@@ -97,3 +97,31 @@ export function findSession(fleet: FleetResponse | null | undefined, host: strin
 export function sessionHref(s: Pick<Session, 'host' | 'session_id'>): string {
   return `/s/${encodeURIComponent(s.host)}/${encodeURIComponent(s.session_id)}`
 }
+
+/** Hosts a session can be spawned on: reachable ones, with the directories each advertises. */
+export function spawnTargets(fleet: FleetResponse | null | undefined): { name: string; dirs: { label: string; path: string }[] }[] {
+  return (fleet?.hosts ?? [])
+    .filter((h) => h.ok !== false)
+    .map((h) => ({ name: h.name, dirs: Array.isArray(h.spawnDirs) ? h.spawnDirs : [] }))
+}
+
+/** The freshly spawned session, once Claude registered it: its tmux session (or name) matches. */
+export function findSpawned(
+  fleet: FleetResponse | null | undefined,
+  host: string,
+  spawned: { tmuxSession?: string; name?: string },
+): Session | null {
+  const entry = fleet?.hosts?.find((h) => h.name === host)
+  const tmux = spawned.tmuxSession || spawned.name
+  return (
+    entry?.sessions?.find((s) => (tmux && s.tmux_session === tmux) || (spawned.name && s.name === spawned.name)) ?? null
+  )
+}
+
+/** The fleet minus one session (optimistic update after closing it). */
+export function withoutSession(fleet: FleetResponse, host: string, id: string): FleetResponse {
+  return {
+    ...fleet,
+    hosts: fleet.hosts.map((h) => (h.name === host ? { ...h, sessions: h.sessions.filter((s) => s.session_id !== id) } : h)),
+  }
+}

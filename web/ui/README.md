@@ -31,18 +31,27 @@ Checks (all must be clean): `npm run typecheck`, `npm run lint` (oxlint), `npm t
 src/
   api/types.ts        API types (Session, Host, FleetResponse, Message, …) — mirror ARCHITECTURE.md
   api/client.ts       typed fetch client: api.fleet(), api.messages(), api.send(), … + ApiError, sessionErrorMessage
+  api/spawnWatch.ts   after a spawn: poll the fleet until the new session registers
   lib/format.ts       pure display helpers: relTime, clockTime, shortCwd, sessionSubtitle, hostColorSlot
-  lib/sessions.ts     status meta/labels, filters, search, sort, listView(), findSession(), sessionHref()
+  lib/sessions.ts     status meta/labels, filters, search, sort, listView(), findSession(), sessionHref(),
+                      spawnTargets(), findSpawned(), withoutSession()
+  lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
+  lib/markdown.ts     safe markdown → AST (port of ../public/markdown.js), linkify()
+  lib/autoname.ts     naming-pass summaries for toasts / the menu
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
   lib/storage.ts      localStorage that never throws
-  lib/viewport.ts     --app-h from visualViewport (keyboard-aware height; utilities h-app / min-h-app)
+  lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
-  hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount, refresh()
+  hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
+                      refresh() (runs even while hidden)
+  hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term
   hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`, shared with the classic UI)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
-  components/         app components: StatusDot, HostBadge/HostDot, SessionRow, SessionListSkeleton, ScreenHeader
+  components/         app components: StatusDot, HostBadge/HostDot, SessionRow, SessionListSkeleton, ScreenHeader,
+                      Markdown/Linkified, NewSessionDrawer
+  components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu, LatestButton
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`)
   App.tsx             providers + wouter hash router
 ```
@@ -68,17 +77,36 @@ src/
   Markdown must stay DOM-only with `http(s)` links only, like `../public/markdown.js`.
 - Pure logic goes in `lib/` with a `*.test.ts` next to it.
 
-## Phase 2 (not built yet)
+## Features
 
-The detail screen is a placeholder. Still to port from the classic UI (`../public/app.js`):
-
-- Session detail: Chat | Term toggle (`fleet.detailMode`); chat polls `messages` every 3s with
-  markdown, interim-note hiding, "Load older" (limits 60/200/500), follow-scroll; term polls `peek`
-  every 2s (lines 200/600, font size); error states via `sessionErrorMessage()`.
-- Composer: send (1..8000 chars), quick replies from `useSettings().quickReplies`, key chips
-  `QUICK_KEYS` (Esc/↵/↑/↓ → `api.keys`), disabled for `backend: unknown` (409).
-- ⋯ menu: text size, auto-name → Run now (`api.autoname`), Close session (two taps → `api.kill`,
-  back to the list), theme (`useTheme().setTheme`).
-- New-session sheet (`+` in the list header): host, dir from that host's `spawnDirs`, name, prompt →
-  `api.spawn`, then poll the fleet for `tmux_session === tmuxSession` and open it (`applyFleet`).
-- PWA polish: service worker/offline shell if wanted, standalone status-bar colours.
+- **List** (`#/`): all sessions across hosts, status + host filter chips, search, unreachable-host
+  banners, `+` → New session.
+- **New session** (drawer): host, directory (radio from that host's `spawnDirs`), optional name
+  and first prompt → `api.spawn`. 400/409 are shown inline; on success a loading toast watches
+  `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
+  opens the session. Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys).
+- **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
+  (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
+  - header: back, name, status, host, "updated Xs ago", Chat | Term toggle, ⋯;
+  - **Chat** polls `messages` every 3s (60 → 200 → 500 with "Load older", which keeps the same
+    message under the thumb); bubbles for user / Claude, quiet progress notes (hideable), centred
+    command / system lines, time captions per burst, "Claude is working…" / "Needs you" footer;
+    markdown via `lib/markdown.ts` (AST, pure) + `components/Markdown.tsx` (React elements only,
+    `http(s)` links only);
+  - **Term** polls `peek` every 2s (200/600 lines), bare URLs linkified;
+  - both follow the tail (`hooks/useFollowScroll.ts`): scrolling up pauses and shows "Latest";
+    re-renders happen only when the payload changed;
+  - errors (`sessionErrorMessage`) as a pill over the pane; host-unreachable / not-in-fleet /
+    gone banners; the composer locks for a gone session or `backend: unknown`.
+- **Composer**: auto-growing textarea (Enter sends on hardware keyboards, newline on touch;
+  1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down;
+  a toast per result; two follow-up polls after steering.
+- **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
+  (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),
+  Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
+  session details (tmux, backend, pid, id), Close session (two taps within 5s → `api.kill`, back
+  to the list, row dropped optimistically).
+- **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;
+  `index.html` sets theme-color (kept in sync with the theme), apple-mobile-web-app meta,
+  `viewport-fit=cover` and `interactive-widget=resizes-content`. No service worker (the app is
+  useless offline; the server revalidates every file).

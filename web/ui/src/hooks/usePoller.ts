@@ -16,7 +16,7 @@ export interface PollerOptions {
  * - unmount / disable aborts the in-flight request via the AbortSignal passed to `fn`.
  *
  * `fn` may change between renders; the latest one is always called.
- * Returns `refresh()`: abort any in-flight run and poll now.
+ * Returns `refresh()`: abort any in-flight run and poll now (even while hidden).
  */
 export function usePoller(fn: (signal: AbortSignal) => Promise<void>, intervalMs: number, { enabled = true }: PollerOptions = {}) {
   const fnRef = useRef(fn)
@@ -33,6 +33,7 @@ export function usePoller(fn: (signal: AbortSignal) => Promise<void>, intervalMs
     let stopped = false
     let running = false
     let firstRun = true
+    let forced = false
 
     const schedule = (ms = intervalMs) => {
       if (stopped) return
@@ -43,11 +44,12 @@ export function usePoller(fn: (signal: AbortSignal) => Promise<void>, intervalMs
     async function tick() {
       if (stopped || running) return
       clearTimeout(timer)
-      if (!firstRun && document.visibilityState !== 'visible') {
+      if (!firstRun && !forced && document.visibilityState !== 'visible') {
         schedule()
         return
       }
       firstRun = false
+      forced = false
       running = true
       const mine = new AbortController()
       controller = mine
@@ -69,6 +71,7 @@ export function usePoller(fn: (signal: AbortSignal) => Promise<void>, intervalMs
       if (running && controller) controller.abort()
       controller = null
       running = false
+      forced = true // an explicit refresh runs even in a hidden tab
       schedule(0)
     }
     refreshRef.current = refresh

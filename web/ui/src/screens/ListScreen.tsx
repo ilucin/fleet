@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react'
-import { SearchIcon, XIcon } from 'lucide-react'
+import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { useLocation } from 'wouter'
 
 import { HostDot } from '@/components/HostBadge'
+import { NewSessionDrawer } from '@/components/NewSessionDrawer'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
 import { SessionRow } from '@/components/SessionRow'
 import { StatusDot } from '@/components/StatusDot'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useFleet } from '@/hooks/useFleet'
@@ -30,6 +33,8 @@ export function ListScreen() {
   // `fleet.filter` is shared with the classic UI (same ids).
   const [status, setStatus] = usePersistentState<StatusFilterId>('fleet.filter', 'all', (raw) => findStatusFilter(raw).id)
   const [hostFilter, setHostFilter] = usePersistentState<string>('fleet.hostFilter', ALL_HOSTS)
+  const [newOpen, setNewOpen] = useState(false)
+  const [, navigate] = useLocation()
 
   const hosts = fleet?.hosts ?? []
   const hostNames = hosts.map((h) => h.name)
@@ -81,7 +86,15 @@ export function ListScreen() {
           >
             {note.text}
           </span>
-          {/* Phase 2: the "+" New-session button goes here. */}
+          <Button
+            size="icon"
+            aria-label="New session"
+            title="New session"
+            onClick={() => setNewOpen(true)}
+            className="-my-1 size-10 shrink-0 rounded-full [&_svg:not([class*='size-'])]:size-5"
+          >
+            <PlusIcon />
+          </Button>
         </div>
 
         <div className="relative mt-2">
@@ -181,6 +194,8 @@ export function ListScreen() {
           ) : null}
         </div>
       </main>
+
+      <NewSessionDrawer open={newOpen} onOpenChange={setNewOpen} onOpenSession={(href) => navigate(href)} />
     </div>
   )
 }

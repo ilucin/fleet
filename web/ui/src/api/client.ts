@@ -108,3 +108,8 @@ export function sessionErrorMessage(err: unknown): string {
       return err.message || 'request failed'
   }
 }
+
+/** 404 "unknown session: …" — the session no longer exists (vs. 404 "transcript not found"). */
+export function isSessionGone(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404 && /^unknown session/i.test(err.message)
+}

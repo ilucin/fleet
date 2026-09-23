@@ -139,6 +139,14 @@
 @utility min-h-app {
   min-height: var(--app-h, 100dvh);
 }
+/* A full-screen, non-scrolling layout pinned to the visible area (detail screen + composer). */
+@utility fixed-app {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  height: var(--app-h, 100dvh);
+  transform: translateY(var(--app-top, 0px));
+}
 
 @layer base {
   * {
@@ -163,6 +171,15 @@
   select {
     font-size: max(16px, 1em);
   }
+}
+
+/* Typing indicator: three dots pulsing in turn. */
+@keyframes fleet-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+@utility animate-dot {
+  animation: fleet-dot 1.2s infinite ease-in-out;
 }
 
 /* Horizontally scrolling chip rows. */

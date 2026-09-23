@@ -1,7 +1,17 @@
 import { expect, test } from 'vitest'
 
 import type { FleetResponse, Session } from '@/api/types'
-import { findSession, listView, matchesSearch, sessionHref, statusLabel, statusMeta } from './sessions'
+import {
+  findSession,
+  findSpawned,
+  listView,
+  matchesSearch,
+  sessionHref,
+  spawnTargets,
+  statusLabel,
+  statusMeta,
+  withoutSession,
+} from './sessions'
 
 const s = (over: Partial<Session>): Session => ({ host: 'laptop', session_id: 'id', status: 'idle', ...over })
 
@@ -60,4 +70,45 @@ test('findSession / sessionHref', () => {
   expect(findSession(fleet, 'workstation', 'c')?.name).toBe('gamma')
   expect(findSession(fleet, 'laptop', 'c')).toBeNull()
   expect(sessionHref({ host: 'a b', session_id: 'x/y' })).toBe('/s/a%20b/x%2Fy')
+})
+
+test('spawnTargets: reachable hosts with their dirs', () => {
+  const fleet = {
+    self: 'a',
+    hosts: [
+      { name: 'a', ok: true, sessions: [], spawnDirs: [{ label: 'Work', path: '/w' }] },
+      { name: 'b', ok: false, sessions: [] },
+      { name: 'c', ok: true, sessions: [] },
+    ],
+  }
+  expect(spawnTargets(fleet)).toEqual([
+    { name: 'a', dirs: [{ label: 'Work', path: '/w' }] },
+    { name: 'c', dirs: [] },
+  ])
+})
+
+test('findSpawned matches tmux session or name on that host', () => {
+  const fleet = {
+    self: 'a',
+    hosts: [
+      { name: 'a', ok: true, sessions: [{ host: 'a', session_id: '1', tmux_session: 'fw-1', name: 'x' }] },
+      { name: 'b', ok: true, sessions: [{ host: 'b', session_id: '2', tmux_session: 'fw-2', name: 'y' }] },
+    ],
+  }
+  expect(findSpawned(fleet, 'a', { tmuxSession: 'fw-1' })?.session_id).toBe('1')
+  expect(findSpawned(fleet, 'a', { tmuxSession: 'fw-2' })).toBeNull()
+  expect(findSpawned(fleet, 'b', { tmuxSession: 'nope', name: 'y' })?.session_id).toBe('2')
+})
+
+test('withoutSession drops only that session', () => {
+  const fleet = {
+    self: 'a',
+    hosts: [
+      { name: 'a', ok: true, sessions: [{ host: 'a', session_id: '1' }, { host: 'a', session_id: '2' }] },
+      { name: 'b', ok: true, sessions: [{ host: 'b', session_id: '1' }] },
+    ],
+  }
+  const out = withoutSession(fleet, 'a', '1')
+  expect(out.hosts[0].sessions.map((s) => s.session_id)).toEqual(['2'])
+  expect(out.hosts[1].sessions).toHaveLength(1)
 })

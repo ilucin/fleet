@@ -200,9 +200,14 @@ the tmux session has a single window. Runs are de-duplicated; `/api/health` repo
 
 ## UI (`ui/`, React)
 
-Same routes and behaviour as the classic UI below (hash routing `#/`, `#/s/<host>/<id>`; the
-`fleet.snapshot` and `fleet.filter` localStorage keys are shared), built with React 19 + Tailwind
-v4 + shadcn/ui. Structure and conventions: [ui/README.md](./ui/README.md). Dev: `npm --prefix ui run dev`
+Feature parity with the classic UI below, plus a host filter, theme choice and session details:
+same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
+paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,
+`fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`,
+`fleet.spawnHost`, `fleet.spawnDirLabel.<host>`), so switching UIs keeps preferences. Built with
+React 19 + Tailwind v4 + shadcn/ui; markdown is parsed to an AST and rendered as React elements
+(no `innerHTML`, only `http(s)` links). A 404 whose error starts with `unknown session` means the
+session is gone; any other 404 from `messages` means there is no transcript yet. Structure and conventions: [ui/README.md](./ui/README.md). Dev: `npm --prefix ui run dev`
 proxies `/api` to a running server (`FLEET_WEB_URL`, default `http://127.0.0.1:7777`).
 
 ## Classic UI (`public/`)
