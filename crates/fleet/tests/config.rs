@@ -135,6 +135,21 @@ fn init_validates_hosts() {
         .unwrap();
     assert!(!out.status.success());
     assert!(stderr(&out).contains("ssh="), "{}", stderr(&out));
+    // A web-only peer (no ssh) is fine.
+    let out = env
+        .cmd()
+        .args([
+            "init",
+            "--yes",
+            "--self",
+            "a",
+            "--add-host",
+            "b,web=http://b:7777",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    std::fs::remove_file(env.config_path()).unwrap();
     let out = env
         .cmd()
         .args(["init", "--yes", "--self", "a", "--default-host", "zzz"])

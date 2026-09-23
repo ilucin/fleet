@@ -374,7 +374,7 @@ pub struct HostRows {
 /// host name *this* config knows it by.
 pub fn gather_all_hosts() -> Vec<HostRows> {
     let cfg = config::get();
-    let names = cfg.host_names();
+    let names = cfg.ssh_host_names();
     let handles: Vec<_> = names
         .into_iter()
         .map(|name| {

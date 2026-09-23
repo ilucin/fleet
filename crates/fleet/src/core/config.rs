@@ -195,6 +195,24 @@ impl Config {
         out
     }
 
+    /// Hosts fleet can run commands on: this machine plus every host with an
+    /// ssh destination (web-only peers are left out).
+    pub fn ssh_host_names(&self) -> Vec<String> {
+        let me = self.self_name();
+        self.host_names()
+            .into_iter()
+            .filter(|n| {
+                *n == me
+                    || self
+                        .hosts
+                        .get(n)
+                        .and_then(|h| h.get("ssh"))
+                        .and_then(|s| s.as_str())
+                        .is_some_and(|s| !s.trim().is_empty())
+            })
+            .collect()
+    }
+
     pub fn web_port(&self) -> u16 {
         self.web.port.unwrap_or(DEFAULT_WEB_PORT)
     }
@@ -225,9 +243,13 @@ impl Config {
             match serde_json::from_value::<Host>(v.clone()) {
                 Err(e) => out.push(format!("hosts.{name}: {e}")),
                 Ok(h) => {
-                    if *name != me && h.ssh.as_deref().is_none_or(|s| s.trim().is_empty()) {
+                    // No ssh is fine for a web-only peer; a host with neither is unreachable.
+                    if *name != me
+                        && h.ssh.as_deref().is_none_or(|s| s.trim().is_empty())
+                        && h.web.is_none()
+                    {
                         out.push(format!(
-                            "hosts.{name} has no `ssh` destination — it can't be reached"
+                            "hosts.{name} has neither `ssh` nor `web` — it can't be reached"
                         ));
                     }
                     if let Some(w) = &h.web
@@ -486,15 +508,36 @@ mod tests {
             "version": 2,
             "self": "a",
             "defaultHost": "nope",
-            "hosts": { "b": { "ssh": null, "web": "ftp://x" } }
+            "hosts": { "b": { "ssh": null, "web": "ftp://x" }, "c": { "ssh": null } }
         }))
         .unwrap();
         let p = c.problems().join("\n");
         assert!(p.contains("version 2"), "{p}");
         assert!(p.contains("no \"a\" entry"), "{p}");
         assert!(p.contains("defaultHost"), "{p}");
-        assert!(p.contains("hosts.b has no `ssh`"), "{p}");
+        assert!(
+            !p.contains("hosts.b has neither"),
+            "web-only peer is fine: {p}"
+        );
+        assert!(p.contains("hosts.c has neither"), "{p}");
         assert!(p.contains("http(s)"), "{p}");
+    }
+
+    #[test]
+    fn ssh_host_names_skip_web_only_peers() {
+        let c: Config = serde_json::from_value(json!({
+            "self": "ws",
+            "hosts": {
+                "ws": { "ssh": null },
+                "laptop": { "ssh": null, "web": "http://laptop:7777" },
+                "box": { "ssh": "box" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            c.ssh_host_names(),
+            vec!["ws".to_string(), "box".to_string()]
+        );
     }
 
     #[test]

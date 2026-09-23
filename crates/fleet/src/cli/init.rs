@@ -434,12 +434,11 @@ fn from_flags(existing: &config::Loaded, a: &InitArgs) -> Result<Answers> {
         if hosts.iter().any(|(n, _, _): &(String, _, _)| *n == name) {
             return Err(Error::exit(1, format!("--add-host {name} given twice")));
         }
-        if name != self_name && ssh.is_none() {
+        // A host without ssh is a web-only peer (e.g. a laptop the workstation can't ssh into).
+        if name != self_name && ssh.is_none() && web.is_none() {
             return Err(Error::exit(
                 1,
-                format!(
-                    "--add-host {name} needs ssh=<destination> (only this machine goes without)"
-                ),
+                format!("--add-host {name} needs ssh=<destination> and/or web=<url>"),
             ));
         }
         hosts.push((name, ssh, web));
@@ -561,7 +560,7 @@ pub fn run(a: InitArgs) -> Result<()> {
     let remotes: Vec<&String> = answers
         .hosts
         .iter()
-        .filter(|h| h.0 != answers.self_name)
+        .filter(|h| h.0 != answers.self_name && h.1.is_some())
         .map(|h| &h.0)
         .collect();
     if let Some(r) = remotes.first() {

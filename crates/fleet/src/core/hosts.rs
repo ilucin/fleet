@@ -141,7 +141,7 @@ pub fn resolve(
 
 /// Every configured host as a target, self first.
 pub fn all_targets(cfg: &Config) -> Vec<Result<Target>> {
-    cfg.host_names()
+    cfg.ssh_host_names()
         .iter()
         .map(|n| resolve(cfg, Some(n), false, Scope::SelfHost))
         .collect()
