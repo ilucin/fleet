@@ -5,11 +5,14 @@ import { HttpError, readJsonBody } from './http.mjs';
 import { clampLines, findSession, resolveHost, validateKey, validateSendText } from './util.mjs';
 import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import { fetchPeerHost as defaultFetchPeerHost, proxyToPeer as defaultProxyToPeer } from './peers.mjs';
+import { createSnapshot } from './snapshot.mjs';
 
 export const API_VERSION = 1;
 
-const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys)$/;
+const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|kill)$/;
+const POST_ACTIONS = new Set(['send', 'keys', 'kill']);
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
+const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -26,9 +29,13 @@ export const DEFAULT_QUICK_REPLIES = [
  *   backend     lib/backends.mjs instance (peek/send/keys)
  *   transcripts lib/transcript.mjs reader
  *   spawner     lib/spawn.mjs spawner
+ *   killer      lib/kill.mjs killer (kill action; absent → 501)
+ *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
+ *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
  *   name, version, startedAt   for /api/health
  *   fetchPeerHost, proxyToPeer (optional, for tests)
- * @returns {(req, url) => Promise<{status, body}>}  throws HttpError / BackendError
+ * @returns {(req, url) => Promise<{status, body}>}  throws HttpError / BackendError.
+ *   The function carries `.refreshFleet()` and `.stop()` (clears the background refresh).
  */
 export function createApi({
   config,
@@ -36,6 +43,8 @@ export function createApi({
   backend,
   transcripts,
   spawner,
+  killer = null,
+  autoNamer = null,
   name = 'fleet-web',
   version = '0.0.0',
   startedAt = Date.now(),
@@ -43,15 +52,40 @@ export function createApi({
   proxyToPeer = defaultProxyToPeer,
   peerFleetTimeoutMs = 6000,
   peerProxyTimeoutMs = 20000,
+  warmFleet = true,
+  fleetRefreshMs = 3000,
+  fleetIdleAfterMs = 90 * 1000,
+  logError = () => {},
 }) {
-  async function handleFleet(url) {
-    const selfHost = { ...(await fleet.localHost()), spawnDirs: config.spawnDirs };
-    if (url.searchParams.get('local') === '1') return { status: 200, body: { self: config.self, hosts: [selfHost] } };
+  async function buildFleet({ force = false } = {}) {
+    const selfHost = { ...(await fleet.localHost({ force })), spawnDirs: config.spawnDirs };
     const peerNames = Object.keys(config.peers);
     const peerHosts = await Promise.all(
       peerNames.map((n) => fetchPeerHost(n, config.peers[n], { timeoutMs: peerFleetTimeoutMs })),
     );
-    return { status: 200, body: { self: config.self, hosts: [selfHost, ...peerHosts] } };
+    return { self: config.self, hosts: [selfHost, ...peerHosts] };
+  }
+
+  // The merged fleet, served stale-while-revalidate so a page load never waits on
+  // discovery or the slowest peer (see lib/snapshot.mjs).
+  const snapshot = warmFleet
+    ? createSnapshot({ build: () => buildFleet({ force: true }), refreshMs: fleetRefreshMs, idleAfterMs: fleetIdleAfterMs, logError })
+    : null;
+
+  /** After a mutation: drop the local cache and rebuild the merged snapshot behind it. */
+  function refreshFleet() {
+    fleet.invalidate?.();
+    snapshot?.refresh().catch(() => {});
+  }
+
+  async function handleFleet(url) {
+    if (url.searchParams.get('local') === '1') {
+      // Peers poll this: the local host (2s TTL cache), never the merged snapshot.
+      const selfHost = { ...(await fleet.localHost()), spawnDirs: config.spawnDirs };
+      return { status: 200, body: { self: config.self, hosts: [selfHost] } };
+    }
+    if (snapshot) return { status: 200, body: await snapshot.get() };
+    return { status: 200, body: { ...(await buildFleet()), snapshotAt: Date.now() } };
   }
 
   async function resolveLocalSession(id) {
@@ -97,6 +131,17 @@ export function createApi({
     }
 
     const body = await readJsonBody(req);
+    if (action === 'kill') {
+      if (!killer) throw new HttpError('kill is not available on this server', 501);
+      const session = await resolveLocalSession(id);
+      const result = await killer.kill(session);
+      refreshFleet();
+      return {
+        status: 200,
+        body: { ok: true, host: config.self, id: session.session_id, name: session.name ?? null, ...result },
+      };
+    }
+
     if (action === 'send') {
       const check = validateSendText(body.text);
       if (!check.ok) throw new HttpError(check.error, 400);
@@ -120,8 +165,10 @@ export function createApi({
     if (!check.ok) throw new HttpError(check.error, 400);
     try {
       check.dir = await resolveAllowedDir(check.dir, roots);
-      const result = await spawner.spawn(check);
-      fleet.invalidate?.();
+      // No name typed → let Claude derive one and the auto-namer replace it (when it runs).
+      const nameGiven = check.nameGiven !== false || !config.autoName?.enabled;
+      const result = await spawner.spawn({ ...check, nameGiven });
+      refreshFleet();
       return { status: 200, body: { ok: true, host: config.self, ...result } };
     } catch (err) {
       if (err?.status) throw new HttpError(err.message, err.status);
@@ -146,7 +193,7 @@ export function createApi({
     return { status: proxied.status, body: proxied.body };
   }
 
-  return async function handleApi(req, url) {
+  async function handleApi(req, url) {
     if (url.pathname === '/api/health') {
       return {
         status: 200,
@@ -157,6 +204,7 @@ export function createApi({
           self: config.self,
           uptime: Math.round((Date.now() - startedAt) / 1000),
           now: Date.now(),
+          autoName: { ...(config.autoName ?? { enabled: false }), lastRun: autoNamer?.lastRun ?? null },
         },
       };
     }
@@ -182,7 +230,7 @@ export function createApi({
     const m = SESSION_ROUTE.exec(url.pathname);
     if (m) {
       const [, rawHost, rawId, action] = m;
-      const wantPost = action === 'send' || action === 'keys';
+      const wantPost = POST_ACTIONS.has(action);
       if (req.method !== (wantPost ? 'POST' : 'GET')) throw new HttpError('method not allowed', 405);
       const id = decodeURIComponent(rawId);
       return forHost({
@@ -199,6 +247,27 @@ export function createApi({
       return forHost({ req, url, host: decodeURIComponent(s[1]), local: () => localSpawn(req) });
     }
 
+    const a = AUTONAME_ROUTE.exec(url.pathname);
+    if (a) {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return forHost({
+        req,
+        url,
+        host: decodeURIComponent(a[1]),
+        local: async () => {
+          await readJsonBody(req);
+          if (!autoNamer) throw new HttpError('auto-naming is not available on this server', 501);
+          const result = await autoNamer.runOnce('manual');
+          refreshFleet();
+          return { status: result.ok ? 200 : 502, body: { host: config.self, ...result } };
+        },
+      });
+    }
+
     throw new HttpError('not found', 404);
-  };
+  }
+
+  handleApi.refreshFleet = refreshFleet;
+  handleApi.stop = () => snapshot?.stop();
+  return handleApi;
 }

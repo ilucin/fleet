@@ -1,5 +1,13 @@
 import { sortSessions } from './util.mjs';
 
+export const TITLE_MAX = 300;
+
+/** Cap a session title for transport: the first prompt can run to 10 KB, the UI shows one line. */
+export function trimTitle(title, max = TITLE_MAX) {
+  if (typeof title !== 'string') return title ?? null;
+  return title.length > max ? `${title.slice(0, max)}…` : title;
+}
+
 /**
  * Local session discovery (via the `fleet` CLI, see lib/fleet-cli.mjs) with a short TTL
  * cache and in-flight de-duplication. Never throws: failures come back as { ok:false, error }.
@@ -14,7 +22,7 @@ export function createFleet({ cli, self = 'local', ttlMs = 2000, now = Date.now 
     const fetchedAt = now();
     try {
       const raw = await cli.list();
-      const sessions = sortSessions(raw).map((s) => ({ ...s, host: self }));
+      const sessions = sortSessions(raw).map((s) => ({ ...s, title: trimTitle(s.title), host: self }));
       return { name: self, ok: true, fetchedAt, sessions };
     } catch (err) {
       return { name: self, ok: false, error: String(err?.message ?? err), fetchedAt, sessions: [] };

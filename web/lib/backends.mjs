@@ -66,6 +66,11 @@ on run argv
       tell theSession to write text ((ASCII character 27) & "[B") without newline
     end tell
     return "ok"
+  else if theMode is "close" then
+    tell application "iTerm2"
+      tell theSession to close
+    end tell
+    return "ok"
   end if
   error "unknown mode: " & theMode number 1002
 end run
@@ -150,5 +155,11 @@ export function createBackend({
     await run(osascript, [scriptPath(), mode, handle], { timeout: 15000 });
   }
 
-  return { peek, send, keys };
+  /** Close the iTerm tab/pane hosting the session (best effort; the process should be dead already). */
+  async function closeIterm(session) {
+    const handle = requireHandle(session);
+    await run(osascript, [scriptPath(), 'close', handle], { timeout: 15000 });
+  }
+
+  return { peek, send, keys, closeIterm };
 }

@@ -26,7 +26,16 @@ function fakeHost(self, sessions) {
   };
   const transcripts = { messages: async () => ({ messages: [{ role: 'user', text: 'hi' }], total: 1, truncated: false, updatedAt: 1 }) };
   const spawner = { spawn: async (req) => (calls.push(['spawn', req]), { name: req.name, dir: req.dir, tmuxSession: req.name, command: 'claude', trusted: false }) };
-  return { calls, cli, backend, transcripts, spawner, fleet: createFleet({ cli, self }) };
+  const killer = { kill: async (s) => (calls.push(['kill', s.session_id]), { process: 'terminated', terminal: 'tmux-session-killed' }) };
+  const autoNamer = {
+    lastRun: null,
+    runOnce: async (reason) => {
+      calls.push(['autoname', reason]);
+      autoNamer.lastRun = { at: 1, ms: 1, reason, ok: true, renamed: [{ from: 'app-9d', to: 'fix-login' }], tmux: [], held: [], errors: [] };
+      return autoNamer.lastRun;
+    },
+  };
+  return { calls, cli, backend, transcripts, spawner, killer, autoNamer, fleet: createFleet({ cli, self }) };
 }
 
 async function startPair(t) {
@@ -54,10 +63,13 @@ async function startPair(t) {
         self: name,
         hosts: { laptop: { web: urls.laptop }, workstation: { web: urls.workstation } },
         spawnDirs: [{ label: 'Tmp', paths: { [name]: os.tmpdir() } }],
+        web: { autoName: { enabled: true } },
       },
       { env: {}, home: '/home/tester' },
     );
-    host.setHandle(createApi({ config: cfgs[name], ...host, version: '9.9.9' }));
+    const api = createApi({ config: cfgs[name], ...host, version: '9.9.9' });
+    t.after(() => api.stop());
+    host.setHandle(api);
   }
   return { lap, remote, urls };
 }
@@ -153,4 +165,78 @@ test('static UI is served from the configured ui dir', async (t) => {
   assert.equal(res.status, 200);
   assert.equal(await res.text(), '<p>custom ui</p>');
   assert.equal((await fetch(`${urls.laptop}/missing.js`)).status, 404);
+});
+
+test('kill is POST-only, served locally or proxied once, and reports what happened', async (t) => {
+  const { urls, lap, remote } = await startPair(t);
+  assert.equal((await get(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/kill`)).status, 405);
+  const local = await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/kill`, {});
+  assert.equal(local.status, 200);
+  assert.deepEqual(local.body, {
+    ok: true,
+    host: 'laptop',
+    id: 'aaaaaaaa-0000-0000-0000-000000000001',
+    name: 'one',
+    process: 'terminated',
+    terminal: 'tmux-session-killed',
+  });
+  assert.deepEqual(lap.calls.at(-1), ['kill', 'aaaaaaaa-0000-0000-0000-000000000001']);
+  const proxied = await post(`${urls.laptop}/api/hosts/workstation/sessions/bbbbbbbb/kill`, {});
+  assert.equal(proxied.body.host, 'workstation');
+  assert.deepEqual(remote.calls.at(-1), ['kill', 'bbbbbbbb-0000-0000-0000-000000000002']);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/zzzzzzzzzz/kill`, {})).status, 404);
+});
+
+test('autoname runs on the target host and shows up in /api/health', async (t) => {
+  const { urls, remote } = await startPair(t);
+  assert.equal((await get(`${urls.laptop}/api/hosts/workstation/autoname`)).status, 405);
+  const res = await post(`${urls.laptop}/api/hosts/workstation/autoname`, {});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.host, 'workstation');
+  assert.deepEqual(res.body.renamed, [{ from: 'app-9d', to: 'fix-login' }]);
+  assert.deepEqual(remote.calls.at(-1), ['autoname', 'manual']);
+  const h = await get(`${urls.workstation}/api/health`);
+  assert.deepEqual(h.body.autoName, { enabled: true, intervalMinutes: 5, lastRun: remote.autoNamer.lastRun });
+  assert.equal((await post(`${urls.laptop}/api/hosts/nope/autoname`, {})).status, 404);
+});
+
+test('spawn without a name lets the auto-namer name it (only when auto-naming is on)', async (t) => {
+  const { urls, remote } = await startPair(t);
+  await post(`${urls.laptop}/api/hosts/workstation/spawn`, {});
+  assert.equal(remote.calls.at(-1)[1].nameGiven, false);
+  await post(`${urls.laptop}/api/hosts/workstation/spawn`, { name: 'job' });
+  assert.equal(remote.calls.at(-1)[1].nameGiven, true);
+});
+
+test('spawn keeps `claude -n <name>` when auto-naming is off', async () => {
+  const host = fakeHost('solo', []);
+  const config = normalizeConfig({ self: 'solo', web: { autoName: { enabled: false } }, spawnDirs: [{ path: os.tmpdir() }] }, { env: {}, home: '/home/tester' });
+  const api = createApi({ config, ...host, warmFleet: false });
+  const req = Object.assign(new (await import('node:stream')).PassThrough(), { method: 'POST', headers: {} });
+  req.end('{}');
+  await api(req, new URL('http://x/api/hosts/solo/spawn'));
+  assert.equal(host.calls.at(-1)[1].nameGiven, true);
+});
+
+test('/api/fleet is served from the warm snapshot with snapshotAt', async (t) => {
+  const { urls } = await startPair(t);
+  const first = await get(`${urls.laptop}/api/fleet`);
+  assert.equal(typeof first.body.snapshotAt, 'number');
+  const again = await get(`${urls.laptop}/api/fleet`);
+  assert.ok(again.body.snapshotAt >= first.body.snapshotAt);
+  assert.deepEqual(again.body.hosts.map((h) => h.name), ['laptop', 'workstation']);
+});
+
+test('static files carry a weak ETag and answer 304 to If-None-Match', async (t) => {
+  const { urls } = await startPair(t);
+  const res = await fetch(`${urls.laptop}/`);
+  const etag = res.headers.get('etag');
+  assert.match(etag, /^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+  await res.text();
+  const cached = await fetch(`${urls.laptop}/`, { headers: { 'if-none-match': etag } });
+  assert.equal(cached.status, 304);
+  assert.equal(cached.headers.get('etag'), etag);
+  const other = await fetch(`${urls.laptop}/`, { headers: { 'if-none-match': 'W/"nope"' } });
+  assert.equal(other.status, 200);
+  await other.text();
 });

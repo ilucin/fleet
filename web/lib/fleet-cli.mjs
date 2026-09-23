@@ -1,6 +1,6 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contract (`fleet list --json`) is documented in one spot (see ARCHITECTURE.md).
+// contracts (`fleet list --json`, `fleet name --all --apply`) are documented in one spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
 // and adds a header, so lib/backends.mjs drives tmux / iTerm directly.
@@ -43,5 +43,25 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parsed.filter((s) => s && typeof s === 'object');
   }
 
-  return { bin, list };
+  /**
+   * The naming pass: `fleet name --all --apply --no-tmux-sync` (or `-n name --all` for a
+   * dry run). Generates task-shaped names for every session still carrying Claude's
+   * cwd+hash name and types `/rename` into the idle ones (the CLI holds busy/waiting ones).
+   * tmux is left alone here; lib/autoname.mjs syncs only generic tmux names.
+   * Resolves { stdout, stderr } (human output, NO_COLOR); throws FleetCliError.
+   */
+  async function nameAll({ dryRun = false, timeoutMs: t = 300 * 1000 } = {}) {
+    const args = dryRun ? ['-n', 'name', '--all'] : ['name', '--all', '--apply', '--no-tmux-sync'];
+    try {
+      const { stdout, stderr } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
+      return { stdout: stdout ?? '', stderr: stderr ?? '' };
+    } catch (err) {
+      const killed = err?.killed || err?.signal === 'SIGTERM';
+      if (killed) throw new FleetCliError(`fleet name timed out after ${Math.round(t / 1000)}s`, { timedOut: true });
+      if (err?.code === 'ENOENT') throw new FleetCliError(`fleet binary not found (${bin})`);
+      throw new FleetCliError(String(err?.message ?? err));
+    }
+  }
+
+  return { bin, list, nameAll };
 }

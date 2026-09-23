@@ -17,7 +17,7 @@ import {
 } from '../lib/util.mjs';
 import { resolveStaticPath, readJsonBody, contentTypeFor, HttpError } from '../lib/http.mjs';
 import { createBackend, BackendError, createScriptProvider, ITERM_SCRIPT } from '../lib/backends.mjs';
-import { createFleet } from '../lib/fleet.mjs';
+import { createFleet, trimTitle, TITLE_MAX } from '../lib/fleet.mjs';
 import { createFleetCli } from '../lib/fleet-cli.mjs';
 import { ensurePath } from '../lib/config.mjs';
 
@@ -301,6 +301,15 @@ test('iterm backend passes values as argv, never interpolated', async () => {
   assert.ok(calls.every((c) => c.file === '/usr/bin/osascript'));
 });
 
+test('iterm closeIterm runs the close mode with the session id as argv', async () => {
+  const { calls, run } = recorder(async () => ({ stdout: 'ok', stderr: '' }));
+  const backend = createBackend({ run, scriptPath: script, sleep: noSleep });
+  await backend.closeIterm({ backend: 'iterm', handle: 'ABC-123' });
+  assert.deepEqual(calls.at(-1).args, ['/tmp/fake.applescript', 'close', 'ABC-123']);
+  assert.match(ITERM_SCRIPT, /theMode is "close"/);
+  await assert.rejects(() => backend.closeIterm({ backend: 'iterm', handle: '' }), (e) => e.status === 409);
+});
+
 test('unknown backend and missing handle are 409', async () => {
   const { run } = recorder();
   const backend = createBackend({ run, scriptPath: script, sleep: noSleep });
@@ -356,6 +365,21 @@ test('fleet sorts, tags host and caches for the TTL', async () => {
   clock += 2500;
   await fleet.localHost();
   assert.equal(calls, 2, 'cache expired');
+});
+
+test('trimTitle caps long first prompts for transport', () => {
+  assert.equal(trimTitle('short'), 'short');
+  assert.equal(trimTitle(null), null);
+  assert.equal(trimTitle(undefined), null);
+  const long = trimTitle('x'.repeat(TITLE_MAX + 50));
+  assert.equal(long.length, TITLE_MAX + 1);
+  assert.ok(long.endsWith('…'));
+});
+
+test('fleet trims session titles', async () => {
+  const run = async () => ({ stdout: JSON.stringify([{ session_id: 'a', status: 'idle', title: 'y'.repeat(5000) }]), stderr: '' });
+  const host = await createFleet({ cli: createFleetCli({ run }), self: 'laptop' }).localHost();
+  assert.equal(host.sessions[0].title.length, TITLE_MAX + 1);
 });
 
 test('fleet CLI is invoked as `<bin> list --json`', async () => {
@@ -431,4 +455,15 @@ test('ensurePath prepends the homebrew/local bins once', () => {
   const once = env.PATH;
   ensurePath(env);
   assert.equal(env.PATH, once, 'idempotent');
+});
+
+test('etagMatches: exact, weak/strong, lists and *', async () => {
+  const { etagMatches } = await import('../lib/app.mjs');
+  const tag = 'W/"1a-2b"';
+  assert.equal(etagMatches(tag, tag), true);
+  assert.equal(etagMatches('"1a-2b"', tag), true);
+  assert.equal(etagMatches('W/"x", W/"1a-2b"', tag), true);
+  assert.equal(etagMatches('*', tag), true);
+  assert.equal(etagMatches('W/"other"', tag), false);
+  assert.equal(etagMatches(undefined, tag), false);
 });

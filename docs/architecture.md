@@ -115,6 +115,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
 | `web.ui` | static UI directory to serve instead of the bundled `web/public` |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
+| `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule and renames generic tmux sessions to match |
 | `tmux` | tmux binary; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |
 | `hosts.<name>.fleetBin` | path to `fleet` on that host; `null` → `~/.local/bin/fleet`, then `PATH` |
 | `fleetBin` | this machine's `fleet` binary (used by the web server) |
@@ -129,7 +130,7 @@ the single host `local`, and remote features say "run `fleet init`"; a present b
 an error.
 
 Env overrides for the web server: `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
+`FLEET_WEB_AUTONAME`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
 
 ## Session discovery
 
@@ -191,14 +192,16 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 
 | method | path | purpose |
 | --- | --- | --- |
-| GET | `/api/health` | name, version, apiVersion, self, uptime |
+| GET | `/api/health` | name, version, apiVersion, self, uptime, autoName (`lastRun`) |
 | GET | `/api/settings` | apiVersion, self, host names, quick replies |
-| GET | `/api/fleet[?local=1]` | `{ self, hosts: [{ name, ok, error?, sessions, spawnDirs }] }` — sessions are `list --json` objects + `host` |
+| GET | `/api/fleet[?local=1]` | `{ self, hosts: [{ name, ok, error?, sessions, spawnDirs }], snapshotAt }` — sessions are `list --json` objects + `host` (`title` capped at 300 chars); the merged view is a warm background-refreshed snapshot |
 | GET | `/api/hosts/:host/sessions/:id/peek?lines=N` | plain-text screen |
 | GET | `/api/hosts/:host/sessions/:id/messages?limit=N` | conversation (no tool calls) from the transcript |
 | POST | `/api/hosts/:host/sessions/:id/send` | `{ text }` → typed + Enter |
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }` (Enter, Escape, …) |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` → new tmux session running claude; `dir` must resolve inside one of the host's `spawnDirs` (else 400) |
+| POST | `/api/hosts/:host/sessions/:id/kill` | `{}` → SIGTERM (then SIGKILL) Claude, then kill its tmux session (or just its window when the session has others) / close its iTerm tab |
+| POST | `/api/hosts/:host/autoname` | `{}` → run the naming pass on that host now → `{ renamed: [{ from, to }], tmux, held, errors }` |
 
 `:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars). The
 full contract (status codes, limits, timeouts) lives with the server: [web/README.md](../web/README.md),

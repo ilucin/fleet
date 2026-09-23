@@ -17,6 +17,14 @@ display:grid;place-items:center;height:100vh;margin:0}</style>
 </head><body><p>fleet-web: no UI found (API is at /api/)</p></body></html>
 `;
 
+/** Does an If-None-Match header (possibly a list, possibly `*`) match `etag`? Weak comparison. */
+export function etagMatches(header, etag) {
+  if (typeof header !== 'string' || !header) return false;
+  const strip = (t) => t.trim().replace(/^W\//, '');
+  const want = strip(etag);
+  return header.split(',').some((t) => t.trim() === '*' || strip(t) === want);
+}
+
 export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = () => {} }) {
   async function serveStatic(req, res, url) {
     if (!uiDir) {
@@ -50,9 +58,17 @@ export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = 
       return;
     }
 
+    // Weak validator from size + mtime: a reload revalidates (no-cache) and gets a 304.
+    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    if (etagMatches(req.headers['if-none-match'], etag)) {
+      res.writeHead(304, { etag, 'cache-control': 'no-cache' });
+      res.end();
+      return;
+    }
     res.writeHead(200, {
       'content-type': contentTypeFor(file),
       'cache-control': 'no-cache',
+      etag,
       'content-length': stat.size,
     });
     if (req.method === 'HEAD') {

@@ -95,6 +95,28 @@ test('normalizeConfig quickReplies accepts strings and {label,text}', () => {
   assert.throws(() => normalizeConfig({ web: { quickReplies: [{}] } }, { env: {}, home: HOME }), /quickReplies/);
 });
 
+test('normalizeConfig quickReplies accepts { label, kind, value }: text kept, key chips skipped', () => {
+  const cfg = normalizeConfig(
+    { web: { quickReplies: [{ label: 'Go', kind: 'text', value: 'Go on.' }, { label: 'Esc', kind: 'key', value: 'Escape' }] } },
+    { env: {}, home: HOME },
+  );
+  assert.deepEqual(cfg.quickReplies, [{ label: 'Go', text: 'Go on.' }]);
+});
+
+test('normalizeConfig web.autoName: defaults off (opt-in) / 5 min, validated, FLEET_WEB_AUTONAME overrides', () => {
+  assert.deepEqual(normalizeConfig({}, { env: {}, home: HOME }).autoName, { enabled: false, intervalMinutes: 5 });
+  assert.equal(normalizeConfig({ web: { autoName: { enabled: true } } }, { env: {}, home: HOME }).autoName.enabled, true);
+  assert.deepEqual(normalizeConfig({ web: { autoName: { enabled: false, intervalMinutes: 15 } } }, { env: {}, home: HOME }).autoName, {
+    enabled: false,
+    intervalMinutes: 15,
+  });
+  assert.equal(normalizeConfig({}, { env: { FLEET_WEB_AUTONAME: '0' }, home: HOME }).autoName.enabled, false);
+  assert.equal(normalizeConfig({ web: { autoName: { enabled: false } } }, { env: { FLEET_WEB_AUTONAME: '1' }, home: HOME }).autoName.enabled, true);
+  assert.throws(() => normalizeConfig({ web: { autoName: { intervalMinutes: 0 } } }, { env: {}, home: HOME }), /intervalMinutes/);
+  assert.throws(() => normalizeConfig({ web: { autoName: { enabled: 'yes' } } }, { env: {}, home: HOME }), /autoName.enabled/);
+  assert.throws(() => normalizeConfig({ web: { autoName: true } } , { env: {}, home: HOME }), /autoName/);
+});
+
 test('normalizeConfig rejects broken shapes with a pointed message', () => {
   const env = {};
   assert.throws(() => normalizeConfig({ version: 2 }, { env, home: HOME }), /version/);

@@ -18,6 +18,7 @@ test('sanitizeName mirrors fleet tmux new', () => {
 
 test('launchCommand builds claude -n name [prompt]', () => {
   assert.equal(launchCommand({ name: 'job', prompt: '' }), "claude -n 'job'");
+  assert.equal(launchCommand({ name: null, prompt: 'go' }), "claude 'go'");
   assert.equal(launchCommand({ launcher: 'cc', name: 'job', prompt: "do it's" }), "cc -n 'job' 'do it'\\''s'");
 });
 
@@ -28,6 +29,9 @@ test('validateSpawnRequest defaults, sanitizes and rejects bad input', () => {
   assert.equal(ok.dir, '/tmp');
   const auto = validateSpawnRequest({}, { spawnDirs: ['/tmp'] });
   assert.match(auto.name, /^fw-\d{6}$/);
+  assert.equal(auto.nameGiven, false);
+  assert.equal(ok.nameGiven, true);
+  assert.equal(validateSpawnRequest({ name: '!!!' }, { spawnDirs: ['/tmp'] }).nameGiven, false, 'nothing usable typed');
   assert.equal(validateSpawnRequest({ dir: 'relative' }).ok, false);
   assert.equal(validateSpawnRequest({ prompt: 'x'.repeat(8001) }, { spawnDirs: ['/tmp'] }).ok, false);
   assert.equal(validateSpawnRequest({}, { spawnDirs: [] }).ok, false);
@@ -107,4 +111,18 @@ test('resolveAllowedDir allows roots and subdirs, rejects .. and symlink escapes
   // No spawnDirs: $HOME subtree only.
   assert.equal(await resolveAllowedDir(path.join(root, 'sub'), [], { home: base }), path.join(root, 'sub'));
   await assert.rejects(resolveAllowedDir('/', [], { home: base }), bad);
+});
+
+test('spawner omits -n for an auto-generated name', async () => {
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (args[0] === 'has-session') throw new Error('no such session');
+    return { stdout: '', stderr: '' };
+  };
+  const sp = createSpawner({ run, sleep: async () => {} });
+  const res = await sp.spawn({ name: 'fw-101010', dir: '/tmp', prompt: 'go', nameGiven: false });
+  const typed = calls.find((a) => a[0] === 'send-keys' && a.includes('-l'));
+  assert.equal(typed.at(-1), "claude 'go'");
+  assert.equal(res.tmuxSession, 'fw-101010');
 });

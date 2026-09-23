@@ -13,6 +13,8 @@ import { createFleet } from './lib/fleet.mjs';
 import { createBackend } from './lib/backends.mjs';
 import { createTranscriptReader } from './lib/transcript.mjs';
 import { createSpawner } from './lib/spawn.mjs';
+import { createKiller } from './lib/kill.mjs';
+import { createAutoNamer } from './lib/autoname.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -36,14 +38,26 @@ try {
 
 const cli = createFleetCli({ run, bin: config.fleetBin });
 const fleet = createFleet({ cli, self: config.self, ttlMs: 2000 });
+const backend = createBackend({ run, tmux: config.tmux });
+const autoNamer = createAutoNamer({
+  cli,
+  run,
+  tmux: config.tmux,
+  listSessions: () => fleet.localSessions({ force: true }),
+  intervalMs: config.autoName.intervalMinutes * 60 * 1000,
+  log,
+});
 const handleApi = createApi({
   config,
   fleet,
-  backend: createBackend({ run, tmux: config.tmux }),
+  backend,
   transcripts: createTranscriptReader(),
   spawner: createSpawner({ run, tmux: config.tmux, launcher: config.claude }),
+  killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
+  autoNamer,
   name: NAME,
   version: VERSION,
+  logError,
 });
 
 const server = createHttpServer({ handleApi, uiDir: config.uiDir, log, logError });
@@ -57,6 +71,12 @@ server.listen(config.port, config.bind, () => {
   log(`[fleet-web] self=${config.self} listening on http://${config.bind}:${config.port}`);
   log(`[fleet-web] config=${config.configFile ?? '(none, defaults)'} peers=${Object.keys(config.peers).join(',') || '(none)'}`);
   log(`[fleet-web] fleet=${config.fleetBin} tmux=${config.tmux} ui=${config.uiDir ?? '(none)'}`);
+  if (config.autoName.enabled) {
+    autoNamer.start();
+    log(`[fleet-web] autoname every ${config.autoName.intervalMinutes}m (fleet name --all --apply)`);
+  } else {
+    log('[fleet-web] autoname off (web.autoName.enabled = false)');
+  }
 });
 
 let shuttingDown = false;
@@ -64,6 +84,8 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   log(`[fleet-web] ${signal} received, shutting down`);
+  autoNamer.stop();
+  handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();
   server.close(() => {

@@ -109,6 +109,7 @@ The server and UI moved into `web/` and are started by the CLI.
 | `tbFleet` | `fleetBin` (optional; `fleet` is found on `PATH`) |
 | `tmux` | `tmux` |
 | quick-reply chips (hard-coded) | `web.quickReplies` |
+| `autoName: { enabled, intervalMinutes }` | `web.autoName: { enabled, intervalMinutes }` (runs `fleet name --all --apply`) |
 | `spawnDirs: [{ label, path }]` | `spawnDirs: [{ label, paths: { <host>: dir } }]` — one list for all hosts |
 | `FLEET_WEB_CONFIG` | `FLEET_CONFIG` |
 | `PORT` | `FLEET_WEB_PORT` (`PORT` still works) |

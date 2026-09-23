@@ -2,7 +2,8 @@
 //
 // Path: $FLEET_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/fleet/config.json.
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
-//   { version, self, defaultHost, hosts: { name: { ssh, web } }, web: { port, bind, dir, ui },
+//   { version, self, defaultHost, hosts: { name: { ssh, web } },
+//     web: { port, bind, dir, ui, quickReplies, autoName: { enabled, intervalMinutes } },
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
 // A missing config file is not an error: the server runs as a single local host
@@ -14,6 +15,7 @@ import path from 'node:path';
 export const DEFAULT_PORT = 7777;
 export const DEFAULT_SELF = 'local';
 export const SUPPORTED_VERSION = 1;
+export const DEFAULT_AUTONAME_MINUTES = 5;
 
 const BIN_FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin'];
 
@@ -107,7 +109,8 @@ function spawnDirFor(entry, self, home) {
 /**
  * Turn the raw shared config into what the server needs:
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
- *     spawnDirs: [{ label, path }], uiDir, quickReplies, configFile, configFound }
+ *     spawnDirs: [{ label, path }], uiDir, quickReplies, autoName: { enabled, intervalMinutes },
+ *     configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -160,14 +163,34 @@ export function normalizeConfig(
   let quickReplies = null;
   if (web.quickReplies != null) {
     if (!Array.isArray(web.quickReplies)) throw new Error('config.web.quickReplies must be an array');
-    quickReplies = web.quickReplies.map((q) => {
-      const r = typeof q === 'string' ? { label: q, text: q } : q;
-      if (!isObject(r) || typeof r.text !== 'string' || !r.text) {
-        throw new Error('config.web.quickReplies entries must be strings or { label, text }');
-      }
-      return { label: typeof r.label === 'string' && r.label ? r.label : r.text, text: r.text };
-    });
+    quickReplies = web.quickReplies
+      // `{ label, kind: "key", value }` entries: the key chips (Esc, Enter, arrows) are
+      // built into the UI, so they are accepted and skipped rather than rejected.
+      .filter((q) => !(isObject(q) && q.kind === 'key'))
+      .map((q) => {
+        let r = typeof q === 'string' ? { label: q, text: q } : q;
+        // `{ label, kind: "text", value }` is accepted as an alias of `{ label, text }`.
+        if (isObject(r) && r.text == null && typeof r.value === 'string') r = { ...r, text: r.value };
+        if (!isObject(r) || typeof r.text !== 'string' || !r.text) {
+          throw new Error('config.web.quickReplies entries must be strings or { label, text }');
+        }
+        return { label: typeof r.label === 'string' && r.label ? r.label : r.text, text: r.text };
+      });
   }
+
+  // web.autoName: the periodic `fleet name --all --apply` pass (lib/autoname.mjs).
+  const an = web.autoName == null ? {} : web.autoName;
+  if (!isObject(an)) throw new Error('config.web.autoName must be an object { enabled, intervalMinutes }');
+  if (an.enabled != null && typeof an.enabled !== 'boolean') throw new Error('config.web.autoName.enabled must be true or false');
+  let intervalMinutes = DEFAULT_AUTONAME_MINUTES;
+  if (an.intervalMinutes != null) {
+    const m = Number(an.intervalMinutes);
+    if (!Number.isFinite(m) || m < 1) throw new Error(`config.web.autoName.intervalMinutes must be a number >= 1: ${an.intervalMinutes}`);
+    intervalMinutes = m;
+  }
+  let autoNameEnabled = an.enabled === true; // opt-in: it types /rename into sessions and spends model calls
+  if (env.FLEET_WEB_AUTONAME != null && env.FLEET_WEB_AUTONAME !== '') autoNameEnabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_AUTONAME);
+  const autoName = { enabled: autoNameEnabled, intervalMinutes };
 
   return {
     self: self.trim(),
@@ -181,6 +204,7 @@ export function normalizeConfig(
     spawnDirs,
     uiDir,
     quickReplies,
+    autoName,
   };
 }
 

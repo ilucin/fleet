@@ -30,14 +30,17 @@ export function defaultName(now = new Date()) {
 
 /** Build the shell line typed into the new pane. */
 export function launchCommand({ launcher = 'claude', name, prompt }) {
-  const parts = [launcher, '-n', shq(name)];
+  // No name → plain `claude`: it derives `<cwd>-9d` and the auto-namer (lib/autoname.mjs)
+  // replaces that with a task-shaped name, tmux session included, once the session is idle.
+  const parts = name ? [launcher, '-n', shq(name)] : [launcher];
   if (prompt && prompt.trim()) parts.push(shq(prompt));
   return parts.join(' ');
 }
 
 export function validateSpawnRequest(body, { spawnDirs = [] } = {}) {
   const errors = [];
-  const name = body?.name ? sanitizeName(body.name) : defaultName();
+  const nameGiven = Boolean(body?.name && sanitizeName(body.name));
+  const name = nameGiven ? sanitizeName(body.name) : defaultName();
   if (!NAME_RE.test(name)) errors.push('name must be 1-40 chars of letters, digits, - or _');
 
   let dir = typeof body?.dir === 'string' && body.dir.trim() ? body.dir.trim() : spawnDirs[0];
@@ -52,7 +55,7 @@ export function validateSpawnRequest(body, { spawnDirs = [] } = {}) {
     else prompt = body.prompt;
   }
   if (errors.length) return { ok: false, error: errors.join('; ') };
-  return { ok: true, name, dir, prompt };
+  return { ok: true, name, dir, prompt, nameGiven };
 }
 
 /** True when `child` is `root` or lies beneath it (both already resolved). */
@@ -105,7 +108,7 @@ export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDe
   }
 
   /** @returns {{ name, dir, tmuxSession, command }} */
-  async function spawn({ name, dir, prompt }) {
+  async function spawn({ name, dir, prompt, nameGiven = true }) {
     let st;
     try {
       st = await fs.stat(dir);
@@ -117,7 +120,7 @@ export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDe
       throw Object.assign(new Error(`tmux session "${name}" already exists`), { status: 409 });
     }
     await run(tmux, ['new-session', '-d', '-s', name, '-c', dir], { timeout: 8000 });
-    const command = launchCommand({ launcher, name, prompt });
+    const command = launchCommand({ launcher, name: nameGiven ? name : null, prompt });
     // Give the login shell a moment to source its profile before typing into it.
     await wait(enterDelayMs);
     await run(tmux, ['send-keys', '-t', `${name}:`, '-l', '--', command], { timeout: 8000 });

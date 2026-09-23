@@ -23,12 +23,17 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui`, `web.quickReplies`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
+`web.ui`, `web.quickReplies`, `web.autoName`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` / `PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` (`0` / `1`), `FLEET_BIN`, `FLEET_TMUX`.
+
+`web.autoName` (default off; opt in with `{ "enabled": true, "intervalMinutes": 5 }`) makes each server run
+`fleet name --all --apply` on its own host every few minutes, so sessions started without a
+name get a task-shaped one (tmux session included, when its name was generic). Set
+`"enabled": false` to keep names manual.
 
 ## Another UI
 

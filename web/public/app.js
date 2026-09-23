@@ -259,9 +259,26 @@ function createTicker(fn, ms = 1000) {
 
 const appEl = document.getElementById('app');
 
+/** Last fleet snapshot, so a reload paints the list instantly while the first poll runs. */
+const SNAPSHOT_KEY = 'fleet.snapshot';
+const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+function loadFleetSnapshot() {
+  try {
+    const raw = store.get(SNAPSHOT_KEY, '');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.fleet?.hosts) || !parsed.at) return null;
+    if (Date.now() - parsed.at > SNAPSHOT_MAX_AGE_MS) return null; // too old to be useful
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+const fleetSnapshot = loadFleetSnapshot();
+
 const state = {
-  fleet: null, // last good { self, hosts }
-  fleetAt: 0,
+  fleet: fleetSnapshot ? fleetSnapshot.fleet : null, // last good { self, hosts }
+  fleetAt: fleetSnapshot ? fleetSnapshot.at : 0,
   filter: store.get('fleet.filter', 'all'),
   search: '',
   termFont: Number(store.get('fleet.termFont', '12')) || 12,
@@ -270,6 +287,13 @@ const state = {
   chatFont: Number(store.get('fleet.chatFont', '15')) || 15,
   hideInterim: store.get('fleet.chatHideNotes', '0') === '1',
 };
+
+/** Record a fresh /api/fleet body (the server's `snapshotAt` is when it was built). */
+function setFleet(data) {
+  state.fleet = data;
+  state.fleetAt = data?.snapshotAt || Date.now();
+  store.set(SNAPSHOT_KEY, JSON.stringify({ fleet: data, at: state.fleetAt }));
+}
 
 const FILTERS = [
   { id: 'all', label: 'All', match: () => true },
@@ -484,8 +508,7 @@ function createListView() {
     renderStatus();
     try {
       const data = await api('/api/fleet', { signal });
-      state.fleet = data;
-      state.fleetAt = Date.now();
+      setFleet(data);
       lastError = null;
     } catch (err) {
       if (isAbort(err)) throw err;
@@ -661,6 +684,67 @@ function createDetailView(host, id) {
   const menuRow = (label, ...controls) => h('div', { class: 'menu-row' }, h('span', { class: 'menu-label', text: label }), h('div', { class: 'menu-controls' }, ...controls));
   const notesRow = menuRow('Progress notes', notesBtn);
   const linesRow = menuRow('Lines', linesBtn);
+
+  // Auto-name: run the `fleet name` pass on this session's host right now.
+  let naming = false;
+  const nameBtn = h('button', { class: 'tool-btn', type: 'button', 'aria-label': 'Name sessions now' }, 'Run now');
+  nameBtn.addEventListener('click', async () => {
+    if (naming) return;
+    naming = true;
+    nameBtn.disabled = true;
+    nameBtn.textContent = 'Naming…';
+    try {
+      const res = await api(`/api/hosts/${enc(host)}/autoname`, { method: 'POST', body: {} });
+      const n = res.renamed?.length || 0;
+      toast(n ? `Renamed ${n}: ${res.renamed.map((r) => r.to).join(', ')}` : `Nothing to rename${res.held?.length ? ` (${res.held.length} busy)` : ''}`);
+    } catch (err) {
+      toast(err.message || 'Naming failed', 'error');
+    } finally {
+      naming = false;
+      nameBtn.disabled = false;
+      nameBtn.textContent = 'Run now';
+    }
+  });
+  const nameRow = menuRow(`Auto-name (${host})`, nameBtn);
+
+  // Close session: two taps. The first arms the button, the second kills Claude + its tmux.
+  let closeArmed = false;
+  let closeTimer = null;
+  let closing = false;
+  const closeBtn = h('button', { class: 'tool-btn danger', type: 'button', 'aria-label': 'Close session' }, 'Close…');
+  function disarmClose() {
+    closeArmed = false;
+    clearTimeout(closeTimer);
+    closeBtn.classList.remove('armed');
+    closeBtn.textContent = 'Close…';
+  }
+  closeBtn.addEventListener('click', async () => {
+    if (closing) return;
+    if (!closeArmed) {
+      closeArmed = true;
+      closeBtn.classList.add('armed');
+      closeBtn.textContent = 'Confirm close';
+      closeTimer = setTimeout(disarmClose, 5000);
+      return;
+    }
+    closing = true;
+    clearTimeout(closeTimer);
+    closeBtn.disabled = true;
+    closeBtn.textContent = 'Closing…';
+    try {
+      const res = await api(sessionPath(host, id, 'kill'), { method: 'POST', body: {} });
+      toast(`Closed ${res.name || id.slice(0, 8)} (${String(res.terminal || 'done').replace(/-/g, ' ')})`);
+      setMenu(false);
+      window.location.hash = '#/';
+    } catch (err) {
+      toast(err.message || 'Close failed', 'error');
+      closing = false;
+      closeBtn.disabled = false;
+      disarmClose();
+    }
+  });
+  const closeRow = menuRow('Close session', closeBtn);
+
   const menuEl = h(
     'div',
     { class: 'menu', role: 'menu', hidden: true },
@@ -668,12 +752,15 @@ function createDetailView(host, id) {
     notesRow,
     menuRow('Text size', fontBtnDown, fontSizeEl, fontBtnUp),
     linesRow,
+    nameRow,
+    closeRow,
   );
   let menuOpen = false;
   function setMenu(open) {
     menuOpen = open;
     menuEl.hidden = !open;
     menuBtn.setAttribute('aria-expanded', String(open));
+    if (!open && !closing) disarmClose();
   }
   const menuBtn = h(
     'button',
@@ -1200,8 +1287,7 @@ function createDetailView(host, id) {
   const metaPoller = createPoller(async (signal) => {
     try {
       const data = await api('/api/fleet', { signal });
-      state.fleet = data;
-      state.fleetAt = Date.now();
+      setFleet(data);
       const found = lookupSession(host, id);
       if (found) {
         sess = found;
@@ -1234,6 +1320,7 @@ function createDetailView(host, id) {
       stopTicker();
       document.removeEventListener('click', onDocClick);
       document.removeEventListener('keydown', onDocKey);
+      clearTimeout(closeTimer);
       for (const t of followUpTimers) clearTimeout(t);
       followUpTimers.clear();
     },
@@ -1359,8 +1446,7 @@ function watchForSpawned(host, name) {
   const tick = async () => {
     try {
       const data = await api('/api/fleet');
-      state.fleet = data;
-      state.fleetAt = Date.now();
+      setFleet(data);
       const hostEntry = (data.hosts || []).find((x) => x.name === host);
       const found = (hostEntry?.sessions || []).find((s) => s.tmux_session === name || s.name === name);
       if (found) {
