@@ -1,5 +1,6 @@
-//! `fleet web serve` / `fleet web install-service`: run the web UI
-//! (`<web.dir>/server.mjs`, Node ≥ 22) against the same config file.
+//! `fleet web serve` / `fleet web build` / `fleet web install-service`: run the web UI
+//! (`<web.dir>/server.mjs`, Node ≥ 22) against the same config file, and build its
+//! React UI (`<web.dir>/ui` → `ui/dist`, which the server prefers when present).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,6 +33,62 @@ fn web_dir(explicit: Option<&str>) -> Result<PathBuf> {
         ));
     }
     Ok(dir)
+}
+
+pub struct BuildOpts {
+    pub dir: Option<String>,
+    /// Run `npm ci` even when `ui/node_modules` exists.
+    pub install: bool,
+}
+
+/// The commands `web build` runs, in order: `npm ci` (when needed), then `npm run build`.
+pub fn build_commands(o: &BuildOpts) -> Result<Vec<Command>> {
+    let dir = web_dir(o.dir.as_deref())?;
+    let ui = dir.join("ui");
+    if !ui.join("package.json").is_file() {
+        return Err(Error::exit(
+            1,
+            format!(
+                "no UI sources in {} — an installed web dir only has the built UI; build in a repo checkout (then `fleet install --host <name>`)",
+                ui.display()
+            ),
+        ));
+    }
+    let npm = tools::find_binary("npm").ok_or_else(|| {
+        Error::exit(
+            127,
+            "npm not found (building the web UI needs Node ≥ 22 with npm)",
+        )
+    })?;
+    let npm_in = |args: &[&str]| {
+        let mut c = Command::new(&npm);
+        c.arg("--prefix").arg(&ui).args(args);
+        c
+    };
+    let mut out = Vec::new();
+    if o.install || !ui.join("node_modules").is_dir() {
+        out.push(npm_in(&["ci"]));
+    }
+    out.push(npm_in(&["run", "build"]));
+    Ok(out)
+}
+
+pub fn build(o: BuildOpts) -> Result<()> {
+    for mut c in build_commands(&o)? {
+        if hosts::dry_run() {
+            println!("{}", hosts::display_command(&c));
+            continue;
+        }
+        hosts::debug(&hosts::display_command(&c));
+        let st = c.status()?;
+        if !st.success() {
+            return Err(Error::exit(
+                st.code().unwrap_or(1),
+                format!("{} failed ({st})", hosts::display_command(&c)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Where a version manager keeps per-version installs: a path that changes (or

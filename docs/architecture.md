@@ -71,7 +71,8 @@ There is no chained hopping: a host dispatches only to hosts in its own config.
 
 Every machine runs the same `server.mjs`. It:
 
-- serves the static UI (`web/public/`, vanilla JS, installable as a PWA);
+- serves the static UI, installable as a PWA: the React app built to `web/ui/dist/` when present
+  (`fleet web build`), else the classic vanilla-JS `web/public/`;
 - exposes **its own** sessions, discovered with `fleet list --json` (cached ~2 s);
 - drives its own backends directly for peek/send/keys (it needs untruncated, header-free output);
 - reads chat transcripts from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`;
@@ -113,7 +114,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.port` / `web.bind` | web server listen address; with no config at all it binds `127.0.0.1` only |
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
-| `web.ui` | static UI directory to serve instead of the bundled `web/public` |
+| `web.ui` | static UI directory to serve instead of the bundled one, or `"classic"` for `web/public`; unset → `web/ui/dist` when built, else `web/public` |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
 | `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule and renames generic tmux sessions to match |
 | `tmux` | tmux binary; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |

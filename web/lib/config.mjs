@@ -106,6 +106,29 @@ function spawnDirFor(entry, self, home) {
   return { label, path: path.normalize(abs) };
 }
 
+/** `web.ui` / FLEET_WEB_UI shortcut for the vanilla UI in web/public. */
+export const CLASSIC_UI = 'classic';
+
+/**
+ * The static UI directory:
+ *   explicit path (`web.ui` / FLEET_WEB_UI, `~` expanded) → that directory;
+ *   `"classic"` → <webRoot>/public (the vanilla UI);
+ *   unset → <webRoot>/ui/dist when it has been built (has index.html), else <webRoot>/public.
+ */
+export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImpl = fs } = {}) {
+  const classic = webRoot ? path.join(webRoot, 'public') : null;
+  if (uiRaw === CLASSIC_UI) return classic;
+  if (uiRaw) return path.resolve(expandHome(uiRaw, home));
+  if (!webRoot) return null;
+  const built = path.join(webRoot, 'ui', 'dist');
+  try {
+    if (fsImpl.statSync(path.join(built, 'index.html')).isFile()) return built;
+  } catch {
+    /* not built */
+  }
+  return classic;
+}
+
 /**
  * Turn the raw shared config into what the server needs:
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
@@ -151,9 +174,8 @@ export function normalizeConfig(
   if (typeof web.bind === 'string' && web.bind) bind = web.bind;
   if (env.FLEET_WEB_BIND) bind = env.FLEET_WEB_BIND;
 
-  const defaultUi = webRoot ? path.join(webRoot, 'public') : null;
   const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
-  const uiDir = uiRaw ? path.resolve(expandHome(uiRaw, home)) : defaultUi;
+  const uiDir = resolveUiDir(uiRaw, { webRoot, home, fsImpl });
 
   const spawnList = raw.spawnDirs == null ? [] : raw.spawnDirs;
   if (!Array.isArray(spawnList)) throw new Error('config.spawnDirs must be an array');

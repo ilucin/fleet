@@ -1,5 +1,5 @@
 // HTTP server: /api/* goes to the API handler (lib/api.mjs), everything else is served
-// as static files from `uiDir` (default web/public, configurable via config.web.ui).
+// as static files from `uiDir` (web/ui/dist when built, else web/public; config.web.ui).
 import http from 'node:http';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -23,6 +23,18 @@ export function etagMatches(header, etag) {
   const strip = (t) => t.trim().replace(/^W\//, '');
   const want = strip(etag);
   return header.split(',').some((t) => t.trim() === '*' || strip(t) === want);
+}
+
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+
+/**
+ * Cache policy for a static request path. Build tools emit content-hashed file names
+ * under /assets/ (Vite: `index-R-dVrV7d.js`): a new build means a new name, so those can
+ * be cached for good. Everything else (index.html, manifest, icons, the classic UI's
+ * files) is `no-cache`: always revalidated, cheap with the ETag → 304.
+ */
+export function cacheControlFor(urlPath) {
+  return /^\/assets\/(?:[^/]+\/)*[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(urlPath) ? IMMUTABLE : 'no-cache';
 }
 
 export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = () => {} }) {
@@ -60,14 +72,15 @@ export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = 
 
     // Weak validator from size + mtime: a reload revalidates (no-cache) and gets a 304.
     const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    const cacheControl = cacheControlFor(url.pathname);
     if (etagMatches(req.headers['if-none-match'], etag)) {
-      res.writeHead(304, { etag, 'cache-control': 'no-cache' });
+      res.writeHead(304, { etag, 'cache-control': cacheControl });
       res.end();
       return;
     }
     res.writeHead(200, {
       'content-type': contentTypeFor(file),
-      'cache-control': 'no-cache',
+      'cache-control': cacheControl,
       etag,
       'content-length': stat.size,
     });

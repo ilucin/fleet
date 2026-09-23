@@ -10,3 +10,4 @@ import './spawn.test.mjs';
 import './kill.test.mjs';
 import './autoname.test.mjs';
 import './snapshot.test.mjs';
+import './ui.test.mjs';

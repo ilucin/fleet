@@ -369,6 +369,15 @@ enum WebCmd {
         #[arg(long)]
         dir: Option<String>,
     },
+    /// Build the React UI (<web.dir>/ui → ui/dist): npm ci when needed, then npm run build
+    Build {
+        /// Web app directory (default: config web.dir, else auto-detected)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Reinstall dependencies (npm ci) even if node_modules exists
+        #[arg(long)]
+        install: bool,
+    },
     /// Keep `fleet web serve` running at login (launchd; prints a systemd unit elsewhere)
     InstallService {
         /// Remove the service instead
@@ -611,6 +620,7 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Commands::Web { action } => match action {
             WebCmd::Serve { port, bind, dir } => web::serve(web::ServeOpts { port, bind, dir })?,
+            WebCmd::Build { dir, install } => web::build(web::BuildOpts { dir, install })?,
             WebCmd::InstallService {
                 uninstall,
                 no_load,

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Fleet">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2230"/>
+      <stop offset="1" stop-color="#0b0c0e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- chat bubble -->
+  <path d="M96 128 h320 a40 40 0 0 1 40 40 v176 a40 40 0 0 1 -40 40 h-176 l-88 64 v-64 h-56 a40 40 0 0 1 -40 -40 v-176 a40 40 0 0 1 40 -40 z" fill="#161b22" stroke="#7fb7ff" stroke-width="18" stroke-linejoin="round"/>
+  <!-- prompt chevron + cursor -->
+  <path d="M176 200 l60 56 l-60 56" fill="none" stroke="#7fb7ff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M268 312 h92" stroke="#e9ecef" stroke-width="30" stroke-linecap="round"/>
+  <!-- status dot -->
+  <circle cx="404" cy="108" r="34" fill="#0b0c0e"/>
+  <circle cx="404" cy="108" r="22" fill="#3ddc84"/>
+</svg>

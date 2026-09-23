@@ -344,3 +344,106 @@ fn web_service_prints_a_launchd_plist() {
     assert!(s.contains("<key>ProgramArguments</key>"), "{s}");
     assert!(s.contains(&env.config_path().display().to_string()), "{s}");
 }
+
+/// A fake web dir: server.mjs, a classic public/, and optionally a built ui/dist.
+fn fake_web(env: &Env, built: bool) -> std::path::PathBuf {
+    let web = env.path("web");
+    std::fs::create_dir_all(web.join("public")).unwrap();
+    std::fs::write(web.join("server.mjs"), "").unwrap();
+    std::fs::create_dir_all(web.join("ui/src")).unwrap();
+    std::fs::write(web.join("ui/package.json"), "{}").unwrap();
+    if built {
+        std::fs::create_dir_all(web.join("ui/dist/assets")).unwrap();
+        std::fs::write(web.join("ui/dist/index.html"), "").unwrap();
+    }
+    web
+}
+
+fn config_with_web(web: &std::path::Path) -> serde_json::Value {
+    let mut cfg = two_hosts();
+    cfg["web"]["dir"] = serde_json::Value::String(web.display().to_string());
+    cfg
+}
+
+#[test]
+fn install_copies_only_the_built_ui() {
+    let env = Env::new();
+    let web = fake_web(&env, true);
+    env.write_config(&config_with_web(&web));
+    let out = env
+        .cmd()
+        .args(["-n", "install", "--host", "workstation"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains(".local/share/fleet/web/ui/dist"), "{s}");
+    assert!(s.contains("mkdir -p"), "{s}");
+    if fleet::core::tools::find_binary("rsync").is_some() {
+        assert!(s.contains("--exclude=/ui"), "ui sources stay behind: {s}");
+    }
+    assert!(!stderr(&out).contains("not built"), "{}", stderr(&out));
+}
+
+#[test]
+fn install_without_a_built_ui_warns_and_drops_a_stale_one() {
+    let env = Env::new();
+    let web = fake_web(&env, false);
+    env.write_config(&config_with_web(&web));
+    let out = env
+        .cmd()
+        .args(["-n", "install", "--host", "workstation"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let s = stdout(&out);
+    let e = stderr(&out);
+    assert!(e.contains("not built"), "{e}");
+    assert!(e.contains("npm --prefix web/ui ci"), "{e}");
+    assert!(s.contains("rm -rf"), "a stale remote ui/ is removed: {s}");
+    assert!(!s.contains("ui/dist"), "{s}");
+}
+
+#[test]
+fn web_build_runs_npm_ci_then_build() {
+    if fleet::core::tools::find_binary("npm").is_none() {
+        return;
+    }
+    let env = Env::new();
+    let web = fake_web(&env, false);
+    let run = |extra: &[&str]| {
+        let out = env
+            .cmd()
+            .args(["-n", "web", "build", "--dir"])
+            .arg(&web)
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        stdout(&out)
+    };
+    let s = run(&[]);
+    let lines: Vec<&str> = s.lines().collect();
+    assert_eq!(lines.len(), 2, "{s}");
+    assert!(
+        lines[0].ends_with("/ui ci"),
+        "no node_modules → npm ci first: {s}"
+    );
+    assert!(lines[1].ends_with("/ui run build"), "{s}");
+
+    std::fs::create_dir_all(web.join("ui/node_modules")).unwrap();
+    let s = run(&[]);
+    assert_eq!(s.lines().count(), 1, "deps present → build only: {s}");
+    assert_eq!(run(&["--install"]).lines().count(), 2);
+
+    // An installed web dir has no ui sources.
+    std::fs::remove_file(web.join("ui/package.json")).unwrap();
+    let out = env
+        .cmd()
+        .args(["web", "build", "--dir"])
+        .arg(&web)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("no UI sources"), "{}", stderr(&out));
+}

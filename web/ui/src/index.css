@@ -1,0 +1,174 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* shadcn convention: dark mode = `.dark` on <html>, set by ThemeProvider (and index.html pre-paint). */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-dimmer: var(--dimmer);
+
+  /* fleet: session status colours (text-status-busy, bg-status-waiting, …) */
+  --color-status-waiting: var(--status-waiting);
+  --color-status-busy: var(--status-busy);
+  --color-status-idle: var(--status-idle);
+  --color-status-unknown: var(--status-unknown);
+  --color-status-error: var(--status-error);
+
+  /* fleet: per-host badge colour slots 0..3 (see lib/format.ts hostColorSlot) */
+  --color-host-0: var(--host-0);
+  --color-host-1: var(--host-1);
+  --color-host-2: var(--host-2);
+  --color-host-3: var(--host-3);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Light (used only when the OS prefers light, or chosen explicitly). */
+:root {
+  --background: #ffffff;
+  --foreground: #16181c;
+  --card: #f5f6f8;
+  --card-foreground: #16181c;
+  --popover: #ffffff;
+  --popover-foreground: #16181c;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef2;
+  --secondary-foreground: #16181c;
+  --muted: #eceef2;
+  --muted-foreground: #5b6470;
+  --dimmer: #7b8490;
+  --accent: #e3ebf8;
+  --accent-foreground: #16181c;
+  --destructive: #dc2626;
+  --border: #e1e4e9;
+  --input: #d6dae0;
+  --ring: #93b4e8;
+  --radius: 0.75rem;
+
+  --status-waiting: #b86e00;
+  --status-busy: #15803d;
+  --status-idle: #52657f;
+  --status-unknown: #8a94a0;
+  --status-error: #dc2626;
+
+  --host-0: #6d4fc9;
+  --host-1: #a15c00;
+  --host-2: #0f7890;
+  --host-3: #b8386a;
+}
+
+/* Dark — the default; colours from the classic UI (web/public/style.css). */
+.dark {
+  --background: #0b0c0e;
+  --foreground: #e9ecef;
+  --card: #131519;
+  --card-foreground: #e9ecef;
+  --popover: #1a1d23;
+  --popover-foreground: #e9ecef;
+  --primary: #6aa6ff;
+  --primary-foreground: #0b0c0e;
+  --secondary: #1a1d23;
+  --secondary-foreground: #e9ecef;
+  --muted: #1a1d23;
+  --muted-foreground: #99a1ac;
+  --dimmer: #6b7480;
+  --accent: #23303f;
+  --accent-foreground: #ffffff;
+  --destructive: #ff6b6b;
+  --border: #24282f;
+  --input: #2a2f37;
+  --ring: #37506e;
+
+  --status-waiting: #f5a524;
+  --status-busy: #3ecf6b;
+  --status-idle: #7d92ad;
+  --status-unknown: #5b6470;
+  --status-error: #ff6b6b;
+
+  --host-0: #c9b6ff;
+  --host-1: #ffd28a;
+  --host-2: #8fd8e8;
+  --host-3: #f2a7c3;
+}
+
+/* Safe-area padding (notch / home indicator) for a standalone PWA. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility px-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+/* Full app height: 100dvh, or the visual viewport (keyboard-aware) — see lib/viewport.ts. */
+@utility h-app {
+  height: var(--app-h, 100dvh);
+}
+@utility min-h-app {
+  min-height: var(--app-h, 100dvh);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    overscroll-behavior-y: none;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* >= 16px inputs: iOS Safari zooms on focus otherwise. */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* Horizontally scrolling chip rows. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

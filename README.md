@@ -2,7 +2,7 @@
 
 Supervise a fleet of Claude Code sessions across your machines — from a terminal or from your phone.
 
-`fleet` is one Rust CLI plus a small, zero-dependency web app. It finds every live Claude Code
+`fleet` is one Rust CLI plus a small web app (a zero-dependency Node server and a React PWA). It finds every live Claude Code
 session on a machine (in tmux panes or iTerm tabs), shows what each one is doing, and lets you
 peek at, steer, rename, spawn and hand work off to them. It also manages the tmux sessions on an
 always-on **workstation** over ssh, so the same command works from your laptop and on the
@@ -55,9 +55,10 @@ build against the Command Line Tools instead:
 ```sh
 git clone https://github.com/ilucin/fleet && cd fleet
 cargo install --path crates/fleet     # installs `fleet` into ~/.cargo/bin
+fleet web build                       # build the web UI (npm ci + vite build → web/ui/dist)
 
 fleet init                            # interactive: this machine's name, hosts, spawn dirs, web port
-fleet install --host workstation      # copy the binary + web app to the workstation over ssh
+fleet install --host workstation      # copy the binary + web app (incl. built UI) to the workstation
 fleet doctor                          # reachability, versions on both ends, config sanity
 
 fleet list                            # Claude sessions on this machine
@@ -78,7 +79,7 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | tmux sessions | `tmux list\|enter\|last\|new\|kill\|rename\|stale` (alias `t`), shortcuts `enter` · `last` · `new` |
 | hosts | `exec` · `ssh` · `doctor` |
 | setup | `init` · `config path\|show\|edit\|set` · `install --host <name>` |
-| web | `web serve` · `web install-service` |
+| web | `web serve` · `web build` · `web install-service` |
 
 Global flags: `-H, --host <name>`, `--local`, `--json` (where it applies). Full reference:
 [docs/cli.md](docs/cli.md).

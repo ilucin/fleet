@@ -1,12 +1,14 @@
 # fleet-web — architecture
 
 A zero-dependency Node server that exposes the fleet over a small JSON HTTP API, plus a
-mobile-first PWA (`public/`) built on that API. Every host runs the same server; any one of
+mobile-first PWA built on that API. Every host runs the same server; any one of
 them shows the whole fleet by merging in its peers. No auth — meant for a private network
-(e.g. a Tailscale tailnet). No build step.
+(e.g. a Tailscale tailnet). The server has no build step and no npm dependencies.
 
-The API is the stable part. `public/` is just one UI; another UI can be pointed at the same
-API (or served by it via `web.ui`, see Config).
+The API is the stable part. Two UIs ship with it: `ui/` (React + shadcn/ui, built to `ui/dist/`,
+the default when built — see [ui/README.md](./ui/README.md)) and `public/` (the classic vanilla-JS
+UI, the fallback). Another UI can be pointed at the same API (or served by it via `web.ui`, see
+Config).
 
 ## Topology
 
@@ -37,7 +39,8 @@ lib/peers.mjs         peer fetch + one-hop proxy
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
 lib/http.mjs, util.mjs, run.mjs   helpers (body limit, static path safety, execFile wrapper)
-public/               the bundled PWA (vanilla JS, hash routing)
+ui/                   the React UI (Vite + TS + Tailwind v4 + shadcn/ui); only ui/dist is served/installed
+public/               the classic PWA (vanilla JS, hash routing, no build)
 ```
 
 `createApi(deps)` and `createHttpServer({ handleApi, uiDir })` take all I/O as injected
@@ -55,7 +58,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `hosts.<name>.web` | peer base URL for every host ≠ self; hosts without `web` are not peers |
 | `web.port` | listen port (default 7777) |
 | `web.bind` | listen address (default `0.0.0.0` with a config, `127.0.0.1` without one) |
-| `web.ui` | static UI directory (default `web/public`); `null` → bundled UI |
+| `web.ui` | static UI: a directory path, or `"classic"` (= `web/public`); unset/`null` → `web/ui/dist` when built (has `index.html`), else `web/public` |
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
@@ -169,9 +172,12 @@ the old snapshot at once and wakes the refresher. Spawn, kill and autoname rebui
 `?local=1` (what peers poll) bypasses it and uses the 2s local cache. Without this a page load
 waited ~1–2s on `fleet list` (one `ps` per session plus an osascript for iTerm tab titles).
 
-**Static**: every non-`/api/` GET/HEAD is served from the UI dir with `cache-control: no-cache`
-and a weak ETag (`W/"<size>-<mtime>"`, hex), so a reload revalidates and gets `304` (path
-traversal rejected). No UI dir / no `index.html` → a placeholder page at `/`.
+**Static**: every non-`/api/` GET/HEAD is served from the UI dir with a weak ETag
+(`W/"<size>-<mtime>"`, hex) and `cache-control: no-cache`, so a reload revalidates and gets `304`
+(path traversal rejected) — except content-hashed build assets (`/assets/…/<name>-<hash ≥ 8>.<ext>`,
+what Vite emits), which get `public, max-age=31536000, immutable`. No SPA fallback: both UIs use
+hash routing, so only `/` is ever loaded; a missing file is a 404. No UI dir / no `index.html` →
+a placeholder page at `/`.
 
 ## Auto-naming
 
@@ -192,7 +198,14 @@ Claude's `<cwd-basename>-xx`), only for Claude sessions whose name is now user-s
 the tmux session has a single window. Runs are de-duplicated; `/api/health` reports
 `autoName.lastRun`.
 
-## UI (`public/`)
+## UI (`ui/`, React)
+
+Same routes and behaviour as the classic UI below (hash routing `#/`, `#/s/<host>/<id>`; the
+`fleet.snapshot` and `fleet.filter` localStorage keys are shared), built with React 19 + Tailwind
+v4 + shadcn/ui. Structure and conventions: [ui/README.md](./ui/README.md). Dev: `npm --prefix ui run dev`
+proxies `/api` to a running server (`FLEET_WEB_URL`, default `http://127.0.0.1:7777`).
+
+## Classic UI (`public/`)
 
 - Dark theme, system font for chrome, monospace for terminal text, safe-area insets, PWA manifest.
 - **List** (`#/`): all sessions across hosts, filter chips (All / Needs you / Busy / Idle), search,

@@ -488,15 +488,20 @@ fn remote_step(r: &Remote, what: &str, script: &str) -> Result<String> {
 }
 
 /// Copy a directory's contents to `dest:remote_dir`, skipping tests, VCS and
-/// dependencies. rsync when available (so removed files go too), tar over ssh
-/// otherwise.
-fn sync_dir(r: &Remote, local: &Path, remote_dir: &str) -> Result<()> {
+/// dependencies anywhere, plus the top-level entries in `skip_top` (which are also
+/// left alone on the remote). rsync when available (so removed files go too), tar
+/// over ssh otherwise.
+fn sync_dir(r: &Remote, local: &Path, remote_dir: &str, skip_top: &[&str]) -> Result<()> {
     const EXCLUDES: [&str; 4] = ["node_modules", "tests", ".git", ".DS_Store"];
     if tools::find_binary("rsync").is_some() {
         let mut c = Command::new("rsync");
         c.args(["-az", "--delete"]);
         for e in EXCLUDES {
             c.arg(format!("--exclude={e}"));
+        }
+        // A leading `/` anchors the pattern at the transfer root.
+        for e in skip_top {
+            c.arg(format!("--exclude=/{e}"));
         }
         let ssh_e = std::iter::once("ssh".to_string())
             .chain(hosts::ssh_opts().iter().map(|o| shq_min(o)))
@@ -513,8 +518,19 @@ fn sync_dir(r: &Remote, local: &Path, remote_dir: &str) -> Result<()> {
     for e in EXCLUDES {
         excl.push_str(&format!(" --exclude={}", shq(e)));
     }
+    // tar's --exclude is unanchored in bsdtar, so top-level skips are done by naming
+    // the entries to pack instead of `.`.
+    let entries = if skip_top.is_empty() {
+        ".".to_string()
+    } else {
+        top_entries(local, skip_top)?
+            .iter()
+            .map(|e| shq(e))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
     let script = format!(
-        "tar -C {} -cf -{excl} . | ssh {} {} {}",
+        "tar -C {} -cf -{excl} {entries} | ssh {} {} {}",
         shq(&local.display().to_string()),
         hosts::ssh_opts()
             .iter()
@@ -530,6 +546,70 @@ fn sync_dir(r: &Remote, local: &Path, remote_dir: &str) -> Result<()> {
     let mut c = Command::new("sh");
     c.args(["-c", &script]);
     run_step("copy web app", c)
+}
+
+/// `dir`'s top-level entry names minus `skip`, sorted (for the tar fallback).
+fn top_entries(dir: &Path, skip: &[&str]) -> Result<Vec<String>> {
+    let mut out: Vec<String> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !skip.contains(&n.as_str()))
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// The built React UI inside a web dir (`npm --prefix web/ui run build`), if built.
+pub fn built_ui(web: &Path) -> Option<PathBuf> {
+    let dist = web.join("ui").join("dist");
+    dist.join("index.html").is_file().then_some(dist)
+}
+
+pub const UI_BUILD_HINT: &str =
+    "npm --prefix web/ui ci && npm --prefix web/ui run build   (or: fleet web build)";
+
+/// Copy the web app: the server + classic UI, then only the *built* React UI
+/// (`ui/dist`) — never its sources or node_modules.
+fn install_web(r: &Remote, dir: &Path) -> Result<()> {
+    let remote_ui = format!("{}/ui", config::INSTALLED_WEB_DIR);
+    let remote_dist = format!("{remote_ui}/dist");
+    let dist = built_ui(dir);
+    // rsync needs the destination's parent; a stale remote ui/ would keep serving an old build.
+    let prep = match &dist {
+        Some(_) => format!("mkdir -p {}", remote_path(&remote_ui)),
+        None => format!("rm -rf {}", remote_path(&remote_ui)),
+    };
+    remote_step(
+        r,
+        "prepare web dir",
+        &format!(
+            "mkdir -p {} && {prep}",
+            remote_path(config::INSTALLED_WEB_DIR)
+        ),
+    )?;
+    sync_dir(r, dir, config::INSTALLED_WEB_DIR, &["ui"])?;
+    match &dist {
+        Some(d) => sync_dir(r, d, &remote_dist, &[])?,
+        None => eprintln!(
+            "fleet: the web UI is not built ({}/ui/dist missing) — {} gets the classic UI only; build it with:\n  {UI_BUILD_HINT}",
+            tools::tildify(&dir.display().to_string()),
+            r.name
+        ),
+    }
+    if !hosts::dry_run() {
+        println!(
+            "  {} {} (from {}{})",
+            "✔".green(),
+            config::INSTALLED_WEB_DIR,
+            tools::tildify(&dir.display().to_string()),
+            if dist.is_some() {
+                ", with ui/dist"
+            } else {
+                ", classic UI only"
+            }
+        );
+    }
+    Ok(())
 }
 
 pub struct InstallOpts {
@@ -595,17 +675,7 @@ pub fn install(target: &Target, o: InstallOpts) -> Result<()> {
 
     if o.web {
         match config::web_dir(config::get()) {
-            Some(dir) => {
-                sync_dir(r, &dir, config::INSTALLED_WEB_DIR)?;
-                if !hosts::dry_run() {
-                    println!(
-                        "  {} {} (from {})",
-                        "✔".green(),
-                        config::INSTALLED_WEB_DIR,
-                        tools::tildify(&dir.display().to_string())
-                    );
-                }
-            }
+            Some(dir) => install_web(r, &dir)?,
             None => eprintln!(
                 "fleet: web app not found here (set web.dir, or run from a checkout) — skipped"
             ),

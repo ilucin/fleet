@@ -4,3 +4,6 @@ node_modules/
 config.json
 .env*
 .DS_Store
+
+# web/ui build output (npm --prefix web/ui run build)
+web/ui/dist/
