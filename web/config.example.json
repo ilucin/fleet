@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "self": "laptop",
+  "defaultHost": "workstation",
+  "hosts": {
+    "laptop": { "ssh": null, "web": "http://100.x.y.z:7777" },
+    "workstation": { "ssh": "workstation", "web": "http://100.x.y.z:7777" }
+  },
+  "web": {
+    "port": 7777,
+    "bind": "0.0.0.0",
+    "dir": null,
+    "ui": null,
+    "quickReplies": ["Continue.", "Yes", "No", "1", "2"]
+  },
+  "tmux": null,
+  "fleetBin": null,
+  "spawnDirs": [
+    { "label": "Work", "paths": { "laptop": "~/Code/project", "workstation": "~/Code/project" } },
+    { "label": "Notes", "paths": { "workstation": "~/Code/notes" } }
+  ]
+}

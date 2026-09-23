@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+license = "MIT"
+
+[workspace.dependencies]
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Output
+colored = "3.0"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+unicode-width = "0.2"
+
+# Error handling
+thiserror = "2.0"
+
+# Dev/test
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"

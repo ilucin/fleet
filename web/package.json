@@ -1,0 +1,16 @@
+{
+  "name": "fleet-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HTTP API + mobile PWA for supervising and steering Claude Code sessions across hosts.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "bin/dev.sh",
+    "test": "node --test tests/"
+  }
+}
