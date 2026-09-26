@@ -45,6 +45,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet send <target> <text>` | type text into the session and press Enter |
 | `fleet rename <target> <name> [--no-tmux-sync] [--force]` | send Claude's `/rename`; also renames the session's tmux session. Busy sessions are held unless `--force` |
 | `fleet name [<target> \| --all] [--apply] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing; only `--apply` sends it. `--all` = every session with a derived (cwd+hash) name. `--refresh` ignores the cache |
+| `fleet group [-a, --all-hosts] [--json] [--apply] [--refresh] [--consolidate] [--input <file\|->] [--cached]` | sort sessions into work-stream groups (the web Board view) — see [Grouping](#grouping). Reads sessions and asks `claude -p`; never sends anything to a session |
 | `fleet spawn [prompt] --dir <path> [--name <n>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new Claude session in a new tab/pane. Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing) |
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--name <n>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
 | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` | live dashboard + notifications on finished/stuck sessions |
@@ -52,6 +53,41 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 
 `send`, `rename --force`, `name --apply` and `spawn` change a live agent's state — scripts and agents
 should confirm before running them.
+
+### Grouping
+
+`fleet group` sorts the live sessions into a handful of work-stream groups (labels of 2–4 words,
+an optional one-line description) with `claude -p --model <grouping.model>` (default `haiku`),
+and keeps them stable across runs. State: `$FLEET_GROUPS_STATE`, else
+`${XDG_STATE_HOME:-~/.local/state}/fleet/groups.json` on the machine that runs it.
+
+- Sessions: this machine's by default; `-a` every configured host (over ssh); `--input <file|->`
+  a `list --json` array or a `/api/fleet` body (what the web server pipes in — hosts with
+  `ok: false` keep their assignments).
+- Without `--apply` the result is printed and nothing is saved; `--apply` writes the state.
+  `-n` builds the prompts and reports how many model calls a run would make, calling none.
+- A run only calls the model for sessions it hasn't placed yet (new, renamed/retitled/moved, or
+  parked in a fallback group while the model was down) — an unchanged fleet costs nothing. At
+  most once an hour (`grouping.consolidateMinutes`), after changes, one consolidation call may
+  merge ≤ 2 groups and rename ≤ 2. `--consolidate` forces it; `--refresh` starts from scratch.
+- Model off (`grouping.enabled: false`), unavailable or unusable → sessions go to a group per
+  repository (the cwd, worktree-aware), `source: "fallback"`.
+- `--cached` prints the stored groups: no discovery, no model call.
+
+`--json` (stable contract):
+
+```json
+{ "version": 1, "applied": true, "updatedAt": 1790000000000,
+  "lastRun": { "at": 0, "ms": 0, "mode": "noop|incremental|full|consolidate|fallback|dry-run", "ok": true,
+               "modelCalls": 0, "classified": 0, "kept": 30, "pruned": 0, "created": 0, "merged": 0,
+               "renamed": 0, "note": "…", "error": "…" },
+  "groups": [ { "id": "g-1a2b3c4d", "label": "Fleet Board", "description": "…", "source": "llm",
+                "members": [ { "host": "laptop", "id": "<session id>", "name": "board-view" } ] } ],
+  "ungrouped": [ { "host": "laptop", "id": "…", "name": "…" } ],
+  "hosts": { "laptop": "ok", "workstation": "unreachable: …" } }
+```
+
+Group ids never change once created (a merge keeps the target's id); empty groups are dropped.
 
 ### Dashboard keys (`watch`)
 
@@ -172,6 +208,7 @@ fleet init --yes --self laptop \
 | `FLEET_BIN` | `fleet` binary the web server calls |
 | `FLEET_NODE` | `node` binary for `fleet web serve` (over config `web.node`; set by the launchd agent) |
 | `FLEET_WEB_PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI` | web server listen address / UI directory (over config `web.*`) |
+| `FLEET_GROUPS_STATE` | `fleet group` state file (default `${XDG_STATE_HOME:-~/.local/state}/fleet/groups.json`) |
 | `FLEET_FIXTURE=<sessions.json>` | read a canned fleet from a file instead of the live registry (demo/tests; backends are inert) |
 | `NO_COLOR=1` | no colors |
 

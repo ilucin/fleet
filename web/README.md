@@ -28,7 +28,7 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.autoName`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
+`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.autoName`, `web.grouping`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
@@ -39,6 +39,11 @@ Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` / `PORT`, `FLEET_WEB_BIND`, `FLE
 `fleet name --all --apply` on its own host every few minutes, so sessions started without a
 name get a task-shaped one (tmux session included, when its name was generic). Set
 `"enabled": false` to keep names manual.
+
+`web.grouping` (default off; opt in on ONE host with `{ "enabled": true, "intervalMinutes": 10 }`,
+and point the others at it with top-level `"grouping": { "host": "<that host>" }`) makes that
+server run `fleet group` over the whole fleet and serve `GET /api/groups` for the Board view; the
+others proxy to it. It only reads sessions and calls `claude -p`; nothing is sent to a session.
 
 ## Another UI
 

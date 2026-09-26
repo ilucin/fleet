@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   FilterIcon,
+  KanbanIcon,
   KeyboardIcon,
+  ListIcon,
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
@@ -9,12 +11,14 @@ import {
   PanelRightIcon,
   PlusIcon,
   RefreshCwIcon,
+  SparklesIcon,
   SquareTerminalIcon,
   SunIcon,
 } from 'lucide-react'
 import { Redirect, useLocation, useRoute } from 'wouter'
 
 import type { Session } from '@/api/types'
+import { Board } from '@/components/board/Board'
 import { CommandPalette, type PaletteAction } from '@/components/desktop/CommandPalette'
 import { ShortcutsDialog } from '@/components/desktop/ShortcutsDialog'
 import { Sidebar, SidebarRail } from '@/components/desktop/Sidebar'
@@ -22,11 +26,13 @@ import { NewSessionDialog } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
 import { Kbd } from '@/components/ui/kbd'
 import { useFleet } from '@/hooks/useFleet'
+import { useGroups, useViewMode } from '@/hooks/useGroups'
 import { WIDE_QUERY } from '@/hooks/useMediaQuery'
 import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSessionList } from '@/hooks/useSessionList'
 import { useTheme } from '@/hooks/useTheme'
+import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
 import { clampSidebarWidth, SIDEBAR_DEFAULT_W, SIDEBAR_MAX_W, SIDEBAR_MIN_W } from '@/lib/layout'
 import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutAction } from '@/lib/shortcuts'
@@ -65,6 +71,19 @@ export function DesktopShell() {
   const toggleSidebar = () => setSidebarRaw(sidebarOpen ? '0' : '1')
   const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
 
+  // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
+  // session sits in the pane to its right, so j/k, Enter and Esc work the same way.
+  const [mode, setMode] = useViewMode()
+  const board = mode === 'board'
+  const toggleView = () => setMode(board ? 'list' : 'board')
+  const groups = useGroups(board)
+  const columns = useMemo(
+    () => (board ? boardColumns(list.view.sessions, effectiveGroups(groups.groups, allSessions(fleet)).groups) : []),
+    [board, list.view.sessions, groups.groups, fleet],
+  )
+  // The cursor walks the sessions in on-screen order: the list, or the board column by column.
+  const ordered = useMemo(() => (board ? boardOrder(columns) : list.view.sessions), [board, columns, list.view.sessions])
+
   const [newOpen, setNewOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -77,8 +96,8 @@ export function DesktopShell() {
     setPrevSelected(selectedKey)
     if (selectedKey) setCursor(selectedKey)
   }
-  const keys = useMemo(() => list.view.sessions.map(sessionKey), [list.view.sessions])
-  const byKey = useMemo(() => new Map(list.view.sessions.map((s) => [sessionKey(s), s])), [list.view.sessions])
+  const keys = useMemo(() => ordered.map(sessionKey), [ordered])
+  const byKey = useMemo(() => new Map(ordered.map((s) => [sessionKey(s), s])), [ordered])
   const cursorKey = cursor && keys.includes(cursor) ? cursor : null
 
   // Opened with Enter → the new pane focuses its composer on mount.
@@ -115,7 +134,7 @@ export function DesktopShell() {
   }, [focusReq])
 
   const focusSearch = () => {
-    if (!sidebarOpen) setSidebarRaw('1')
+    if (!sidebarOpen && !board) setSidebarRaw('1')
     setFocusReq((r) => ({ to: 'search', n: (r?.n ?? 0) + 1 }))
   }
 
@@ -158,7 +177,7 @@ export function DesktopShell() {
         // A focused link / button handles Enter itself.
         if (action === 'openAndReply' && target?.closest('a, button, [role="button"], [role="radio"], [role="option"], [role="switch"]'))
           return false
-        const s = cur ?? (selectedKey ? null : list.view.sessions[0])
+        const s = cur ?? (selectedKey ? null : ordered[0])
         if (s) openSession(s, action === 'openAndReply')
         else if (selectedKey && action === 'openAndReply') paneRef.current?.focusComposer()
         return true
@@ -186,7 +205,11 @@ export function DesktopShell() {
         paneRef.current?.setMode(action)
         return !!paneRef.current
       case 'sidebar':
+        if (board) return false
         toggleSidebar()
+        return true
+      case 'view':
+        toggleView()
         return true
       case 'inspector':
         if (!selectedKey) return false
@@ -266,7 +289,15 @@ export function DesktopShell() {
               },
             ]
           : []),
-        { id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: '[', run: toggleSidebar },
+        board
+          ? { id: 'view', label: 'List view', icon: <ListIcon />, shortcut: 'B', keywords: ['list', 'sidebar'], run: toggleView }
+          : { id: 'view', label: 'Board view (grouped)', icon: <KanbanIcon />, shortcut: 'B', keywords: ['board', 'kanban', 'groups'], run: toggleView },
+        ...(board && groups.groups?.enabled
+          ? [{ id: 'regroup', label: 'Regroup now', icon: <SparklesIcon />, keywords: ['group', 'board'], run: () => void groups.run() }]
+          : []),
+        ...(board
+          ? []
+          : [{ id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: '[', run: toggleSidebar }]),
         { id: 'refresh', label: 'Refresh now', icon: <RefreshCwIcon />, shortcut: 'G R', run: refresh },
         { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: '?', run: () => setHelpOpen(true) },
       ],
@@ -294,9 +325,47 @@ export function DesktopShell() {
   // Anything but `/` and `/s/:host/:id` → the list (same as mobile).
   if (!match && location !== '/') return <Redirect to="/" replace />
 
+  const onSearchNav = (a: 'next' | 'prev' | 'open') => {
+    if (a === 'open') {
+      const s = (cursorKey && byKey.get(cursorKey)) || ordered[0]
+      if (s) openSession(s, true)
+    } else moveCursor(a === 'next' ? 1 : -1)
+  }
+
+  const pane = selected ? (
+    <SessionScreen
+      key={selectedKey}
+      host={selected.host}
+      id={selected.id}
+      layout="pane"
+      inspector={inspector}
+      onToggleInspector={toggleInspector}
+      paneRef={paneRef}
+      autoFocusComposer={focusOnOpen === selectedKey}
+    />
+  ) : null
+
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      {sidebarOpen ? (
+      {board ? (
+        <section aria-label="Session board" className="flex min-w-0 flex-1">
+          <Board
+            list={list}
+            groups={groups}
+            columns={columns}
+            now={now}
+            cursorKey={cursorKey}
+            selectedKey={selectedKey}
+            compact={!!selected}
+            searchRef={searchRef}
+            onSearchNav={onSearchNav}
+            onOpen={(s) => openSession(s, false)}
+            onNew={() => setNewOpen(true)}
+            view={mode}
+            onView={setMode}
+          />
+        </section>
+      ) : sidebarOpen ? (
         <aside aria-label="Session list" className="relative shrink-0 border-r bg-background" style={{ width: sidebarW }}>
           <Sidebar
             list={list}
@@ -305,16 +374,13 @@ export function DesktopShell() {
             selectedKey={selectedKey}
             modKey={modKey}
             searchRef={searchRef}
-            onSearchNav={(a) => {
-              if (a === 'open') {
-                const s = (cursorKey && byKey.get(cursorKey)) || list.view.sessions[0]
-                if (s) openSession(s, true)
-              } else moveCursor(a === 'next' ? 1 : -1)
-            }}
+            onSearchNav={onSearchNav}
             onNew={() => setNewOpen(true)}
             onCollapse={toggleSidebar}
             onPalette={() => setPaletteOpen(true)}
             onHelp={() => setHelpOpen(true)}
+            viewMode={mode}
+            onViewMode={setMode}
           />
           <div
             role="separator"
@@ -353,26 +419,21 @@ export function DesktopShell() {
         />
       )}
 
-      <main className="flex min-w-0 flex-1">
-        {selected ? (
-          <SessionScreen
-            key={selectedKey}
-            host={selected.host}
-            id={selected.id}
-            layout="pane"
-            inspector={inspector}
-            onToggleInspector={toggleInspector}
-            paneRef={paneRef}
-            autoFocusComposer={focusOnOpen === selectedKey}
-          />
-        ) : (
-          <EmptyPane
-            waitingSessions={paletteSessions.filter((s) => s.status === 'waiting').slice(0, 6)}
-            modKey={modKey}
-            onOpen={(s) => openSession(s, true)}
-          />
-        )}
-      </main>
+      {board ? (
+        pane ? (
+          <main className="flex w-[min(62%,1200px)] min-w-[34rem] shrink-0 border-l">{pane}</main>
+        ) : null
+      ) : (
+        <main className="flex min-w-0 flex-1">
+          {pane ?? (
+            <EmptyPane
+              waitingSessions={paletteSessions.filter((s) => s.status === 'waiting').slice(0, 6)}
+              modKey={modKey}
+              onOpen={(s) => openSession(s, true)}
+            />
+          )}
+        </main>
+      )}
 
       <NewSessionDialog open={newOpen} onOpenChange={setNewOpen} onOpenSession={(href) => navigate(href)} />
       <CommandPalette

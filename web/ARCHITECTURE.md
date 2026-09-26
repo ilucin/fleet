@@ -34,6 +34,7 @@ lib/transcript.mjs    Claude Code transcript JSONL → chat messages
 lib/spawn.mjs         new tmux session + `claude [-n <name>] '<prompt>'`, auto-accept folder trust
 lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux session/window or iTerm tab
 lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
+lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
 lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fleet
 lib/peers.mjs         peer fetch + one-hop proxy
 lib/api.mjs           /api/* request handling (no UI knowledge)
@@ -61,13 +62,15 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.ui` | static UI: a directory path, or `"classic"` (= `web/public`); unset/`null` → `web/ui/dist` when built (has `index.html`), else `web/public` |
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
+| `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
+| `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
 | `fleetBin` | `fleet` binary; `null` → PATH, fallbacks, `~/.local/bin`, `~/.cargo/bin` |
 | `claude` | launcher typed by spawn (default `claude`) |
 | `spawnDirs[]` | `{ label, paths: { <host>: dir } }` → this host offers `{ label, path: paths[self] }`; `{ label, path }` means the same dir on every host; `~` expanded; none → `[{ label: "Home", path: $HOME }]` |
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME` (`0`/`false`/`off` disables, anything else enables), `FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` (`0`/`false`/`off` disables, anything else enables), `FLEET_BIN`, `FLEET_TMUX`.
 
 Missing config → runs as a single host `local` on 127.0.0.1 and logs a hint to run
 `fleet init`. A config that exists but is not valid JSON / has a bad shape → exits with code
@@ -98,6 +101,10 @@ The naming pass is `fleet name --all --apply --no-tmux-sync` (timeout 5 min, `NO
 human output is parsed line by line: `<from>  →  <to>` renamed, `⏸ …` held (busy/waiting),
 `✕ …` error, `⧉ …` tmux note.
 
+The grouping pass is `fleet group --input - --apply --json` (timeout 5 min, the merged
+`/api/fleet` body on stdin; `lib/run.mjs` takes `opts.input`); at start the server reads the stored
+groups with `fleet group --cached --json`. Both answer the JSON report in docs/cli.md → Grouping.
+
 Peek/send/keys do **not** go through `fleet peek/send` (those truncate to terminal width and
 add a header). `lib/backends.mjs` drives the backends directly, mirroring the CLI:
 
@@ -124,6 +131,8 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }`, one of `Enter`, `Escape`, `Up`, `Down` | `{ ok: true }` |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` | `{ ok, host, name, dir, tmuxSession, command, trusted }` |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
+| GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
+| POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
 | POST | `/api/hosts/:host/autoname` | `{}` | `{ host, ok, at, ms, reason, dryRun, renamed: [{ from, to }], tmux: ["a → b"], held: [..], errors: [..], error? }` (502 when the pass failed) |
 
 **Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
@@ -200,6 +209,21 @@ sessions whose name is *generic* (the web spawner's `fw-hhmmss`, tmux's numeric 
 Claude's `<cwd-basename>-xx`), only for Claude sessions whose name is now user-set, and only when
 the tmux session has a single window. Runs are de-duplicated; `/api/health` reports
 `autoName.lastRun`.
+
+## Smart grouping
+
+The Board view's groups come from `fleet group` (docs/architecture.md → Smart grouping). Exactly
+one server runs it: `grouping.host`, else the one with `web.grouping.enabled`. `lib/grouping.mjs`
+there reads the stored groups at start (`--cached`), runs the pass 20s later and then every
+`web.grouping.intervalMinutes`, feeding it a freshly built merged fleet (`handleApi.buildFleet()`,
+which doesn't warm the snapshot), and checks every 60s whether the *warm* snapshot (only there
+while someone is watching; never triggers discovery) holds live sessions no group has — if so, and
+the last run is ≥ 2 min old, it runs early. The CLI decides whether the model is called, so a
+scheduled run over an unchanged fleet costs one `fleet group` process and no model call. Runs are
+de-duplicated; `/api/health` reports `grouping: { enabled, host, lastRun }`.
+
+Other servers answer `/api/groups` by proxying to `grouping.host` (or the first peer whose
+`/api/groups?local=1` says `enabled: true`, cached 5 min); `?local=1` is never forwarded again.
 
 ## UI (`ui/`, React)
 

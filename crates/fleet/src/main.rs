@@ -3,7 +3,9 @@ use std::io::IsTerminal;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
-use fleet::cli::{commands, config_cmd, hosts as host_cmds, init, skill, tmux as tmux_cmds, web};
+use fleet::cli::{
+    commands, config_cmd, group, hosts as host_cmds, init, skill, tmux as tmux_cmds, web,
+};
 use fleet::core::config;
 use fleet::core::discovery::Backend;
 use fleet::core::hosts::{self, Scope, Target};
@@ -141,6 +143,31 @@ enum Commands {
         /// Ignore the cached name and generate (and store) a fresh one
         #[arg(long, alias = "no-cache")]
         refresh: bool,
+    },
+
+    /// Sort sessions into work-stream groups (the web Board view) — reads sessions, asks `claude -p`, sends nothing
+    Group {
+        /// Every configured host, in parallel
+        #[arg(long, short = 'a')]
+        all_hosts: bool,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+        /// Save the result to the state file (without it: print only)
+        #[arg(long)]
+        apply: bool,
+        /// Forget all groups and regroup every session from scratch
+        #[arg(long)]
+        refresh: bool,
+        /// Run the merge/rename consolidation pass now, even if not due
+        #[arg(long)]
+        consolidate: bool,
+        /// Print the stored groups; no discovery, no model call
+        #[arg(long, conflicts_with_all = ["apply", "refresh", "consolidate", "all_hosts", "input"])]
+        cached: bool,
+        /// Read sessions from a file ("-" = stdin): a `list --json` array or a `/api/fleet` body
+        #[arg(long, value_name = "FILE", conflicts_with = "all_hosts")]
+        input: Option<String>,
     },
 
     /// Spawn a new Claude session in a fresh tab/pane
@@ -496,6 +523,24 @@ fn run(cli: Cli) -> Result<i32> {
                 refresh,
             },
         )?,
+        Commands::Group {
+            all_hosts,
+            json,
+            apply,
+            refresh,
+            consolidate,
+            cached,
+            input,
+        } => group::run(group::GroupOpts {
+            all_hosts,
+            json,
+            apply,
+            refresh,
+            consolidate,
+            cached,
+            input,
+            dry_run: cli.dry_run,
+        })?,
         Commands::Spawn {
             prompt,
             dir,

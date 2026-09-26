@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod config_cmd;
+pub mod group;
 pub mod hosts;
 pub mod init;
 pub mod render;

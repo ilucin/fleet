@@ -22,6 +22,7 @@ describe('matchShortcut', () => {
     expect(act('G', {}, { shiftKey: true }).action).toBe('last')
     expect(act('[').action).toBe('sidebar')
     expect(act('i').action).toBe('inspector')
+    expect(act('b').action).toBe('view')
     expect(act('r').action).toBe('reply')
     expect(act('x').action).toBeNull()
   })

@@ -1,6 +1,6 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contracts (`fleet list --json`, `fleet name --all --apply`) are documented in one spot (see ARCHITECTURE.md).
+// contracts (`fleet list --json`, `fleet name --all --apply`, `fleet group`) are documented in one spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
 // and adds a header, so lib/backends.mjs drives tmux / iTerm directly.
@@ -63,5 +63,51 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     }
   }
 
-  return { bin, list, nameAll };
+  function wrap(err, what, t) {
+    const killed = err?.killed || err?.signal === 'SIGTERM';
+    if (killed) return new FleetCliError(`${what} timed out after ${Math.round(t / 1000)}s`, { timedOut: true });
+    if (err?.code === 'ENOENT') return new FleetCliError(`fleet binary not found (${bin})`);
+    return new FleetCliError(String(err?.message ?? err));
+  }
+
+  function parseObject(stdout, what) {
+    try {
+      const v = JSON.parse(String(stdout ?? '').trim());
+      if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    } catch {
+      /* below */
+    }
+    throw new FleetCliError(`${what} returned non-JSON output`);
+  }
+
+  /**
+   * The grouping pass: `fleet group --input - --apply --json` with the merged fleet
+   * (`/api/fleet` body) on stdin. Reads sessions and calls `claude -p`; never sends
+   * anything to a session. Resolves the parsed report (docs/cli.md → `fleet group`).
+   */
+  async function groupRun({ fleet, refresh = false, consolidate = false, timeoutMs: t = 5 * 60 * 1000 } = {}) {
+    const args = ['group', '--input', '-', '--apply', '--json'];
+    if (refresh) args.push('--refresh');
+    if (consolidate) args.push('--consolidate');
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, args, { timeout: t, input: JSON.stringify(fleet ?? { hosts: [] }), env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      throw wrap(err, 'fleet group', t);
+    }
+    return parseObject(stdout, 'fleet group');
+  }
+
+  /** The stored groups (`fleet group --cached --json`): no discovery, no model call. */
+  async function groupCached({ timeoutMs: t = 10 * 1000 } = {}) {
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, ['group', '--cached', '--json'], { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      throw wrap(err, 'fleet group --cached', t);
+    }
+    return parseObject(stdout, 'fleet group --cached');
+  }
+
+  return { bin, list, nameAll, groupRun, groupCached };
 }

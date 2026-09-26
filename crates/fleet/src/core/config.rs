@@ -125,6 +125,43 @@ impl NamingConfig {
     }
 }
 
+/// `grouping` — the smart-grouping pass behind the web Board view
+/// (`fleet group`). Opt-*out* like naming for the CLI; the web server only runs
+/// it on a schedule when `web.grouping.enabled` is set.
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GroupingConfig {
+    /// Call the model at all. `false` leaves the group-by-repository fallback.
+    pub enabled: Option<bool>,
+    /// Model passed to `claude -p --model`.
+    pub model: Option<String>,
+    /// The host whose web server runs the pass for the whole fleet (read by the
+    /// web server; peers proxy `/api/groups` to it).
+    pub host: Option<String>,
+    /// Minimum minutes between consolidation passes (merge/rename).
+    pub consolidate_minutes: Option<f64>,
+}
+
+impl GroupingConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+    pub fn model(&self) -> String {
+        self.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("haiku")
+            .to_string()
+    }
+    pub fn consolidate_every_ms(&self) -> i64 {
+        match self.consolidate_minutes {
+            Some(m) if m.is_finite() && m >= 1.0 => (m * 60_000.0) as i64,
+            _ => crate::core::grouping::CONSOLIDATE_EVERY_MS,
+        }
+    }
+}
+
 /// The typed view of the config file.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -145,6 +182,7 @@ pub struct Config {
     pub spawn_dirs: Vec<SpawnDir>,
     pub tui: UiConfig,
     pub naming: NamingConfig,
+    pub grouping: GroupingConfig,
 }
 
 impl Config {

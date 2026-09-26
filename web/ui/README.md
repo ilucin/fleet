@@ -38,6 +38,9 @@ src/
   lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
   lib/markdown.ts     safe markdown → AST (port of ../public/markdown.js), linkify()
   lib/autoname.ts     naming-pass summaries for toasts / the menu
+  lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
+                      fallbackGroups()/repoOf() (client-side group-by-repo, worktree-aware),
+                      statusSummary(), boardOrder() (j/k order), groupsStatusText(), regroupToast()
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
   lib/shortcuts.ts    desktop keyboard map: matchShortcut() (key + typing/chord context → action),
                       isTypingTarget(), stepCursor(), sessionKey(), SHORTCUT_HELP (the `?` dialog)
@@ -51,12 +54,16 @@ src/
   hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term
   hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`, shared with the classic UI)
   hooks/useSessionList.ts  list state shared by the mobile list and the desktop sidebar (search, filters, counts)
+  hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
+                      every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now
   hooks/useMediaQuery.ts   useMediaQuery(), useIsDesktop() (≥ 1024px), WIDE_QUERY (≥ 1440px)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, SessionListSkeleton, ScreenHeader,
-                      Markdown/Linkified, NewSessionDrawer
+                      Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board)
+  components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
+                      GroupsStatus (last run + Regroup), StatusSummaryDots
   components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu (drawer) /
                       SessionMenuBody (also the desktop details panel), LatestButton
   components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
@@ -94,6 +101,19 @@ src/
 
 - **List** (`#/`): all sessions across hosts, status + host filter chips, search, unreachable-host
   banners, `+` → New session.
+- **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by
+  what they work on. Groups come from `GET /api/groups` (the server's periodic `fleet group`
+  pass — stable ids, a 2–4 word label, an optional description); sessions no group claims yet
+  go in **Ungrouped** (last), members that are no longer live are dropped, empty groups vanish.
+  When grouping is off (`enabled: false`), or the endpoint is missing / failing, the UI groups
+  by repo itself (cwd basename; `<repo>/.worktrees/<x>`, `<repo>/worktrees/<x>` and
+  `<repo>/.claude/worktrees/<x>` count as `<repo>`) and says "fallback: by repo". Columns with
+  sessions that need you come first, then busy ones, then by size and label; cards within a
+  column put waiting sessions first, then most recent. The list's search / status / host
+  filters apply. "Regroup now" (`POST /api/groups/run`, toast with the result) and the last run
+  ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
+  sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)
+  of the usual `SessionRow`s. The List view is unchanged.
 - **New session** (drawer): host, directory (radio from that host's `spawnDirs`), optional name
   and first prompt → `api.spawn`. 400/409 are shown inline; on success a loading toast watches
   `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
@@ -138,6 +158,12 @@ session in the pane), so a link opens the same session on either layout.
   (max-w-4xl) readable column, the terminal uses the full width; the composer sends on Enter (also
   ⌘/Ctrl+Enter, touch-capable laptops included), Shift+Enter is a newline. Nothing open → an empty
   state with key hints and the sessions that need you.
+- **Board** (`b`, the toggle in the sidebar / board header, or ⌘K): the Kanban replaces the
+  sidebar — full width, one column per group (label, status dots, count, description), cards
+  with status, name, host, subtitle, status / `waiting_for`, context meter and age. Clicking a
+  card (or j/k + Enter / o, walking the columns left to right) opens the session in the normal
+  pane to the right of the board (`#/s/<host>/<id>`, same route as the list), with the board
+  still visible and scrollable beside it; Esc closes the pane. `[` does nothing on the board.
 - **Details panel** (right, `i` or the header button; `fleet.inspector`, open by default from
   1440px): name, host · cwd, context meter + model, view settings (chat/terminal, notes,
   scrollback, text size, theme), auto-name, tmux/backend/pid/id, Close session (click twice) —
@@ -165,6 +191,7 @@ open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through
 | `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
 | `Esc` | leave the field; otherwise close the pane (`#/`) |
 | `[`, ⌘/Ctrl+`B` | toggle the sidebar |
+| `b` | switch List / Board |
 | `i` | toggle the details panel |
 | `g r` | refresh now |
 | ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions, filters, theme |

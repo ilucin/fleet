@@ -5,6 +5,7 @@ pub mod backend;
 pub mod config;
 pub mod context;
 pub mod discovery;
+pub mod grouping;
 pub mod hosts;
 pub mod naming;
 pub mod tmux;

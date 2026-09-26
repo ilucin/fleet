@@ -3,7 +3,9 @@
 // Path: $FLEET_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/fleet/config.json.
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
-//     web: { port, bind, dir, ui, quickReplies, autoName: { enabled, intervalMinutes } },
+//     web: { port, bind, dir, ui, quickReplies, autoName: { enabled, intervalMinutes },
+//            grouping: { enabled, intervalMinutes } },
+//     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
 // A missing config file is not an error: the server runs as a single local host
@@ -16,6 +18,7 @@ export const DEFAULT_PORT = 7777;
 export const DEFAULT_SELF = 'local';
 export const SUPPORTED_VERSION = 1;
 export const DEFAULT_AUTONAME_MINUTES = 5;
+export const DEFAULT_GROUPING_MINUTES = 10;
 
 const BIN_FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin'];
 
@@ -133,6 +136,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImp
  * Turn the raw shared config into what the server needs:
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, autoName: { enabled, intervalMinutes },
+ *     grouping: { enabled, intervalMinutes, host },
  *     configFile, configFound }
  */
 export function normalizeConfig(
@@ -214,6 +218,30 @@ export function normalizeConfig(
   if (env.FLEET_WEB_AUTONAME != null && env.FLEET_WEB_AUTONAME !== '') autoNameEnabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_AUTONAME);
   const autoName = { enabled: autoNameEnabled, intervalMinutes };
 
+  // web.grouping: the periodic `fleet group` pass (lib/grouping.mjs); grouping.host: which
+  // host's server runs it for the whole fleet (peers proxy /api/groups there).
+  const wg = web.grouping == null ? {} : web.grouping;
+  if (!isObject(wg)) throw new Error('config.web.grouping must be an object { enabled, intervalMinutes }');
+  if (wg.enabled != null && typeof wg.enabled !== 'boolean') throw new Error('config.web.grouping.enabled must be true or false');
+  let groupingMinutes = DEFAULT_GROUPING_MINUTES;
+  if (wg.intervalMinutes != null) {
+    const m = Number(wg.intervalMinutes);
+    if (!Number.isFinite(m) || m < 1) throw new Error(`config.web.grouping.intervalMinutes must be a number >= 1: ${wg.intervalMinutes}`);
+    groupingMinutes = m;
+  }
+  const g = raw.grouping == null ? {} : raw.grouping;
+  if (!isObject(g)) throw new Error('config.grouping must be an object { enabled, model, host }');
+  if (g.host != null && (typeof g.host !== 'string' || !g.host.trim())) throw new Error('config.grouping.host must be a host name');
+  let groupingEnabled = wg.enabled === true; // opt-in: it spends model calls
+  if (env.FLEET_WEB_GROUPING != null && env.FLEET_WEB_GROUPING !== '') groupingEnabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_GROUPING);
+  const groupingHost = g.host == null ? null : g.host.trim();
+  // With grouping.host set, only that host runs the pass — one source of truth.
+  const grouping = {
+    enabled: groupingEnabled && (groupingHost == null || groupingHost === self.trim()),
+    intervalMinutes: groupingMinutes,
+    host: groupingHost,
+  };
+
   return {
     self: self.trim(),
     port,
@@ -227,6 +255,7 @@ export function normalizeConfig(
     uiDir,
     quickReplies,
     autoName,
+    grouping,
   };
 }
 

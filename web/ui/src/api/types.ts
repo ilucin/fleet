@@ -169,3 +169,45 @@ export interface KillResponse {
 export interface OkResponse {
   ok: true
 }
+
+/** One member of a group: a session on a host (`id` = session_id, or String(pid) without one). */
+export interface GroupMember {
+  host: string
+  id: string
+}
+
+/** A smart group of sessions (`fleet group`). Ids are stable across runs. */
+export interface SessionGroup {
+  id: string
+  label: string
+  description?: string | null
+  /** `llm` (model-made) or `fallback` (grouped by repo). */
+  source?: 'llm' | 'fallback' | string
+  members: GroupMember[]
+}
+
+export interface GroupRun {
+  at: number
+  ms: number
+  ok: boolean
+  reason?: 'scheduled' | 'manual' | 'startup' | 'changes' | string
+  mode?: 'noop' | 'incremental' | 'consolidate' | 'full' | 'fallback' | string
+  modelCalls?: number
+  classified?: number
+  error?: string
+  note?: string
+}
+
+/** GET /api/groups (and POST /api/groups/run). `enabled: false` → the UI groups by repo itself. */
+export interface GroupsResponse {
+  enabled: boolean
+  /** The host that runs the grouping pass. */
+  host: string | null
+  intervalMinutes: number | null
+  running: boolean
+  /** Epoch ms of the last applied grouping state. */
+  updatedAt: number | null
+  lastRun: GroupRun | null
+  groups: SessionGroup[]
+  error?: string
+}

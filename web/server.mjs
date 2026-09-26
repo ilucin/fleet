@@ -15,6 +15,7 @@ import { createTranscriptReader } from './lib/transcript.mjs';
 import { createSpawner } from './lib/spawn.mjs';
 import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer } from './lib/autoname.mjs';
+import { createGrouper } from './lib/grouping.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -47,6 +48,18 @@ const autoNamer = createAutoNamer({
   intervalMs: config.autoName.intervalMinutes * 60 * 1000,
   log,
 });
+// Only the grouping host runs the pass; the fleet accessors are bound once the API exists.
+let fleetAccess = null;
+const grouper = config.grouping.enabled
+  ? createGrouper({
+      cli,
+      getFleet: () => fleetAccess.buildFleet(),
+      peekFleet: () => fleetAccess.peekFleet(),
+      self: config.self,
+      intervalMs: config.grouping.intervalMinutes * 60 * 1000,
+      log,
+    })
+  : null;
 const handleApi = createApi({
   config,
   fleet,
@@ -55,10 +68,13 @@ const handleApi = createApi({
   spawner: createSpawner({ run, tmux: config.tmux, launcher: config.claude }),
   killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
   autoNamer,
+  grouper,
   name: NAME,
   version: VERSION,
   logError,
 });
+
+fleetAccess = handleApi;
 
 const server = createHttpServer({ handleApi, uiDir: config.uiDir, log, logError });
 
@@ -77,6 +93,14 @@ server.listen(config.port, config.bind, () => {
   } else {
     log('[fleet-web] autoname off (web.autoName.enabled = false)');
   }
+  if (grouper) {
+    grouper.start();
+    log(`[fleet-web] grouping every ${config.grouping.intervalMinutes}m (fleet group, all hosts)`);
+  } else if (config.grouping.host && config.grouping.host !== config.self) {
+    log(`[fleet-web] grouping: served by ${config.grouping.host}`);
+  } else {
+    log('[fleet-web] grouping off (web.grouping.enabled = false)');
+  }
 });
 
 let shuttingDown = false;
@@ -85,6 +109,7 @@ function shutdown(signal) {
   shuttingDown = true;
   log(`[fleet-web] ${signal} received, shutting down`);
   autoNamer.stop();
+  grouper?.stop();
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();

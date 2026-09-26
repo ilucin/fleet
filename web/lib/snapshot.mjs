@@ -67,11 +67,16 @@ export function createSnapshot({
     return { ...snapshot.body, snapshotAt: snapshot.at };
   }
 
+  /** The current body without counting as a request (no warming); null before the first build. */
+  function peek() {
+    return snapshot ? { ...snapshot.body, snapshotAt: snapshot.at } : null;
+  }
+
   function stop() {
     stopped = true;
     clearTimer(timer);
     timer = null;
   }
 
-  return { get, refresh, stop };
+  return { get, peek, refresh, stop };
 }

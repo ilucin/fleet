@@ -3,6 +3,7 @@
 import type {
   AutoNameRun,
   FleetResponse,
+  GroupsResponse,
   Health,
   KillResponse,
   MessagesResponse,
@@ -87,6 +88,9 @@ export const api = {
     request<SpawnResponse>(`${hostPath(host)}/spawn`, { ...o, method: 'POST', body }),
   autoname: (host: string, o: Opts = {}) =>
     request<AutoNameRun>(`${hostPath(host)}/autoname`, { ...o, method: 'POST', body: {} }),
+
+  groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
+  runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),
 }
 
 /** A short, human message for a failed session request (peek/messages/send…). */

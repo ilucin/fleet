@@ -12,8 +12,10 @@
     "dir": null,
     "ui": null,
     "quickReplies": ["Continue.", "Yes", "No", "1", "2"],
-    "autoName": { "enabled": true, "intervalMinutes": 5 }
+    "autoName": { "enabled": true, "intervalMinutes": 5 },
+    "grouping": { "enabled": true, "intervalMinutes": 10 }
   },
+  "grouping": { "enabled": true, "model": "haiku", "host": "workstation" },
   "tmux": null,
   "fleetBin": null,
   "spawnDirs": [

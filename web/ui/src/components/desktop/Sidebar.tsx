@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { ViewToggle } from '@/components/ViewToggle'
 import { ALL_HOSTS, type SessionListState } from '@/hooks/useSessionList'
+import type { ViewMode } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
 import { sessionKey } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
@@ -33,10 +35,13 @@ export interface SidebarProps {
   onCollapse: () => void
   onPalette: () => void
   onHelp: () => void
+  /** List | Board toggle (omitted → no toggle). */
+  viewMode?: ViewMode
+  onViewMode?: (v: ViewMode) => void
 }
 
 /** Desktop left column: header + summary, search, status/host filters, the session list. */
-export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, onSearchNav, onNew, onCollapse, onPalette, onHelp }: SidebarProps) {
+export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, onSearchNav, onNew, onCollapse, onPalette, onHelp, viewMode, onViewMode }: SidebarProps) {
   const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view, hostCounts, summary, unreachable, note } = list
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -100,7 +105,8 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           </Button>
         </div>
 
-        <div className="relative">
+        <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-dimmer" />
           <Input
             ref={searchRef}
@@ -129,6 +135,8 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           ) : (
             <Kbd className="absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>
           )}
+        </div>
+          {viewMode && onViewMode ? <ViewToggle value={viewMode} onChange={onViewMode} labels={false} className="p-px" /> : null}
         </div>
 
         <ToggleGroup

@@ -117,6 +117,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.ui` | static UI directory to serve instead of the bundled one, or `"classic"` for `web/public`; unset → `web/ui/dist` when built, else `web/public` |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
 | `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule and renames generic tmux sessions to match |
+| `web.grouping` | `{ enabled, intervalMinutes }` (default off, 10): this host's web server runs `fleet group` over the whole fleet on that schedule and serves `/api/groups` (see [Smart grouping](#smart-grouping)) |
 | `tmux` | tmux binary; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |
 | `hosts.<name>.fleetBin` | path to `fleet` on that host; `null` → `~/.local/bin/fleet`, then `PATH` |
 | `fleetBin` | this machine's `fleet` binary (used by the web server) |
@@ -124,6 +125,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `spawnDirs` | directories offered for new sessions, per host (`paths.<host>`) |
 | `tui` | dashboard preferences: `rows` (`"1"`, `"2"`, `"auto"`), `mouse` |
 | `naming` | generated names: `enabled`, `model` (default `haiku`), `syncTmux`, `autoTitle` |
+| `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
 (writes go through the raw JSON, never the typed view); a missing file is fine — this machine is
@@ -131,7 +133,7 @@ the single host `local`, and remote features say "run `fleet init`"; a present b
 an error.
 
 Env overrides for the web server: `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
+`FLEET_WEB_AUTONAME`, `FLEET_WEB_GROUPING`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
 
 ## Session discovery
 
@@ -209,6 +211,10 @@ result is cached in-process per `(path, size, mtime)`, so the `watch` dashboard 
 transcript only after it has grown. Views colour `pct` in the same bands: under 60 dim, 60–85
 amber, over 85 red.
 
+### `fleet group --json`
+
+See [cli.md](cli.md#grouping) for the shape. State file: `groups.json` (below).
+
 ### `fleet tmux list --json` / `fleet tmux stale --json`
 
 See [cli.md](cli.md#tmux-sessions) for the shapes.
@@ -228,11 +234,42 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }` (Enter, Escape, …) |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` → new tmux session running claude; `dir` must resolve inside one of the host's `spawnDirs` (else 400) |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` → SIGTERM (then SIGKILL) Claude, then kill its tmux session (or just its window when the session has others) / close its iTerm tab |
+| GET | `/api/groups` | the Board view's groups: `{ enabled, host, intervalMinutes, running, updatedAt, lastRun, groups: [{ id, label, description, source, members: [{ host, id }] }] }`; served by the grouping host, proxied by every other server (`enabled: false` when nobody runs it) |
+| POST | `/api/groups/run` | `{}` → run the grouping pass now (on the grouping host) → the same shape; 501 when grouping is off |
 | POST | `/api/hosts/:host/autoname` | `{}` → run the naming pass on that host now → `{ renamed: [{ from, to }], tmux, held, errors }` |
 
 `:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars). The
 full contract (status codes, limits, timeouts) lives with the server: [web/README.md](../web/README.md),
 [web/ARCHITECTURE.md](../web/ARCHITECTURE.md).
+
+## Smart grouping
+
+The web Board view shows sessions as columns of work streams, and nobody maintains those groups:
+`core::grouping` (the `fleet group` verb) does, with one source of truth for the whole fleet.
+
+- **Where it runs.** One host: `grouping.host`, or — without it — the host whose server has
+  `web.grouping.enabled`. That server runs `fleet group --input - --apply --json` every
+  `web.grouping.intervalMinutes` (default 10, first run 20s after start) with its merged
+  `/api/fleet` body on stdin — so it needs no ssh to its peers, only their web servers — and early
+  (≥ 2 min after the last run) when the warm snapshot shows live sessions no group knows. Every
+  other server proxies `/api/groups` to it (and finds it by asking peers when `grouping.host` is
+  unset). The state lives on that host (`~/.local/state/fleet/groups.json`).
+- **Input per session**: display name (generated title, else name), name, the last two cwd
+  segments (worktree paths carry the branch-ish name; the git branch itself is not read — a
+  remote session's branch isn't cheaply known), host, the first prompt's first 160 characters.
+  Prompts are capped at 12k characters per call; overflow goes to another call, at most 4 per run.
+- **Stability.** Assignments persist per `host/sessionId` with a fingerprint of those inputs; an
+  unchanged session is never re-sent. New or changed sessions are classified into the existing
+  groups (the model sees their labels and a few member names and is told never to rename them) or
+  a new group; a new label equal to an existing one reuses that group. Consolidation — merge
+  clearly identical streams, fix a clearly wrong label — runs at most hourly, only after changes,
+  and is capped at 2 merges + 2 renames per pass. Group ids never change; empty groups vanish;
+  sessions of a host that didn't answer keep their group.
+- **Fallback.** Model disabled, missing, logged out, or answering garbage (one retry on an
+  unparseable answer, none on a failed call): group by repository, marked `fallback`, reclassified
+  once the model is back. The UI does the same grouping client-side when no server runs grouping.
+- **Cost.** A run with nothing new makes no model call; a typical run after one new session makes
+  one (haiku, ~2–8k prompt characters, 10–45s wall clock with `claude -p` start-up).
 
 ## Extension points
 

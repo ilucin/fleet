@@ -20,6 +20,7 @@ export type ShortcutAction =
   | 'palette'
   | 'help'
   | 'refresh'
+  | 'view'
 
 export interface KeyLike {
   key: string
@@ -68,6 +69,7 @@ const PLAIN: Record<string, ShortcutAction> = {
   Escape: 'back',
   '[': 'sidebar',
   i: 'inspector',
+  b: 'view',
   '?': 'help',
 }
 
@@ -161,6 +163,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
     title: 'Layout',
     items: [
       { keys: [['['], ['mod', 'B']], label: 'Toggle the sidebar' },
+      { keys: [['b']], label: 'Switch List / Board (sessions grouped by work)' },
       { keys: [['i']], label: 'Toggle the details panel' },
       { keys: [['g', 'r']], label: 'Refresh now' },
       { keys: [['?']], label: 'This help' },

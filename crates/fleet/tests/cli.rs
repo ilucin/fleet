@@ -361,3 +361,77 @@ fn every_subcommand_parses_its_help() {
         );
     }
 }
+
+// `fleet group`: model off in config → the repository fallback, persisted only
+// with --apply, read back by --cached; `-n` with the model on calls nothing.
+#[test]
+fn group_falls_back_persists_with_apply_and_reads_back_cached() {
+    let env = common::Env::new();
+    env.write_config(&serde_json::json!({
+        "version": 1, "self": "laptop", "grouping": { "enabled": false }
+    }));
+    let state = env.path("state/groups.json");
+    let input = env.path("sessions.json");
+    std::fs::write(
+        &input,
+        serde_json::json!({ "hosts": [
+            { "name": "laptop", "ok": true, "sessions": [
+                { "session_id": "a1", "name": "board", "cwd": "~/Code/project" },
+                { "session_id": "a2", "name": "api", "cwd": "~/Code/project/.worktrees/api" }
+            ]},
+            { "name": "workstation", "ok": true, "sessions": [
+                { "session_id": "b1", "name": "notes", "cwd": "~/Code/notes" }
+            ]},
+            { "name": "other", "ok": false, "error": "unreachable", "sessions": [] }
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let group = |args: &[&str]| {
+        let out = env
+            .cmd()
+            .env("FLEET_GROUPS_STATE", &state)
+            .arg("group")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("json")
+    };
+    let inp = input.to_str().unwrap();
+
+    let v = group(&["--input", inp, "--json"]);
+    assert_eq!(v["applied"], false);
+    assert!(!state.exists(), "no --apply, no write");
+    assert_eq!(v["lastRun"]["mode"], "fallback");
+    assert_eq!(v["lastRun"]["modelCalls"], 0);
+    assert_eq!(v["groups"][0]["id"], "repo-project");
+    assert_eq!(v["groups"][0]["members"].as_array().unwrap().len(), 2);
+    assert_eq!(v["hosts"]["other"], "unreachable");
+
+    let v = group(&["--input", inp, "--json", "--apply"]);
+    assert_eq!(v["applied"], true);
+    assert!(state.exists());
+
+    let v = group(&["--cached", "--json"]);
+    assert_eq!(v["groups"].as_array().unwrap().len(), 2);
+    assert_eq!(v["lastRun"]["classified"], 3);
+
+    // Model on, dry run: prompts are counted, nothing is called or written.
+    env.write_config(&serde_json::json!({ "version": 1, "self": "laptop" }));
+    let before = std::fs::read_to_string(&state).unwrap();
+    let v = group(&["-n", "--input", inp, "--json", "--apply"]);
+    assert_eq!(v["lastRun"]["mode"], "dry-run");
+    assert_eq!(v["lastRun"]["modelCalls"], 0);
+    assert!(
+        v["lastRun"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("would make 1 model call")
+    );
+    assert_eq!(std::fs::read_to_string(&state).unwrap(), before);
+}

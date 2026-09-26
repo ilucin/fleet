@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
+import { GroupedList } from '@/components/board/GroupedList'
+import { GroupsStatus } from '@/components/board/GroupsStatus'
 import { HostDot } from '@/components/HostBadge'
 import { NewSessionDrawer } from '@/components/NewSessionDrawer'
 import { ScreenHeader } from '@/components/ScreenHeader'
@@ -12,8 +14,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { ViewToggle } from '@/components/ViewToggle'
+import { useGroups, useViewMode } from '@/hooks/useGroups'
 import { useNow } from '@/hooks/useNow'
 import { ALL_HOSTS, useSessionList } from '@/hooks/useSessionList'
+import { boardColumns, effectiveGroups } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
 
@@ -28,6 +33,13 @@ export function ListScreen() {
     useSessionList(now)
   const [newOpen, setNewOpen] = useState(false)
   const [, navigate] = useLocation()
+  const [mode, setMode] = useViewMode()
+  const board = mode === 'board'
+  const groups = useGroups(board)
+  const columns = useMemo(
+    () => (board ? boardColumns(view.sessions, effectiveGroups(groups.groups, allSessions(fleet)).groups) : []),
+    [board, view.sessions, groups.groups, fleet],
+  )
 
   return (
     <div className="flex min-h-app flex-col">
@@ -69,7 +81,8 @@ export function ListScreen() {
           </Button>
         </div>
 
-        <div className="relative mt-2">
+        <div className="mt-2 flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-dimmer" />
           <Input
             type="search"
@@ -94,6 +107,8 @@ export function ListScreen() {
               <XIcon className="size-4" />
             </button>
           ) : null}
+        </div>
+          <ViewToggle value={mode} onChange={setMode} size="lg" />
         </div>
 
         <ToggleGroup
@@ -133,6 +148,8 @@ export function ListScreen() {
             ))}
           </ToggleGroup>
         ) : null}
+
+        {board ? <GroupsStatus state={groups} now={now} size="lg" className="mt-1 -mb-1 justify-between" /> : null}
       </ScreenHeader>
 
       <main className="flex-1 pb-safe px-safe">
@@ -155,6 +172,8 @@ export function ListScreen() {
 
           {!fleet ? (
             <SessionListSkeleton />
+          ) : board && columns.length > 0 ? (
+            <GroupedList columns={columns} now={now} />
           ) : view.sessions.length > 0 ? (
             <div className="flex flex-col gap-2">
               {view.sessions.map((s) => (

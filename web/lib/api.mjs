@@ -6,6 +6,7 @@ import { clampLines, findSession, resolveHost, validateKey, validateSendText } f
 import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import { fetchPeerHost as defaultFetchPeerHost, proxyToPeer as defaultProxyToPeer } from './peers.mjs';
 import { createSnapshot } from './snapshot.mjs';
+import { DISABLED_GROUPS } from './grouping.mjs';
 
 export const API_VERSION = 1;
 
@@ -31,6 +32,8 @@ export const DEFAULT_QUICK_REPLIES = [
  *   spawner     lib/spawn.mjs spawner
  *   killer      lib/kill.mjs killer (kill action; absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
+ *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
+ *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
  *   name, version, startedAt   for /api/health
  *   fetchPeerHost, proxyToPeer (optional, for tests)
@@ -45,6 +48,8 @@ export function createApi({
   spawner,
   killer = null,
   autoNamer = null,
+  grouper = null,
+  groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
   version = '0.0.0',
   startedAt = Date.now(),
@@ -176,6 +181,65 @@ export function createApi({
     }
   }
 
+  // --- /api/groups: served by the grouping host, proxied from everywhere else ----------
+  let discovered = null; // { at, name } — the peer found running grouping (name null: none)
+
+  async function groupsTarget(url) {
+    if (grouper) return { kind: 'self' };
+    if (url.searchParams.get('local') === '1') return { kind: 'none' }; // never chain
+    const host = config.grouping?.host ?? null;
+    if (host === config.self) return { kind: 'none' };
+    if (host) {
+      const peerUrl = config.peers[host];
+      if (!peerUrl) return { kind: 'none', error: `grouping.host "${host}" is not a peer with a web URL` };
+      return { kind: 'peer', name: host, url: peerUrl };
+    }
+    // No grouping.host: the first peer whose server runs grouping (cached).
+    if (!discovered || Date.now() - discovered.at > groupingDiscoveryMs) {
+      let found = null;
+      for (const [peer, peerUrl] of Object.entries(config.peers)) {
+        const r = await proxyToPeer(peerUrl, { method: 'GET', pathname: '/api/groups', timeoutMs: 3000 });
+        if (r.status === 200 && r.body?.enabled === true) {
+          found = peer;
+          break;
+        }
+      }
+      discovered = { at: Date.now(), name: found };
+    }
+    return discovered.name ? { kind: 'peer', name: discovered.name, url: config.peers[discovered.name] } : { kind: 'none' };
+  }
+
+  async function handleGroups(req, url, action) {
+    const target = await groupsTarget(url);
+    if (action === 'get') {
+      if (target.kind === 'self') return { status: 200, body: grouper.response() };
+      if (target.kind === 'peer') {
+        const r = await proxyToPeer(target.url, { method: 'GET', pathname: '/api/groups', timeoutMs: peerProxyTimeoutMs });
+        if (r.status === 200) return { status: 200, body: r.body };
+        discovered = null;
+        return { status: 200, body: { ...DISABLED_GROUPS, host: target.name, error: r.body?.error ?? `HTTP ${r.status}` } };
+      }
+      return { status: 200, body: { ...DISABLED_GROUPS, ...(target.error ? { error: target.error } : {}) } };
+    }
+    // run
+    await readJsonBody(req);
+    if (target.kind === 'self') {
+      const body = await grouper.runOnce('manual');
+      refreshFleet();
+      return { status: body.lastRun?.ok === false ? 502 : 200, body };
+    }
+    if (target.kind === 'peer') {
+      const r = await proxyToPeer(target.url, {
+        method: 'POST',
+        pathname: '/api/groups/run',
+        body: '{}',
+        timeoutMs: 6 * 60 * 1000,
+      });
+      return { status: r.status, body: r.body };
+    }
+    throw new HttpError(target.error ?? 'smart grouping is not enabled on this fleet (web.grouping.enabled)', 501);
+  }
+
   /** Serve locally when `host` is self, proxy (once, with ?local=1) when it is a peer. */
   async function forHost({ req, url, host, local }) {
     const target = resolveHost(host, config);
@@ -205,6 +269,11 @@ export function createApi({
           uptime: Math.round((Date.now() - startedAt) / 1000),
           now: Date.now(),
           autoName: { ...(config.autoName ?? { enabled: false }), lastRun: autoNamer?.lastRun ?? null },
+          grouping: {
+            enabled: Boolean(grouper),
+            host: grouper ? config.self : (config.grouping?.host ?? null),
+            lastRun: grouper?.lastRun ?? null,
+          },
         },
       };
     }
@@ -225,6 +294,16 @@ export function createApi({
     if (url.pathname === '/api/fleet') {
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
       return handleFleet(url);
+    }
+
+    if (url.pathname === '/api/groups') {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return handleGroups(req, url, 'get');
+    }
+
+    if (url.pathname === '/api/groups/run') {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return handleGroups(req, url, 'run');
     }
 
     const m = SESSION_ROUTE.exec(url.pathname);
@@ -268,6 +347,10 @@ export function createApi({
   }
 
   handleApi.refreshFleet = refreshFleet;
+  /** A fresh merged fleet, built once — what the grouper feeds `fleet group`. Doesn't warm the snapshot. */
+  handleApi.buildFleet = () => buildFleet({ force: true });
+  /** The warm snapshot if someone is watching, else null — for cheap change checks. */
+  handleApi.peekFleet = () => snapshot?.peek() ?? null;
   handleApi.stop = () => snapshot?.stop();
   return handleApi;
 }
