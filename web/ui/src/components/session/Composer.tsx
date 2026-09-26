@@ -59,7 +59,8 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
   const tooLong = text.length > MAX_SEND_CHARS
   // Mobile: quick replies + keys live in a mini drawer above the input, hidden until swiped up.
   const [chipsOpen, setChipsOpen] = useState(false)
-  const showChips = desktop || chipsOpen
+  // Desktop has no quick-reply / key chips at all.
+  const showChips = !desktop && chipsOpen
   const touchY = useRef<number | null>(null)
   const onTouchStart = (e: TouchEvent) => {
     // The textarea keeps its own gestures (scrolling, selection).
@@ -123,6 +124,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
           void submit()
         }}
       >
+        {desktop ? null : (
         <div
           className={cn('grid transition-[grid-template-rows] duration-200 ease-out', showChips ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}
           inert={!showChips}
@@ -161,6 +163,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
         </div>
         </div>
         </div>
+        )}
 
         <div className="flex items-end gap-2">
           <input
