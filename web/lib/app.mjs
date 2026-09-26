@@ -37,6 +37,24 @@ export function cacheControlFor(urlPath) {
   return /^\/assets\/(?:[^/]+\/)*[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(urlPath) ? IMMUTABLE : 'no-cache';
 }
 
+/** An API result that is a body stream (`files/raw`): headers first, then pipe; a client that goes away stops the read. */
+function pipeResult(res, { status, headers = {}, stream }, logError, context) {
+  return new Promise((resolve) => {
+    res.writeHead(status, headers);
+    const finish = () => {
+      stream.destroy?.();
+      resolve();
+    };
+    stream.on('error', (err) => {
+      logError(err, context);
+      res.destroy();
+      finish();
+    });
+    res.on('close', finish);
+    stream.pipe(res);
+  });
+}
+
 export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = () => {} }) {
   async function serveStatic(req, res, url) {
     if (!uiDir) {
@@ -125,7 +143,8 @@ export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = 
       }
       if (url.pathname.startsWith('/api/')) {
         const result = await handleApi(req, url);
-        if (result) sendJson(res, result.status, result.body);
+        if (result?.stream) await pipeResult(res, result, logError, `${req.method} ${req.url}`);
+        else if (result) sendJson(res, result.status, result.body);
         return;
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') {

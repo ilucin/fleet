@@ -91,3 +91,30 @@ describe('parseMarkdown', () => {
     expect(parseMarkdown(null)).toEqual([])
   })
 })
+
+describe('local file links ({ files: true })', () => {
+  test('relative link → file node, image → img node; off by default', () => {
+    expect(parseInline('see [the doc](docs/a.md)', 0, { files: true })).toEqual([
+      { t: 'text', v: 'see ' },
+      { t: 'file', href: 'docs/a.md', raw: '[the doc](docs/a.md)', children: [{ t: 'text', v: 'the doc' }] },
+    ])
+    expect(parseInline('x ![shot](img/a.png) y', 0, { files: true })).toEqual([
+      { t: 'text', v: 'x ' },
+      { t: 'img', src: 'img/a.png', alt: 'shot', raw: '![shot](img/a.png)' },
+      { t: 'text', v: ' y' },
+    ])
+    expect(parseInline('see [the doc](docs/a.md)')).toEqual([{ t: 'text', v: 'see [the doc](docs/a.md)' }])
+  })
+  test('schemes and anchors never become file nodes', () => {
+    for (const href of ['javascript:alert(1)', 'data:text/html,x', 'mailto:a@b', '#top', '//evil.dev/x', 'C:/x.md']) {
+      const out = parseInline(`[x](${href})`, 0, { files: true })
+      expect(out.some((n) => n.t === 'file' || n.t === 'img' || n.t === 'link')).toBe(false)
+    }
+    expect(parseInline('[x](https://a.dev)', 0, { files: true })[0]).toMatchObject({ t: 'link', href: 'https://a.dev' })
+  })
+  test('parseMarkdown threads the option through blocks', () => {
+    expect(parseMarkdown('- [a](b.md)', { files: true })).toEqual([
+      { t: 'list', ordered: false, items: [{ content: [{ t: 'file', href: 'b.md', raw: '[a](b.md)', children: [{ t: 'text', v: 'a' }] }] }] },
+    ])
+  })
+})

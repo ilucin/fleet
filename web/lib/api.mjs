@@ -8,6 +8,7 @@ import {
   fetchPeerHost as defaultFetchPeerHost,
   proxyToPeer as defaultProxyToPeer,
   streamToPeer as defaultStreamToPeer,
+  streamFromPeer as defaultStreamFromPeer,
 } from './peers.mjs';
 import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
@@ -19,6 +20,7 @@ const POST_ACTIONS = new Set(['send', 'keys', 'kill', 'rename']);
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
+const FILES_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/files\/(stat|raw|open)$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -39,11 +41,12 @@ export const DEFAULT_QUICK_REPLIES = [
  *   cli         lib/fleet-cli.mjs instance — `rename` (absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
  *   uploader    lib/uploads.mjs instance (uploads route; absent → 501)
+ *   files       lib/files.mjs instance (files/stat|raw|open; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
  *   name, version, startedAt   for /api/health
- *   fetchPeerHost, proxyToPeer, streamToPeer (optional, for tests)
+ *   fetchPeerHost, proxyToPeer, streamToPeer, streamFromPeer (optional, for tests)
  * @returns {(req, url) => Promise<{status, body}>}  throws HttpError / BackendError.
  *   The function carries `.refreshFleet()` and `.stop()` (clears the background refresh).
  */
@@ -57,6 +60,7 @@ export function createApi({
   cli = null,
   autoNamer = null,
   uploader = null,
+  files = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -65,6 +69,7 @@ export function createApi({
   fetchPeerHost = defaultFetchPeerHost,
   proxyToPeer = defaultProxyToPeer,
   streamToPeer = defaultStreamToPeer,
+  streamFromPeer = defaultStreamFromPeer,
   peerFleetTimeoutMs = 6000,
   peerProxyTimeoutMs = 20000,
   peerUploadTimeoutMs = 15 * 60 * 1000,
@@ -273,11 +278,19 @@ export function createApi({
   }
 
   /** Serve locally when `host` is self, proxy (once, with ?local=1) when it is a peer. */
-  async function forHost({ req, url, host, local, stream = false }) {
+  async function forHost({ req, url, host, local, stream = false, streamResponse = false }) {
     const target = resolveHost(host, config);
     if (target.kind === 'unknown') throw new HttpError(`unknown host: ${host}`, 404);
     if (target.kind === 'self') return local();
     if (url.searchParams.get('local') === '1') throw new HttpError(`unknown host: ${host}`, 404); // never chain
+    if (streamResponse) {
+      // files/raw: the peer's body (any type, any size) comes back unbuffered.
+      return streamFromPeer(target.url, {
+        pathname: url.pathname,
+        search: url.search.replace(/^\?/, ''),
+        timeoutMs: peerProxyTimeoutMs,
+      });
+    }
     if (stream) {
       // Uploads: the raw body goes through unbuffered.
       const proxied = await streamToPeer(target.url, {
@@ -403,7 +416,32 @@ export function createApi({
       });
     }
 
+    const f = FILES_ROUTE.exec(url.pathname);
+    if (f) {
+      const [, rawHost, rawId, action] = f;
+      if (req.method !== (action === 'raw' ? 'GET' : 'POST')) throw new HttpError('method not allowed', 405);
+      const id = decodeURIComponent(rawId);
+      return forHost({
+        req,
+        url,
+        host: decodeURIComponent(rawHost),
+        streamResponse: action === 'raw',
+        local: () => localFiles({ action, id, url, req }),
+      });
+    }
+
     throw new HttpError('not found', 404);
+  }
+
+  async function localFiles({ action, id, url, req }) {
+    if (!files) throw new HttpError('file preview is not available on this server', 501);
+    const body = action === 'raw' ? null : await readJsonBody(req);
+    const session = await resolveLocalSession(id);
+    const cwd = typeof session.cwd === 'string' && session.cwd ? session.cwd : null;
+    if (action === 'stat') return { status: 200, body: { host: config.self, id: session.session_id, ...(await files.stat(body.paths, cwd)) } };
+    if (action === 'open') return { status: 200, body: { host: config.self, ...(await files.open(body.path, cwd)) } };
+    const download = ['1', 'true'].includes(url.searchParams.get('download') ?? '');
+    return files.raw(url.searchParams.get('path'), cwd, { download });
   }
 
   handleApi.refreshFleet = refreshFleet;

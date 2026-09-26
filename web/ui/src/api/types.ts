@@ -94,6 +94,45 @@ export interface UploadResponse {
   size: number
 }
 
+export type FileKind = 'markdown' | 'text' | 'image' | 'pdf' | 'other'
+
+/** One entry of POST …/sessions/:id/files/stat — a path mentioned in chat, resolved on the session's host. */
+export interface FileStat {
+  /** What was asked (`docs/a.md:12`). */
+  input: string
+  /** Absolute path on the host (resolved against the session cwd). */
+  path: string
+  /** Relative to the cwd when inside it, else `~/…`, else absolute. */
+  rel?: string
+  line?: number
+  col?: number
+  exists: boolean
+  /** Outside $HOME / the cwd, or a secret store: never served. */
+  forbidden?: boolean
+  isFile?: boolean
+  isDir?: boolean
+  size?: number
+  mtime?: number
+  kind?: FileKind
+}
+
+export interface FileStatResponse {
+  host: string
+  id: string
+  cwd: string | null
+  home: string
+  files: FileStat[]
+}
+
+export interface FileOpenResponse {
+  ok: true
+  host: string
+  path: string
+  /** A runnable file was revealed in its folder instead of opened. */
+  revealed: boolean
+  command: string
+}
+
 export interface AutoNameRun {
   host?: string
   ok?: boolean

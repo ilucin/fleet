@@ -3,6 +3,7 @@
 // Config: the shared fleet config ($FLEET_CONFIG or ~/.config/fleet/config.json).
 // See ARCHITECTURE.md.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,7 @@ import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
+import { createFiles } from './lib/files.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -74,6 +76,7 @@ const handleApi = createApi({
   cli,
   autoNamer,
   uploader,
+  files: createFiles({ home: os.homedir(), run }),
   grouper,
   name: NAME,
   version: VERSION,

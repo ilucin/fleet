@@ -148,3 +148,44 @@ export function streamToPeer(baseUrl, { method = 'POST', pathname, search = '', 
     req.pipe(out);
   });
 }
+
+const PASS_HEADERS = [
+  'content-type',
+  'content-length',
+  'content-disposition',
+  'content-security-policy',
+  'x-content-type-options',
+  'cache-control',
+  'last-modified',
+  'x-fleet-kind',
+];
+
+/**
+ * GET a (possibly large, binary) response from a peer and hand its body back as a stream,
+ * unbuffered: `{ status, headers, stream }` (the app pipes it to the client). The timeout
+ * covers connecting and the response head only; once the body flows it is not cut off.
+ * An unreachable peer → `{ status: 502|504, body }` like proxyToPeer.
+ */
+export function streamFromPeer(baseUrl, { pathname, search = '', timeoutMs = 20000 } = {}) {
+  const target = new URL(`${baseUrl}${pathname}?${withLocalFlag(search)}`);
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const out = (target.protocol === 'https:' ? https : http).request(target, { method: 'GET' }, (res) => {
+      const headers = {};
+      for (const h of PASS_HEADERS) if (res.headers[h] != null) headers[h] = res.headers[h];
+      done({ status: res.statusCode ?? 502, headers, stream: res });
+    });
+    const timer = setTimeout(() => {
+      out.destroy();
+      done({ status: 504, body: { error: `peer ${baseUrl} unreachable: timed out after ${timeoutMs}ms` } });
+    }, timeoutMs);
+    out.on('error', (err) => done({ status: 502, body: { error: `peer ${baseUrl} unreachable: ${describeError(err, timeoutMs)}` } }));
+    out.end();
+  });
+}

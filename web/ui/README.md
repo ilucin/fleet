@@ -47,6 +47,8 @@ src/
   lib/shortcuts.ts    desktop keyboard map: matchShortcut() (key + typing/chord context → action),
                       isTypingTarget(), stepCursor(), sessionKey(), SHORTCUT_HELP (the `?` dialog)
   lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
+  lib/paths.ts        chat file paths: isPathLike(), pathTokens(), splitPaths(), pathCandidates() (per message, cached),
+                      parsePathRef() (`:line[:col]` / `#L12`), POSIX helpers normalizePath() / dirname() / resolveFrom()
   lib/attach.ts       attachments: insertPaths() (paths at the caret, padded), formatPath() (quote on spaces),
                       uploadName() (clipboard images → pasted-<stamp>.<ext>), overLimit(), formatBytes(), dragHasFiles()
   lib/layout.ts       sidebar width bounds + clampSidebarWidth()
@@ -67,6 +69,8 @@ src/
                       useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
   hooks/useLongPress.ts  touch long-press on a row link (swallows the click that follows)
   hooks/useSwipeBack.ts  mobile session screen: swipe right → back (follows the finger, snaps back)
+  hooks/useFileLinks.ts  FileLinksContext (what <Markdown> links + what a click does), useFileStats(host, id, onOpen):
+                      per-session stat cache, debounced batched POST …/files/stat
   hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
@@ -76,7 +80,7 @@ src/
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
-  components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu (drawer) /
+  components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, SessionMenu (drawer) /
                       SessionMenuBody (also the desktop details panel), LatestButton
   components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
@@ -177,6 +181,20 @@ src/
   `uploads.maxMB` (`/api/settings`) are refused before uploading. The New session form does the
   same for the first prompt (drop on the form, paste, "Attach files"), uploading to the chosen
   host. A file dropped outside a zone never navigates the app away.
+- **File links + preview**: paths in Claude's messages — code spans, plain text tokens (with a
+  `/` or an extension; URLs, flags, Windows paths, versions and fenced code blocks are skipped)
+  and relative markdown links `[t](docs/a.md)`, with optional `:line[:col]` / `#L12` — are sent
+  to `POST …/files/stat` (debounced, ≤ 200 per call, cached per session, misses re-asked after
+  60s; a host whose server lacks the endpoint is left alone for 5 min). Only existing regular
+  files become links (dotted underline, `role="button"`, never an href). A click opens
+  `FilePreview`: a full-screen sheet on mobile, a large dialog on desktop. Header: name, path
+  (cwd-relative), host, size · age; Download (`files/raw?download=1`), "Open on <host>" (opens it
+  with that machine's default app, not in the browser), Copy path, Close (Esc). Content by kind:
+  markdown rendered with `<Markdown>` (relative links open in the preview with Back; relative
+  images load via `files/raw`; Source toggle, the default when the mention has a line), text with
+  line numbers (the line highlighted and scrolled to; first 20k lines), image, PDF (iframe),
+  else / over 5 MB an info panel with Download and Open. Markdown safety is unchanged: file
+  nodes exist only with `parseMarkdown(text, { files: true })` and render as buttons.
 - **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
   (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),
   Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),

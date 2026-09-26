@@ -2,6 +2,8 @@
 // UI's public/markdown.js. It never produces HTML: components/Markdown.tsx renders the
 // tree as React elements (text is escaped by React), and only http(s) URLs ever become
 // links. Unknown constructs fall back to plain text. Pure, unit-tested in markdown.test.ts.
+// With `{ files: true }` (chat + the file preview) a relative `[t](docs/a.md)` becomes a `file`
+// node and `![alt](img.png)` an `img` node — never an href: the renderer decides what to do.
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -9,6 +11,14 @@ export type Inline =
   | { t: 'code'; v: string }
   | { t: 'strong'; children: Inline[] }
   | { t: 'em'; children: Inline[] }
+  /** `[t](rel/path)` — a local file reference; `raw` is the source text (the fallback). */
+  | { t: 'file'; href: string; raw: string; children: Inline[] }
+  | { t: 'img'; src: string; alt: string; raw: string }
+
+export interface ParseOptions {
+  /** Emit `file` / `img` nodes for local (scheme-less) link targets. */
+  files?: boolean
+}
 
 export interface ListItem {
   content: Inline[]
@@ -59,7 +69,18 @@ export function linkify(str: string): Inline[] {
   return out
 }
 
-export function parseInline(str: string, depth = 0): Inline[] {
+/** A link target that names a local file: no scheme (`javascript:`, `mailto:`, `C:`…), not `//host`, not just `#anchor`. */
+export function isLocalHref(raw: unknown): boolean {
+  const u = String(raw ?? '').trim()
+  if (!u || u.startsWith('#') || u.startsWith('//') || u.includes('\\')) return false
+  return !/^[a-z][a-z0-9+.-]*:/i.test(u)
+}
+
+export function parseInline(str: string, depth = 0, opts: ParseOptions = {}): Inline[] {
+  return parseInlineWith(str, depth, opts)
+}
+
+function parseInlineWith(str: string, depth: number, opts: ParseOptions): Inline[] {
   const s = String(str ?? '')
   if (depth > 3) return linkify(s)
   const out: Inline[] = []
@@ -70,14 +91,20 @@ export function parseInline(str: string, depth = 0): Inline[] {
     // `_snake_case_` inside a word is not emphasis
     if (m[7] !== undefined && index > 0 && /\w/.test(s[index - 1])) continue
     let node: Inline
+    let start = index
     if (m[1] !== undefined) node = { t: 'code', v: m[1] }
-    else if (m[2] !== undefined || m[3] !== undefined) node = { t: 'strong', children: parseInline(m[2] ?? m[3], depth + 1) }
+    else if (m[2] !== undefined || m[3] !== undefined) node = { t: 'strong', children: parseInline(m[2] ?? m[3], depth + 1, opts) }
     else if (m[5] !== undefined) {
       const href = safeHref(m[5])
-      if (!href) continue // e.g. javascript: — leave the whole construct as text
-      node = { t: 'link', href, children: parseInline(m[4] || href, depth + 1) }
-    } else node = { t: 'em', children: parseInline(m[6] ?? m[7], depth + 1) }
-    if (index > last) out.push(...linkify(s.slice(last, index)))
+      if (href) node = { t: 'link', href, children: parseInline(m[4] || href, depth + 1, opts) }
+      else if (opts.files && isLocalHref(m[5])) {
+        if (index > last && s[index - 1] === '!') {
+          start = index - 1
+          node = { t: 'img', src: m[5], alt: m[4], raw: `!${m[0]}` }
+        } else node = { t: 'file', href: m[5], raw: m[0], children: parseInline(m[4] || m[5], depth + 1, opts) }
+      } else continue // e.g. javascript: — leave the whole construct as text
+    } else node = { t: 'em', children: parseInline(m[6] ?? m[7], depth + 1, opts) }
+    if (start > last) out.push(...linkify(s.slice(last, start)))
     out.push(node)
     last = index + m[0].length
   }
@@ -103,7 +130,8 @@ function splitRow(line: string): string[] {
 }
 
 /** Parse markdown into blocks. */
-export function parseMarkdown(src: string | null | undefined): Block[] {
+export function parseMarkdown(src: string | null | undefined, opts: ParseOptions = {}): Block[] {
+  const parseInline = (str: string) => parseInlineWith(str, 0, opts)
   const lines = String(src ?? '').replace(/\r\n?/g, '\n').split('\n')
   const blocks: Block[] = []
   let i = 0

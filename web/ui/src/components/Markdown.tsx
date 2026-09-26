@@ -1,10 +1,14 @@
-import { Fragment, memo, type ReactNode } from 'react'
+import { Fragment, memo, useContext, type ReactNode } from 'react'
 
+import { FileLinksContext, type FileLinkApi, type FileLinkSource } from '@/hooks/useFileLinks'
 import { linkify, parseMarkdown, type Block, type Inline } from '@/lib/markdown'
+import { splitPaths } from '@/lib/paths'
 import { cn } from '@/lib/utils'
 
 // Renders the lib/markdown.ts AST as React elements: text is always a React text child
 // (escaped), links are only the http(s) hrefs the parser let through. No innerHTML.
+// Inside a <FileLinksContext> provider, file paths the provider accepts render as buttons
+// (never hrefs) that open the in-app preview; without one, paths stay plain text.
 
 const linkClass =
   'text-primary underline decoration-primary/40 underline-offset-2 break-all active:opacity-70 [overflow-wrap:anywhere]'
@@ -17,17 +21,91 @@ function Link({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
+const codeClass = 'rounded-[5px] bg-foreground/[0.07] px-1 py-px font-mono text-[0.86em] [overflow-wrap:anywhere]'
+const fileClass =
+  'cursor-pointer underline decoration-primary/35 decoration-dotted underline-offset-[3px] hover:decoration-primary hover:decoration-solid focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring'
+
+/** A path that exists on the session's host: opens the preview (a button, not an href). */
+function FileLink({ links, raw, source, children }: { links: FileLinkApi; raw: string; source: FileLinkSource; children: ReactNode }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title={`Preview ${raw}`}
+      className={cn(fileClass, source !== 'code' && 'text-primary')}
+      onClick={(e) => {
+        e.stopPropagation()
+        links.open(raw, source)
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+        e.stopPropagation()
+        links.open(raw, source)
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function TextWithPaths({ v, links }: { v: string; links: FileLinkApi | null }) {
+  if (!links) return v
+  const parts = splitPaths(v, (raw) => links.isLink(raw, 'text'))
+  if (parts.length === 1 && parts[0].t === 'text') return v
+  return parts.map((p, i) =>
+    p.t === 'path' ? (
+      <FileLink key={i} links={links} raw={p.v} source="text">
+        {p.v}
+      </FileLink>
+    ) : (
+      <Fragment key={i}>{p.v}</Fragment>
+    ),
+  )
+}
+
 function Inlines({ nodes }: { nodes: Inline[] }) {
+  const links = useContext(FileLinksContext)
   return nodes.map((n, i) => {
     switch (n.t) {
       case 'text':
-        return <Fragment key={i}>{n.v}</Fragment>
-      case 'code':
         return (
-          <code key={i} className="rounded-[5px] bg-foreground/[0.07] px-1 py-px font-mono text-[0.86em] [overflow-wrap:anywhere]">
-            {n.v}
-          </code>
+          <Fragment key={i}>
+            <TextWithPaths v={n.v} links={links} />
+          </Fragment>
         )
+      case 'code': {
+        const code = <code className={codeClass}>{n.v}</code>
+        const raw = n.v.trim()
+        return links?.isLink(raw, 'code') ? (
+          <FileLink key={i} links={links} raw={raw} source="code">
+            {code}
+          </FileLink>
+        ) : (
+          <Fragment key={i}>{code}</Fragment>
+        )
+      }
+      case 'file':
+        return links?.isLink(n.href, 'file') ? (
+          <FileLink key={i} links={links} raw={n.href} source="file">
+            <FileLinksContext.Provider value={null}>
+              <Inlines nodes={n.children} />
+            </FileLinksContext.Provider>
+          </FileLink>
+        ) : (
+          <Fragment key={i}>{n.raw}</Fragment>
+        )
+      case 'img': {
+        const src = links?.imageSrc?.(n.src)
+        if (src) return <img key={i} src={src} alt={n.alt} loading="lazy" className="my-1 inline-block max-w-full rounded-md border border-border/60" />
+        return links?.isLink(n.src, 'file') ? (
+          <FileLink key={i} links={links} raw={n.src} source="file">
+            {n.alt || n.src}
+          </FileLink>
+        ) : (
+          <Fragment key={i}>{n.raw}</Fragment>
+        )
+      }
       case 'strong':
         return (
           <strong key={i} className="font-semibold text-foreground">
@@ -43,7 +121,13 @@ function Inlines({ nodes }: { nodes: Inline[] }) {
       case 'link':
         return (
           <Link key={i} href={n.href}>
-            <Inlines nodes={n.children} />
+            {links ? (
+              <FileLinksContext.Provider value={null}>
+                <Inlines nodes={n.children} />
+              </FileLinksContext.Provider>
+            ) : (
+              <Inlines nodes={n.children} />
+            )}
           </Link>
         )
     }
@@ -145,7 +229,8 @@ function BlockView({ b }: { b: Block }) {
 
 /** Claude's markdown, rendered safely. Memoised: a poll that returns the same text re-renders nothing. */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
-  const blocks = parseMarkdown(text)
+  const links = useContext(FileLinksContext)
+  const blocks = parseMarkdown(text, links ? { files: true } : undefined)
   return (
     <div className={cn('space-y-2 [overflow-wrap:anywhere]', className)}>
       {blocks.map((b, i) => (

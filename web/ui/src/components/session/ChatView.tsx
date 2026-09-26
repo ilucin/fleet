@@ -5,10 +5,12 @@ import type { Message } from '@/api/types'
 import { LatestButton } from '@/components/session/LatestButton'
 import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
+import { FileLinksContext, type FileStats } from '@/hooks/useFileLinks'
 import { useFollowScroll } from '@/hooks/useFollowScroll'
 import { useNow } from '@/hooks/useNow'
 import { clockTime } from '@/lib/format'
 import { msgKind, sameGroup, visibleMessages } from '@/lib/chat'
+import { pathCandidates } from '@/lib/paths'
 import { cn } from '@/lib/utils'
 
 export interface ChatViewProps {
@@ -30,6 +32,8 @@ export interface ChatViewProps {
   jumpSignal: number
   /** Desktop pane: a wider (still readable) column. */
   wide?: boolean
+  /** Link file paths in Claude's messages that exist on the session's host (click → preview). */
+  fileLinks?: FileStats
 }
 
 const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: string }) {
@@ -127,6 +131,15 @@ export function ChatView(p: ChatViewProps) {
     if (p.jumpSignal) jump()
   }, [p.jumpSignal, jump])
 
+  // Ask the host which of the paths Claude mentioned exist (batched, cached per session).
+  const requestStats = p.fileLinks?.request
+  useEffect(() => {
+    if (!requestStats || !p.messages) return
+    const candidates: string[] = []
+    for (const m of p.messages) if (msgKind(m) === 'assistant' && typeof m.text === 'string') candidates.push(...pathCandidates(m.text))
+    if (candidates.length) requestStats(candidates)
+  }, [p.messages, requestStats])
+
   let body
   if (p.messages === null) {
     body = p.gone ? (
@@ -172,7 +185,7 @@ export function ChatView(p: ChatViewProps) {
               </Button>
             </div>
           ) : null}
-          {body}
+          {p.fileLinks ? <FileLinksContext.Provider value={p.fileLinks.api}>{body}</FileLinksContext.Provider> : body}
           {p.messages ? <Typing status={p.status} waitingFor={p.waitingFor} /> : null}
         </div>
       </div>

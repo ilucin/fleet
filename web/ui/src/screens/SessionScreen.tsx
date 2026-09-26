@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { toast } from 'sonner'
 
 import { ApiError, api, isAbortError, isSessionGone, sessionErrorMessage } from '@/api/client'
-import type { Message, SessionKey } from '@/api/types'
+import type { FileStat, Message, SessionKey } from '@/api/types'
 import { ContextMeter } from '@/components/ContextMeter'
 import { DropOverlay } from '@/components/DropOverlay'
 import { EditableTitle } from '@/components/EditableTitle'
@@ -12,11 +12,13 @@ import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { ChatView } from '@/components/session/ChatView'
 import { Composer } from '@/components/session/Composer'
+import { FilePreview } from '@/components/session/FilePreview'
 import { SessionMenu, SessionMenuBody, type SessionMenuProps } from '@/components/session/SessionMenu'
 import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useFileDrop } from '@/hooks/useAttach'
+import { useFileStats } from '@/hooks/useFileLinks'
 import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
@@ -112,6 +114,12 @@ export function SessionScreen({
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [jumpSignal, setJumpSignal] = useState(0)
+  // Paths in Claude's messages that exist on the host → links → this preview.
+  const sessionKey = `${host}/${id}`
+  const [previewOf, setPreviewOf] = useState<{ key: string; file: FileStat } | null>(null)
+  const preview = previewOf?.key === sessionKey ? previewOf.file : null
+  const openPreview = useCallback((file: FileStat) => setPreviewOf({ key: sessionKey, file }), [sessionKey])
+  const fileLinks = useFileStats(host, id, openPreview)
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -472,6 +480,7 @@ export function SessionScreen({
             onLoadOlder={loadOlder}
             jumpSignal={jumpSignal}
             wide={pane}
+            fileLinks={fileLinks}
           />
         ) : (
           <TermView text={peek?.text ?? null} failed={!!peekErr} fontSize={termFont} jumpSignal={jumpSignal} />
@@ -498,6 +507,7 @@ export function SessionScreen({
         attachRef={attachRef}
       />
       <DropOverlay show={drop.dragging} hint={`Uploaded to ${host}; the path goes into the message`} />
+      <FilePreview host={host} id={id} file={preview} onClose={() => setPreviewOf(null)} desktop={pane} />
     </>
   )
 

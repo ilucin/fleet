@@ -81,7 +81,9 @@ Every machine runs the same `server.mjs`. It:
 Requests for another host are proxied once to that peer with `?local=1`, and requests carrying
 `?local=1` are never proxied again, so there are no loops. Either machine's URL shows everything.
 
-The server has no auth; it relies on the network (tailnet) for access control.
+The server has no auth; it relies on the network (tailnet) for access control. The files
+endpoints (chat file links → preview) therefore only serve paths that, after `realpath`, are
+inside that host's `$HOME` or the session's cwd, and never secret stores like `~/.ssh` or `.env`.
 
 ## Config
 
@@ -273,6 +275,9 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/groups/run` | `{}` → run the grouping pass now (on the grouping host) → the same shape; 501 when grouping is off |
 | POST | `/api/hosts/:host/uploads?name=<file>` | raw file body → stored under that host's `web.uploads.dir` → `{ host, path, name, size }` (absolute `path`; 413 over `web.uploads.maxMB`); streamed through to a peer |
 | POST | `/api/hosts/:host/autoname` | `{}` → run the naming pass on that host now → `{ renamed: [{ from, to }], tmux, held, errors }` |
+| POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths }` (≤ 200, as written in chat, `:line` allowed) → per path: resolved absolute path, `exists`, `isFile`, size, mtime, `kind` (markdown/text/image/pdf/other); the UI links only existing files |
+| GET | `/api/hosts/:host/sessions/:id/files/raw?path=…[&download=1]` | the file itself, streamed (also through a peer); text/markdown over 5 MB only as a download |
+| POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` → opens it with its default app **on that host** (`open` / `xdg-open`; runnable files are revealed in their folder instead) |
 
 `:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars). The
 full contract (status codes, limits, timeouts) lives with the server: [web/README.md](../web/README.md),

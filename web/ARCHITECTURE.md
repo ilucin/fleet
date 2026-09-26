@@ -37,7 +37,8 @@ lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sy
 lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
 lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fleet
 lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
-lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads are streamed through unbuffered)
+lib/files.mjs         files mentioned in chat: resolve against the session cwd, $HOME/cwd sandbox, stat/kind, raw stream, open
+lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
 lib/http.mjs, util.mjs, run.mjs   helpers (body limit, static path safety, execFile wrapper)
@@ -144,6 +145,9 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
 | POST | `/api/hosts/:host/uploads` | `?name=<file name>`, the raw file as the body (any `content-type`) | `{ host, path, name, size }` — `path` is absolute on `:host`. 413 over `web.uploads.maxMB` (no partial file is left) |
 | POST | `/api/hosts/:host/autoname` | `{}` | `{ host, ok, at, ms, reason, dryRun, renamed: [{ from, to }], tmux: ["a → b"], held: [..], errors: [..], error? }` (502 when the pass failed) |
+| POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths: [string] }` (≤ 200) | `{ host, id, cwd, home, files: [FileStat] }` — 400 not an array / too many |
+| GET | `/api/hosts/:host/sessions/:id/files/raw` | `?path=<as in chat or absolute>`, `&download=1` | the file's bytes (streamed; see Files). 400 no path / a directory, 403 outside the sandbox, 404 missing, 413 text over 5 MB inline |
+| POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` | `{ ok, host, path, revealed, command }` — 403/404 as raw, 501 no `open`/`xdg-open` on the host, 502 the opener failed |
 
 **Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
 Each host advertises its own `spawnDirs` (absolute paths on that host).
@@ -177,6 +181,28 @@ closed itself counts as done); a pane that was already gone is `"tmux-pane-gone"
 `skipped`. It lives here (lib/kill.mjs, next to the backends) rather than in the CLI: everything
 it needs is already in the `list --json` row. The UI exposes it in the ⋯ menu as a two-tap
 "Close… → Confirm close" button that returns to the list.
+
+**files** (chat file links → the UI's preview). A path is what the agent wrote: relative (to the
+session's cwd), `~/…` or absolute, optionally with `:line`, `:line:col` or `#L12` (split off and
+echoed as `line`/`col`). It must resolve — lexically and again after `realpath`, so no `..` or
+symlink escapes — inside this host's `$HOME` or the session cwd; anything else is 403 (stat:
+`exists: false, forbidden: true`, nothing else revealed). Never served even inside `$HOME`:
+`.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`, `.password-store`, `.config/gh`, `Library/Keychains`,
+and files named `.env`, `.env.*`, `.envrc`, `.netrc`, `.pgpass`. A symlinked dir pointing out of
+`$HOME` (e.g. to another volume) is refused too.
+**FileStat** = `{ input, path (absolute), rel (cwd-relative, else ~/…), line?, col?, exists, forbidden?, isFile?, isDir?, size?, mtime?, kind? }`;
+`kind` by extension (markdown `.md`/`.markdown`/`.mdx`…, image png/jpg/gif/webp/avif/bmp/ico/svg,
+pdf, known binaries → other), else a sniff of the first 4 KB (no NUL, valid UTF-8 → text). Stat
+results are cached 5 s per (cwd, path). **raw** sets `content-type` by kind — every text kind,
+markdown and HTML included, as `text/plain; charset=utf-8` — plus `content-disposition`
+(inline / attachment with `download=1`), `x-content-type-options: nosniff`, `x-fleet-kind`,
+`cache-control: no-store` and (except PDFs, which Chrome won't show under it)
+`content-security-policy: sandbox`, so an SVG opened straight in a tab runs no script on this
+origin. No Range support. For a peer the body is piped through (`lib/peers.mjs#streamFromPeer`;
+the 20s timeout covers the response head only). **open** runs `open <path>` (macOS) or
+`xdg-open <path>` via execFile (argv, never a shell); a file with an executable bit or a
+runnable extension (`.app`, `.command`, `.sh`, `.py`, `.pkg`, `.webloc`, …) is revealed instead
+(`open -R` / `xdg-open <dir>`, `revealed: true`).
 
 **Statuses**: 400 bad input, 404 unknown host/session/route (also a `?local=1` request for a
 non-self host), 405 wrong method, 409 existing tmux session or uncontrollable backend,

@@ -2,6 +2,8 @@
 // in dev, Vite proxies /api to a running server (see vite.config.ts).
 import type {
   AutoNameRun,
+  FileOpenResponse,
+  FileStatResponse,
   FleetResponse,
   GroupsResponse,
   Health,
@@ -102,8 +104,35 @@ export const api = {
   upload: (host: string, file: Blob, name: string, o: Opts = {}) =>
     request<UploadResponse>(`${hostPath(host)}/uploads?name=${enc(name)}`, { ...o, method: 'POST', file }),
 
+  /** Which of these paths (as written in chat, relative to the session cwd) exist on the session's host. */
+  fileStat: (host: string, id: string, paths: string[], o: Opts = {}) =>
+    request<FileStatResponse>(sessionPath(host, id, 'files/stat'), { ...o, method: 'POST', body: { paths } }),
+  /** Open the file with its default app — on `host`, not in this browser. */
+  fileOpen: (host: string, id: string, path: string, o: Opts = {}) =>
+    request<FileOpenResponse>(sessionPath(host, id, 'files/open'), { ...o, method: 'POST', body: { path } }),
+  /** The file's text (preview); 413 when it is too large. */
+  fileText: async (host: string, id: string, path: string, o: Opts = {}) => {
+    let res: Response
+    try {
+      res = await fetch(fileRawUrl(host, id, path), { signal: o.signal })
+    } catch (err) {
+      if (isAbortError(err)) throw err
+      throw new ApiError('network unreachable', 0)
+    }
+    if (!res.ok) {
+      const msg = await res.json().then((d: { error?: string }) => d?.error, () => null)
+      throw new ApiError(msg || `HTTP ${res.status}`, res.status)
+    }
+    return res.text()
+  },
+
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),
+}
+
+/** GET …/files/raw — for <img>, <iframe>, fetch and download links. */
+export function fileRawUrl(host: string, id: string, path: string, { download = false } = {}): string {
+  return `${sessionPath(host, id, 'files/raw')}?path=${enc(path)}${download ? '&download=1' : ''}`
 }
 
 /** A short, human message for a failed session request (peek/messages/send…). */
