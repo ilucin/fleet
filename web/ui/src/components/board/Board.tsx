@@ -183,7 +183,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
         </div>
       ) : null}
 
-      <div ref={boardRef} data-session-list className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-contain p-3">
+      <div ref={boardRef} data-session-list className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-x-contain p-3">
         {!fleet ? (
           [0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-72 shrink-0 rounded-xl" />)
         ) : columns.length === 0 ? (
@@ -209,7 +209,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
                 </div>
                 {c.description ? <p className="mt-0.5 line-clamp-2 text-[11px] text-dimmer">{c.description}</p> : null}
               </header>
-              <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto overscroll-contain px-2 pb-2">
+              <div className="flex min-h-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2">
                 {c.sessions.map((s) => {
                   const key = sessionKey(s)
                   return (
