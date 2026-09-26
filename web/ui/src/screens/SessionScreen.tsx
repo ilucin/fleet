@@ -22,6 +22,7 @@ import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
 import { useSettings } from '@/hooks/useSettings'
+import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
 import {
   CHAT_FONT_SIZES,
@@ -300,6 +301,9 @@ export function SessionScreen({
     if (window.history.length > 1) window.history.back()
     else navigate('/', { replace: true })
   }
+  // Mobile: swipe right anywhere on the screen = Back (the installed PWA has no native back swipe).
+  const screenRef = useRef<HTMLDivElement>(null)
+  useSwipeBack(screenRef, back, !pane && !menuOpen)
 
   const fontSizes = mode === 'chat' ? CHAT_FONT_SIZES : TERM_FONT_SIZES
   const fontSize = mode === 'chat' ? chatFont : termFont
@@ -513,7 +517,7 @@ export function SessionScreen({
   }
 
   return (
-    <div className="fixed-app flex flex-col overflow-hidden bg-background" {...drop.bind}>
+    <div ref={screenRef} className="fixed-app flex flex-col overflow-hidden bg-background" {...drop.bind}>
       {column}
       <SessionMenu {...menuProps} />
     </div>

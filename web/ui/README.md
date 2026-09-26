@@ -50,6 +50,8 @@ src/
   lib/attach.ts       attachments: insertPaths() (paths at the caret, padded), formatPath() (quote on spaces),
                       uploadName() (clipboard images → pasted-<stamp>.<ext>), overLimit(), formatBytes(), dragHasFiles()
   lib/layout.ts       sidebar width bounds + clampSidebarWidth()
+  lib/gestures.ts     touch gestures: swipeIntent() (composer chips), pullIntent() (list filter drawer),
+                      swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/storage.ts      localStorage that never throws
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
@@ -64,6 +66,7 @@ src/
   hooks/useTitles.ts  inline-rename store: startEditing/openTitleEditor/stopEditing, useEditing(scope, key),
                       useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
   hooks/useLongPress.ts  touch long-press on a row link (swallows the click that follows)
+  hooks/useSwipeBack.ts  mobile session screen: swipe right → back (follows the finger, snaps back)
   hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
@@ -112,7 +115,11 @@ src/
 ## Features
 
 - **List** (`#/`): all sessions across hosts, status + host filter chips, search, unreachable-host
-  banners, `+` → New session.
+  banners, `+` → New session. Mobile: the filter chips (and the Board's regroup line) sit in a
+  drawer under the search field, closed by default — swipe down on the header (not in the
+  field) or tap the handle to open, swipe up / tap to close; the list itself scrolls as usual.
+  While closed, active filters show on the handle ("Needs you · workstation") with ✕ to clear.
+  The List | Board toggle stays next to the search field.
 - **Inline rename** (`EditableTitle`): rows, board cards and the session header show the one
   title; the tmux session name is not on rows any more (it follows the title — details panel only).
   Open the editor with the pencil on row hover (desktop), `e` / F2 (the open session's header,
@@ -140,6 +147,11 @@ src/
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
   - header: back, title (click to rename), status, host, "updated Xs ago", Chat | Term toggle, ⋯;
+  - **swipe right** anywhere = back (also in the installed PWA, which has no native back swipe):
+    the screen follows the finger and snaps back unless the swipe is ≥ 70px, mostly horizontal
+    and long (≥ 120px) or quick. Left alone: the textarea / inputs, open sheets, a text
+    selection, anything that can still scroll left (wide terminal lines, chip rows, code blocks),
+    and — in a browser tab — the 20px left edge (the browser's own back swipe);
   - **Chat** polls `messages` every 3s (60 → 200 → 500 with "Load older", which keeps the same
     message under the thumb); bubbles for user / Claude, quiet progress notes (hideable), centred
     command / system lines, time captions per burst, "Claude is working…" / "Needs you" footer;

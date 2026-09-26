@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type TouchEvent } from 'react'
 import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
@@ -19,7 +19,8 @@ import { useGroups, useViewMode } from '@/hooks/useGroups'
 import { useNow } from '@/hooks/useNow'
 import { ALL_HOSTS, useSessionList } from '@/hooks/useSessionList'
 import { boardColumns, effectiveGroups } from '@/lib/groups'
-import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
+import { pullIntent } from '@/lib/gestures'
+import { STATUS_FILTERS, allSessions, findStatusFilter, type StatusFilterId } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
 
 const chipClass = cn(
@@ -40,10 +41,33 @@ export function ListScreen() {
     () => (board ? boardColumns(view.sessions, effectiveGroups(groups.groups, allSessions(fleet)).groups) : []),
     [board, view.sessions, groups.groups, fleet],
   )
+  // The filter rows live in a drawer under the search field, closed by default: swipe down on
+  // the header (or tap the handle) opens it, swipe up closes it. Active filters show on the handle.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filterSummary = [status !== 'all' ? findStatusFilter(status).label : null, host].filter(Boolean).join(' · ')
+  const clearFilters = () => {
+    setStatus('all')
+    setHostFilter(ALL_HOSTS)
+  }
+  const touch = useRef<{ x: number; y: number } | null>(null)
+  const onTouchStart = (e: TouchEvent) => {
+    // The search field keeps its own gestures (caret, selection).
+    touch.current = e.target instanceof HTMLInputElement ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }
+  const onTouchEnd = (e: TouchEvent, onHandle: boolean) => {
+    const t = touch.current
+    touch.current = null
+    if (!t) return
+    const intent = pullIntent(e.changedTouches[0].clientX - t.x, e.changedTouches[0].clientY - t.y)
+    if (intent === 'open') setFiltersOpen(true)
+    else if (intent === 'close') setFiltersOpen(false)
+    else if (intent === 'tap' && onHandle) setFiltersOpen((o) => !o)
+  }
 
   return (
     <div className="flex min-h-app flex-col">
       <ScreenHeader>
+        <div onTouchStart={onTouchStart} onTouchEnd={(e) => onTouchEnd(e, false)}>
         <div className="flex min-h-8 items-center gap-2.5">
           <h1 className="text-xl font-bold tracking-tight">Fleet</h1>
           {fleet ? (
@@ -111,6 +135,11 @@ export function ListScreen() {
           <ViewToggle value={mode} onChange={setMode} size="lg" />
         </div>
 
+        <div
+          className={cn('grid transition-[grid-template-rows] duration-200 ease-out', filtersOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}
+          inert={!filtersOpen}
+        >
+        <div className="min-h-0 overflow-hidden">
         <ToggleGroup
           type="single"
           value={status}
@@ -150,6 +179,46 @@ export function ListScreen() {
         ) : null}
 
         {board ? <GroupsStatus state={groups} now={now} size="lg" className="mt-1 -mb-1 justify-between" /> : null}
+        </div>
+        </div>
+
+        <div className="relative -mb-1.5 flex min-h-6 items-center justify-center">
+          <button
+            type="button"
+            aria-label={filtersOpen ? 'Hide filters' : 'Show filters'}
+            aria-expanded={filtersOpen}
+            className="flex h-6 min-w-0 flex-1 touch-none items-center justify-center gap-2 outline-none"
+            onTouchStart={(e) => {
+              e.stopPropagation()
+              touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation()
+              e.preventDefault() // no synthetic click after a touch — the touch already decided
+              onTouchEnd(e, true)
+            }}
+            onClick={() => setFiltersOpen((o) => !o)}
+          >
+            <span className={cn('h-1 w-9 shrink-0 rounded-full transition-colors', filtersOpen ? 'bg-muted-foreground/60' : 'bg-muted-foreground/30')} />
+            {filterSummary && !filtersOpen ? (
+              <span className="min-w-0 truncate text-xs font-medium text-primary">
+                {filterSummary}
+              </span>
+            ) : null}
+          </button>
+          {filterSummary && !filtersOpen ? (
+            <button
+              type="button"
+              aria-label="Clear filters"
+              title="Clear filters"
+              onClick={clearFilters}
+              className="relative -mr-1 grid size-6 shrink-0 place-items-center rounded-full text-dimmer after:absolute after:-inset-2.5 active:text-foreground"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+        </div>
       </ScreenHeader>
 
       <main className="flex-1 pb-safe px-safe">
