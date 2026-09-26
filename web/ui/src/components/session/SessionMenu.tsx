@@ -74,7 +74,25 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+/** ⋯ on mobile: the session menu as a bottom drawer. */
 export function SessionMenu(p: SessionMenuProps) {
+  // Closing the drawer unmounts the body, which disarms "Close session".
+  return (
+    <Drawer open={p.open} onOpenChange={p.onOpenChange}>
+      <DrawerContent className="px-safe">
+        <SessionMenuBody {...p} variant="drawer" />
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+/**
+ * The menu's content: header (name, host · cwd, context), View, Session (auto-name,
+ * details, close). `drawer` = inside the mobile drawer; `panel` = the desktop details
+ * column (always open, click-to-confirm wording, no drawer chrome).
+ */
+export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'panel' }) {
+  const panel = p.variant === 'panel'
   const { theme, setTheme } = useTheme()
   const [lastRun, setLastRun] = useState<AutoNameRun | null>(() => lastRuns.get(p.host) ?? null)
   const [autoName, setAutoName] = useState<{ enabled: boolean; intervalMinutes: number } | null>(null)
@@ -157,22 +175,30 @@ export function SessionMenu(p: SessionMenuProps) {
         : 'scheduled runs off'
       : `on ${p.host}`
 
+  const Header = panel ? 'div' : DrawerHeader
+  const Title = panel ? 'h2' : DrawerTitle
+  const Description = panel ? 'p' : DrawerDescription
+
   return (
-    <Drawer open={p.open} onOpenChange={onOpenChange}>
-      <DrawerContent className="px-safe">
-        <div className="no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <DrawerHeader className="px-0 pt-3 pb-1 text-left">
-            <DrawerTitle className="truncate text-left text-base font-semibold">{s?.name || p.id.slice(0, 8)}</DrawerTitle>
-            <DrawerDescription className="truncate text-left font-mono text-xs">
+        <div
+          className={
+            panel
+              ? 'no-scrollbar h-full w-full overflow-y-auto px-4 pb-4'
+              : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]'
+          }
+        >
+          <Header className={panel ? 'flex flex-col gap-0.5 pt-3 pb-1 text-left' : 'px-0 pt-3 pb-1 text-left'}>
+            <Title className="truncate text-left text-base font-semibold">{s?.name || p.id.slice(0, 8)}</Title>
+            <Description className={cn('truncate text-left font-mono text-xs', panel && 'text-muted-foreground')} title={panel ? (s?.cwd ?? undefined) : undefined}>
               {[p.host, s?.cwd ? shortCwd(s.cwd, 60) : null].filter(Boolean).join(' · ')}
-            </DrawerDescription>
+            </Description>
             {s?.context ? (
               <p className={cn('truncate text-left text-xs tabular-nums', CTX_TEXT[ctxLevel(s.context.pct)])}>
                 Context {ctxSummary(s.context)}
                 {s.context.model ? <span className="text-dimmer"> · {s.context.model}</span> : null}
               </p>
             ) : null}
-          </DrawerHeader>
+          </Header>
 
           <Section title="View">
             <div className="py-2">
@@ -290,7 +316,7 @@ export function SessionMenu(p: SessionMenuProps) {
                 onClick={closeSession}
               >
                 {closing ? <Loader2Icon className="animate-spin" /> : <PowerIcon />}
-                {closing ? 'Closing…' : armed ? 'Tap again to close' : 'Close session…'}
+                {closing ? 'Closing…' : armed ? (panel ? 'Click again to close' : 'Tap again to close') : 'Close session…'}
               </Button>
               <p className="pt-1.5 text-center text-xs text-dimmer">
                 Ends Claude and its {s?.backend === 'iterm' ? 'iTerm tab' : 'tmux window'}.
@@ -298,7 +324,5 @@ export function SessionMenu(p: SessionMenuProps) {
             </div>
           </Section>
         </div>
-      </DrawerContent>
-    </Drawer>
   )
 }

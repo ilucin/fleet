@@ -1,6 +1,6 @@
 # fleet web UI (React)
 
-The mobile-first PWA for the fleet web server, built with Vite + React 19 + TypeScript +
+The mobile-first PWA (with a keyboard-first desktop layout from 1024px up) for the fleet web server, built with Vite + React 19 + TypeScript +
 Tailwind CSS v4 + [shadcn/ui](https://ui.shadcn.com) (radix, "nova" style) + lucide-react.
 It talks only to the server's HTTP API ([../ARCHITECTURE.md](../ARCHITECTURE.md) → "HTTP API").
 
@@ -39,6 +39,10 @@ src/
   lib/markdown.ts     safe markdown → AST (port of ../public/markdown.js), linkify()
   lib/autoname.ts     naming-pass summaries for toasts / the menu
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
+  lib/shortcuts.ts    desktop keyboard map: matchShortcut() (key + typing/chord context → action),
+                      isTypingTarget(), stepCursor(), sessionKey(), SHORTCUT_HELP (the `?` dialog)
+  lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
+  lib/layout.ts       sidebar width bounds + clampSidebarWidth()
   lib/storage.ts      localStorage that never throws
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
@@ -46,14 +50,19 @@ src/
                       refresh() (runs even while hidden)
   hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term
   hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`, shared with the classic UI)
+  hooks/useSessionList.ts  list state shared by the mobile list and the desktop sidebar (search, filters, counts)
+  hooks/useMediaQuery.ts   useMediaQuery(), useIsDesktop() (≥ 1024px), WIDE_QUERY (≥ 1440px)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, SessionListSkeleton, ScreenHeader,
                       Markdown/Linkified, NewSessionDrawer
-  components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu, LatestButton
-  screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`)
-  App.tsx             providers + wouter hash router
+  components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu (drawer) /
+                      SessionMenuBody (also the desktop details panel), LatestButton
+  components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
+  screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
+                      DesktopShell (≥ lg master–detail + the keyboard handler)
+  App.tsx             providers + wouter hash router; picks DesktopShell or the mobile screens
 ```
 
 ## Conventions
@@ -71,6 +80,10 @@ src/
 - **Mobile**: ≥ 44px tap targets, inputs ≥ 16px (no iOS zoom), `pt-safe`/`pb-safe`/`px-safe` on an
   outer wrapper (they set padding, so put spacing on an inner element), `min-h-app`/`h-app` for
   full-height screens.
+- **Desktop vs mobile**: `App` renders `DesktopShell` at ≥ 1024px (`useIsDesktop()`), else the
+  mobile `Switch` — two trees, not responsive classes, so the mobile layout cannot drift. Shared
+  components take opt-in props (`layout="pane"`, `wide`, `desktop`, `selected`/`cursor`) whose
+  defaults keep the mobile markup byte-identical; keep it that way (check a 390px iframe).
 - **Storage keys** are `fleet.*`; reuse the classic UI's keys where the meaning is the same
   (`fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`).
 - **Text from sessions is data**: render it as text (React escapes); never `dangerouslySetInnerHTML`.
@@ -110,3 +123,49 @@ src/
   `index.html` sets theme-color (kept in sync with the theme), apple-mobile-web-app meta,
   `viewport-fit=cover` and `interactive-widget=resizes-content`. No service worker (the app is
   useless offline; the server revalidates every file).
+
+## Desktop (≥ 1024px)
+
+Master–detail on the same hash routes as mobile (`#/` = nothing open, `#/s/<host>/<id>` = that
+session in the pane), so a link opens the same session on either layout.
+
+- **Sidebar** (left): Fleet summary, "updated Xs ago", `+`, search (`/`), compact status + host
+  filter chips, the session list (the open row is highlighted, the keyboard cursor has a ring),
+  footer buttons for the palette and the shortcuts. Resizable by dragging its edge (280–560px,
+  double-click resets, ←/→ on the focused handle; `fleet.sidebarWidth`), collapsible to a rail
+  with `[` / ⌘B (`fleet.sidebar`).
+- **Pane**: the session screen without the back button; header adds the cwd; chat is a wider
+  (max-w-4xl) readable column, the terminal uses the full width; the composer sends on Enter (also
+  ⌘/Ctrl+Enter, touch-capable laptops included), Shift+Enter is a newline. Nothing open → an empty
+  state with key hints and the sessions that need you.
+- **Details panel** (right, `i` or the header button; `fleet.inspector`, open by default from
+  1440px): name, host · cwd, context meter + model, view settings (chat/terminal, notes,
+  scrollback, text size, theme), auto-name, tmux/backend/pid/id, Close session (click twice) —
+  the mobile ⋯ menu's content (`SessionMenuBody`).
+- **New session**: the mobile form in a dialog. Toasts sit bottom-right, above the composer.
+- **Polling** is unchanged: one `/api/fleet` loop (FleetProvider, 5s) feeds the sidebar and the
+  pane's status; the pane runs exactly one messages (3s) or peek (2s) loop. The tab title is
+  `(<needs you>) <session> · Fleet`.
+
+### Shortcuts
+
+Single keys never fire while typing in a field (input, textarea, contenteditable); with a dialog
+open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through `matchShortcut()`.
+
+| Keys | Action |
+| --- | --- |
+| `j` / `↓`, `k` / `↑` | move the list cursor (arrows only when focus is not in the chat/terminal) |
+| `g g`, `G` | cursor to first / last |
+| `Enter` | open the cursor's session and focus the composer |
+| `o` | open the cursor's session |
+| `r` | focus the composer |
+| `/` | search (in the field: ↑/↓ move, Enter opens, Esc clears then leaves) |
+| `c`, `n` | new session |
+| `g c`, `g t` | chat / terminal view |
+| `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
+| `Esc` | leave the field; otherwise close the pane (`#/`) |
+| `[`, ⌘/Ctrl+`B` | toggle the sidebar |
+| `i` | toggle the details panel |
+| `g r` | refresh now |
+| ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions, filters, theme |
+| `?` | shortcuts help |

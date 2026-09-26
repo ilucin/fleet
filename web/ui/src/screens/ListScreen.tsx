@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
@@ -12,14 +12,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
-import { usePersistentState } from '@/hooks/usePersistentState'
-import { relTime } from '@/lib/format'
-import { STATUS_FILTERS, allSessions, findStatusFilter, listView, type StatusFilterId } from '@/lib/sessions'
+import { ALL_HOSTS, useSessionList } from '@/hooks/useSessionList'
+import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
-
-const ALL_HOSTS = '*'
 
 const chipClass = cn(
   'h-9 shrink-0 gap-1.5 rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground',
@@ -27,35 +23,11 @@ const chipClass = cn(
 )
 
 export function ListScreen() {
-  const { fleet, fleetAt, error, refreshing } = useFleet()
   const now = useNow(1000)
-  const [query, setQuery] = useState('')
-  // `fleet.filter` is shared with the classic UI (same ids).
-  const [status, setStatus] = usePersistentState<StatusFilterId>('fleet.filter', 'all', (raw) => findStatusFilter(raw).id)
-  const [hostFilter, setHostFilter] = usePersistentState<string>('fleet.hostFilter', ALL_HOSTS)
+  const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view, hostCounts, summary, unreachable, note } =
+    useSessionList(now)
   const [newOpen, setNewOpen] = useState(false)
   const [, navigate] = useLocation()
-
-  const hosts = fleet?.hosts ?? []
-  const hostNames = hosts.map((h) => h.name)
-  // A remembered host that is no longer configured means "all".
-  const host = hostFilter !== ALL_HOSTS && hostNames.includes(hostFilter) ? hostFilter : null
-
-  const view = useMemo(() => listView(fleet, { query, host, status }), [fleet, query, host, status])
-  const hostCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const s of allSessions(fleet)) counts.set(s.host, (counts.get(s.host) ?? 0) + 1)
-    return counts
-  }, [fleet])
-  const summary = useMemo(() => listView(fleet, { status: 'all' }).counts, [fleet])
-
-  const unreachable = hosts.filter((h) => h.ok === false && (host == null || h.name === host))
-
-  let note: { text: string; error?: boolean }
-  if (!fleet && refreshing) note = { text: 'loading…' }
-  else if (error) note = { text: 'offline — retrying', error: true }
-  else if (refreshing) note = { text: 'refreshing…' }
-  else note = { text: fleetAt ? `updated ${relTime(fleetAt, now)} ago` : '' }
 
   return (
     <div className="flex min-h-app flex-col">

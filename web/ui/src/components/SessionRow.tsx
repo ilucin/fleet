@@ -11,8 +11,17 @@ import { cn } from '@/lib/utils'
 
 const chip = 'inline-flex h-4.5 shrink-0 items-center rounded-[5px] border px-1 text-[11px] whitespace-nowrap'
 
+export interface SessionRowProps {
+  session: Session
+  now: number
+  /** Desktop sidebar: this row is the session open in the detail pane. */
+  selected?: boolean
+  /** Desktop sidebar: the keyboard cursor (j/k) is on this row. */
+  cursor?: boolean
+}
+
 /** One session in the list: status, name, host, status label / waiting_for, subtitle, cwd, tmux, backend, context, age. */
-export function SessionRow({ session: s, now }: { session: Session; now: number }) {
+export function SessionRow({ session: s, now, selected, cursor }: SessionRowProps) {
   const meta = statusMeta(s.status)
   const subtitle = sessionSubtitle(s)
   const cwd = shortCwd(s.cwd)
@@ -22,10 +31,14 @@ export function SessionRow({ session: s, now }: { session: Session; now: number 
   return (
     <Link
       href={sessionHref(s)}
+      aria-current={selected ? 'page' : undefined}
+      data-session-key={selected || cursor ? `${s.host}/${s.session_id}` : undefined}
       className={cn(
         'block min-h-16 rounded-xl border bg-card px-3.5 py-3 text-card-foreground transition-colors',
         'outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-muted',
         waiting ? 'border-status-waiting/35' : 'border-border/70',
+        selected && 'border-primary/60 bg-accent/60 hover:bg-accent/70',
+        cursor && 'border-primary/40 ring-2 ring-primary/40',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">

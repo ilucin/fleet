@@ -28,6 +28,8 @@ export interface ChatViewProps {
   onLoadOlder: () => void
   /** Bumped by the parent to jump to the bottom (after a send). */
   jumpSignal: number
+  /** Desktop pane: a wider (still readable) column. */
+  wide?: boolean
 }
 
 const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: string }) {
@@ -161,7 +163,7 @@ export function ChatView(p: ChatViewProps) {
         className="absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain px-safe outline-none [overflow-anchor:none]"
         style={{ fontSize: p.fontSize, lineHeight: 1.5 }}
       >
-        <div className="mx-auto w-full max-w-3xl px-3 pt-3 pb-4">
+        <div className={p.wide ? 'mx-auto w-full max-w-4xl px-4 pt-3 pb-4' : 'mx-auto w-full max-w-3xl px-3 pt-3 pb-4'}>
           {p.canLoadOlder || p.loadingOlder ? (
             <div className="flex justify-center pb-3">
               <Button variant="outline" size="sm" className="h-8 rounded-full px-3.5" disabled={p.loadingOlder} onClick={p.onLoadOlder}>

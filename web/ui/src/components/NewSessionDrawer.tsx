@@ -7,6 +7,7 @@ import { watchForSpawned } from '@/api/spawnWatch'
 import { HostDot } from '@/components/HostBadge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,7 +44,30 @@ export function NewSessionDrawer({ open, onOpenChange, onOpenSession }: NewSessi
   )
 }
 
-function NewSessionForm({ onDone, onOpenSession }: { onDone: () => void; onOpenSession: (href: string) => void }) {
+/** Desktop: the same form in a centred dialog (`c` / `n`, the sidebar's `+`, the palette). */
+export function NewSessionDialog({ open, onOpenChange, onOpenSession }: NewSessionDrawerProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100dvh-4rem)] overflow-hidden p-0 sm:max-w-lg">
+        {open ? <NewSessionForm variant="dialog" onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} /> : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function NewSessionForm({
+  onDone,
+  onOpenSession,
+  variant = 'drawer',
+}: {
+  onDone: () => void
+  onOpenSession: (href: string) => void
+  variant?: 'drawer' | 'dialog'
+}) {
+  const dialog = variant === 'dialog'
+  const Header = dialog ? DialogHeader : DrawerHeader
+  const Title = dialog ? DialogTitle : DrawerTitle
+  const Description = dialog ? DialogDescription : DrawerDescription
   const { fleet, applyFleet } = useFleet()
   const hosts = spawnTargets(fleet)
 
@@ -103,18 +127,22 @@ function NewSessionForm({ onDone, onOpenSession }: { onDone: () => void; onOpenS
 
   return (
     <form
-      className="no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+      className={
+        dialog
+          ? 'no-scrollbar max-h-[calc(100dvh-4rem)] w-full overflow-y-auto px-5 pt-2 pb-5'
+          : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]'
+      }
       onSubmit={(e) => {
         e.preventDefault()
         void start()
       }}
     >
-      <DrawerHeader className="px-0 pt-3 pb-2 text-left">
-        <DrawerTitle className="text-left text-base font-semibold">New session</DrawerTitle>
-        <DrawerDescription className="text-left text-xs">
+      <Header className="px-0 pt-3 pb-2 text-left">
+        <Title className="text-left text-base font-semibold">New session</Title>
+        <Description className="text-left text-xs">
           Starts Claude in a new tmux session. A first-run folder trust prompt is accepted for you.
-        </DrawerDescription>
-      </DrawerHeader>
+        </Description>
+      </Header>
 
       {hosts.length === 0 ? (
         <Alert variant="destructive" className="my-2">

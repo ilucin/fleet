@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeftIcon, CircleAlertIcon, EllipsisIcon, MessageSquareTextIcon, SquareTerminalIcon, WifiOffIcon } from 'lucide-react'
+import { ChevronLeftIcon, CircleAlertIcon, EllipsisIcon, MessageSquareTextIcon, PanelRightIcon, SquareTerminalIcon, WifiOffIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { toast } from 'sonner'
 
@@ -10,7 +10,7 @@ import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { ChatView } from '@/components/session/ChatView'
 import { Composer } from '@/components/session/Composer'
-import { SessionMenu } from '@/components/session/SessionMenu'
+import { SessionMenu, SessionMenuBody, type SessionMenuProps } from '@/components/session/SessionMenu'
 import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -32,7 +32,7 @@ import {
   stepSize,
   type DetailMode,
 } from '@/lib/chat'
-import { relTime } from '@/lib/format'
+import { relTime, shortCwd } from '@/lib/format'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
@@ -53,12 +53,41 @@ interface PeekState {
 
 const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false : undefined)
 
+/** What the desktop shell's shortcuts can ask of the open pane. */
+export interface PaneApi {
+  setMode: (m: DetailMode) => void
+  focusComposer: () => void
+}
+
+export interface SessionScreenProps {
+  host: string
+  id: string
+  /** `screen` (mobile, default): fixed full-screen page. `pane`: the desktop detail pane. */
+  layout?: 'screen' | 'pane'
+  /** Pane only: show the details column (⋯ toggles it instead of opening the drawer). */
+  inspector?: boolean
+  onToggleInspector?: () => void
+  /** Pane only: filled with the pane's API while mounted. */
+  paneRef?: React.RefObject<PaneApi | null>
+  /** Pane only: focus the composer on mount (opened with Enter). */
+  autoFocusComposer?: boolean
+}
+
 /**
  * Session detail — `#/s/:host/:id`: Chat (transcript, polls `messages` every 3s) or Term
  * (pane capture, polls `peek` every 2s) — exactly one loop runs, the other is disabled.
  * Shared composer with quick replies + key chips; ⋯ opens the session menu (drawer).
  */
-export function SessionScreen({ host, id }: { host: string; id: string }) {
+export function SessionScreen({
+  host,
+  id,
+  layout = 'screen',
+  inspector = false,
+  onToggleInspector,
+  paneRef,
+  autoFocusComposer = false,
+}: SessionScreenProps) {
+  const pane = layout === 'pane'
   const { fleet, refresh: refreshFleet, applyFleet } = useFleet()
   const settings = useSettings()
   const [, navigate] = useLocation()
@@ -78,6 +107,18 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [jumpSignal, setJumpSignal] = useState(0)
+
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!paneRef) return
+    paneRef.current = { setMode, focusComposer: () => composerRef.current?.focus() }
+    return () => {
+      paneRef.current = null
+    }
+  }, [paneRef, setMode])
+  useEffect(() => {
+    if (autoFocusComposer) composerRef.current?.focus()
+  }, [autoFocusComposer])
 
   // --- chat loop -----------------------------------------------------------
   const [chat, setChat] = useState<ChatState | null>(null)
@@ -266,13 +307,43 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
 
   const name = session?.name || chat?.name || id.slice(0, 8)
 
-  return (
-    <div className="fixed-app flex flex-col overflow-hidden bg-background">
+  const menuProps: SessionMenuProps = {
+    open: menuOpen,
+    onOpenChange: setMenuOpen,
+    host,
+    id,
+    session,
+    isSelfHost: settings.self != null && settings.self === host,
+    mode,
+    onMode: setMode,
+    hideNotes,
+    onHideNotes: (v) => setHideNotesRaw(v ? '1' : '0'),
+    fontSize,
+    fontSizes,
+    onFont: bumpFont,
+    termLines,
+    onTermLines: setTermLines,
+    onClosed: () => {
+      // Drop it from the list now; the next polls confirm (discovery caches ~2s).
+      if (fleet) applyFleet(withoutSession(fleet, host, id))
+      setTimeout(refreshFleet, 2500)
+      navigate('/', { replace: true })
+    },
+  }
+
+  const column = (
+    <>
       <header className="z-20 shrink-0 border-b bg-background/90 pt-safe px-safe backdrop-blur-md backdrop-saturate-150">
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-1 py-1.5 pr-2 pl-1">
-          <Button variant="ghost" size="icon" aria-label="Back" onClick={back} className="size-11 shrink-0 rounded-xl">
-            <ChevronLeftIcon className="size-6" />
-          </Button>
+        <div
+          className={
+            pane ? 'flex w-full items-center gap-1 py-1.5 pr-2 pl-4' : 'mx-auto flex w-full max-w-3xl items-center gap-1 py-1.5 pr-2 pl-1'
+          }
+        >
+          {pane ? null : (
+            <Button variant="ghost" size="icon" aria-label="Back" onClick={back} className="size-11 shrink-0 rounded-xl">
+              <ChevronLeftIcon className="size-6" />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-[15px] leading-tight font-bold">{name}</div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap">
@@ -280,6 +351,11 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
               <span className={cn('shrink-0', STATUS_TEXT[meta.key])}>{gone ? 'gone' : meta.label}</span>
               <HostBadge host={host} className="h-4 px-1 text-[10px]" />
               <ContextMeter context={session?.context} />
+              {pane && session?.cwd ? (
+                <span className="min-w-0 shrink truncate font-mono text-[11px] text-dimmer" title={session.cwd}>
+                  · {shortCwd(session.cwd, 60)}
+                </span>
+              ) : null}
               <span className="truncate text-dimmer tabular-nums">
                 {updatedAt ? `· ${relTime(updatedAt, now)} ago` : '· connecting…'}
               </span>
@@ -293,23 +369,37 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
             aria-label="View mode"
             className="shrink-0 rounded-xl bg-muted p-0.5"
           >
-            <ToggleGroupItem value="chat" aria-label="Chat view" className={modeItem}>
+            <ToggleGroupItem value="chat" aria-label="Chat view" title={pane ? 'Chat (g c)' : undefined} className={modeItem}>
               <MessageSquareTextIcon />
             </ToggleGroupItem>
-            <ToggleGroupItem value="term" aria-label="Terminal view" className={modeItem}>
+            <ToggleGroupItem value="term" aria-label="Terminal view" title={pane ? 'Terminal (g t)' : undefined} className={modeItem}>
               <SquareTerminalIcon />
             </ToggleGroupItem>
           </ToggleGroup>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="More"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-            className="size-11 shrink-0 rounded-xl"
-          >
-            <EllipsisIcon className="size-5" />
-          </Button>
+          {pane ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Details panel"
+              title="Details panel (i)"
+              aria-pressed={inspector}
+              onClick={onToggleInspector}
+              className={cn('size-11 shrink-0 rounded-xl', inspector && 'bg-muted text-foreground')}
+            >
+              <PanelRightIcon className="size-5" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="More"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+              className="size-11 shrink-0 rounded-xl"
+            >
+              <EllipsisIcon className="size-5" />
+            </Button>
+          )}
         </div>
       </header>
 
@@ -317,7 +407,9 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
         <div className="shrink-0 px-3 px-safe">
           <div
             className={cn(
-              'mx-auto mt-2 flex max-w-3xl items-start gap-2 rounded-lg border px-3 py-2 text-xs',
+              pane
+                ? 'mx-auto mt-2 flex max-w-4xl items-start gap-2 rounded-lg border px-3 py-2 text-xs'
+                : 'mx-auto mt-2 flex max-w-3xl items-start gap-2 rounded-lg border px-3 py-2 text-xs',
               hostDown ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-border bg-card text-muted-foreground',
             )}
           >
@@ -347,6 +439,7 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
             loadingOlder={loadingOlder}
             onLoadOlder={loadOlder}
             jumpSignal={jumpSignal}
+            wide={pane}
           />
         ) : (
           <TermView text={peek?.text ?? null} failed={!!peekErr} fontSize={termFont} jumpSignal={jumpSignal} />
@@ -367,31 +460,31 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
         sending={sending}
         onSend={send}
         onKey={sendKey}
+        desktop={pane}
+        inputRef={composerRef}
       />
+    </>
+  )
 
-      <SessionMenu
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        host={host}
-        id={id}
-        session={session}
-        isSelfHost={settings.self != null && settings.self === host}
-        mode={mode}
-        onMode={setMode}
-        hideNotes={hideNotes}
-        onHideNotes={(v) => setHideNotesRaw(v ? '1' : '0')}
-        fontSize={fontSize}
-        fontSizes={fontSizes}
-        onFont={bumpFont}
-        termLines={termLines}
-        onTermLines={setTermLines}
-        onClosed={() => {
-          // Drop it from the list now; the next polls confirm (discovery caches ~2s).
-          if (fleet) applyFleet(withoutSession(fleet, host, id))
-          setTimeout(refreshFleet, 2500)
-          navigate('/', { replace: true })
-        }}
-      />
+  if (pane) {
+    return (
+      <div className="flex h-full min-w-0 flex-1 overflow-hidden bg-background">
+        <section aria-label={`Session ${name}`} className="flex min-w-0 flex-1 flex-col">
+          {column}
+        </section>
+        {inspector ? (
+          <aside aria-label="Session details" className="w-80 shrink-0 border-l bg-card/30">
+            <SessionMenuBody {...menuProps} open variant="panel" />
+          </aside>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed-app flex flex-col overflow-hidden bg-background">
+      {column}
+      <SessionMenu {...menuProps} />
     </div>
   )
 }

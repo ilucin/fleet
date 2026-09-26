@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, Loader2Icon, SendHorizontalIcon } from 'lucide-react'
 
 import type { QuickReply, SessionKey } from '@/api/types'
@@ -29,13 +29,21 @@ export interface ComposerProps {
   /** Resolves true when the text was delivered (the textarea is then cleared). */
   onSend: (text: string) => Promise<boolean>
   onKey: (key: SessionKey) => void
+  /**
+   * Desktop pane: Enter (or ⌘/Ctrl+Enter) always sends, even on touch-capable laptops;
+   * Shift+Enter is a newline; wider column. Mobile (false): Enter sends only on hardware keyboards.
+   */
+  desktop?: boolean
+  /** The textarea, for "reply" shortcuts. */
+  inputRef?: React.Ref<HTMLTextAreaElement>
 }
 
 const MAX_TEXTAREA_PX = 21 * 5 + 22 // ~5 rows + padding
 
-export function Composer({ quickReplies, lockedReason, sending, onSend, onKey }: ComposerProps) {
+export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef }: ComposerProps) {
   const [text, setText] = useState('')
   const ta = useRef<HTMLTextAreaElement>(null)
+  useImperativeHandle(inputRef, () => ta.current as HTMLTextAreaElement, [])
   const locked = lockedReason != null
   const empty = text.trim().length === 0
   const tooLong = text.length > MAX_SEND_CHARS
@@ -59,7 +67,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey }:
   return (
     <div className="shrink-0 border-t bg-background/95 pb-safe px-safe backdrop-blur-md">
       <form
-        className={cn('mx-auto w-full max-w-3xl px-3 pt-2 pb-2', locked && 'opacity-60')}
+        className={cn(desktop ? 'mx-auto w-full max-w-4xl px-4 pt-2 pb-2' : 'mx-auto w-full max-w-3xl px-3 pt-2 pb-2', locked && 'opacity-60')}
         onSubmit={(e) => {
           e.preventDefault()
           void submit()
@@ -104,14 +112,14 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey }:
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (isTouch) return
+              if (isTouch && !desktop) return
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 void submit()
               }
             }}
             disabled={locked}
-            placeholder={locked ? 'Read-only' : 'Message Claude…'}
+            placeholder={locked ? 'Read-only' : desktop ? 'Message Claude…  (Enter to send, Shift+Enter for a new line)' : 'Message Claude…'}
             aria-label="Message"
             autoCapitalize="sentences"
             autoComplete="off"
