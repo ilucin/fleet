@@ -181,6 +181,253 @@ pub fn enter(q: &str) -> Result<()> {
     tmux::attach(&name)
 }
 
+// --- enter across hosts ----------------------------------------------------------
+
+/// One host's tmux sessions, or why they could not be listed.
+pub type HostList = std::result::Result<Vec<TmuxSession>, String>;
+
+/// Where a query landed across hosts.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Found {
+    /// Exactly one session. `elsewhere`: not on the default host.
+    One {
+        host: String,
+        name: String,
+        elsewhere: bool,
+    },
+    /// Several at the best tier, as (host, name).
+    Many {
+        hits: Vec<(String, String)>,
+        elsewhere: bool,
+    },
+    None,
+}
+
+#[derive(Debug)]
+pub struct Search {
+    pub found: Found,
+    /// Hosts that answered, with their sessions, in search order.
+    pub listed: Vec<(String, Vec<TmuxSession>)>,
+    /// Hosts that did not, with why.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Resolve `q` on `default` first; only when nothing matches there (or it
+/// can't be reached) ask `others`, in parallel, and rank their hits by the
+/// same tiers (exact > case-folded exact > prefix > substring) across hosts.
+pub fn search_hosts<F>(q: &str, default: &str, others: &[String], fetch: F) -> Search
+where
+    F: Fn(&str) -> HostList + Sync,
+{
+    let mut listed = Vec::new();
+    let mut failed = Vec::new();
+    match fetch(default) {
+        Ok(v) => {
+            let hit = tmux::match_tier(&v, q);
+            listed.push((default.to_string(), v));
+            if let Some((_, mut names)) = hit {
+                let found = if names.len() == 1 {
+                    Found::One {
+                        host: default.to_string(),
+                        name: names.remove(0),
+                        elsewhere: false,
+                    }
+                } else {
+                    Found::Many {
+                        hits: names
+                            .into_iter()
+                            .map(|n| (default.to_string(), n))
+                            .collect(),
+                        elsewhere: false,
+                    }
+                };
+                return Search {
+                    found,
+                    listed,
+                    failed,
+                };
+            }
+        }
+        Err(e) => failed.push((default.to_string(), e)),
+    }
+    let answers: Vec<(String, HostList)> = std::thread::scope(|sc| {
+        let handles: Vec<_> = others
+            .iter()
+            .map(|h| {
+                let fetch = &fetch;
+                sc.spawn(move || (h.clone(), fetch(h)))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .zip(others)
+            .map(|(t, h)| {
+                t.join()
+                    .unwrap_or_else(|_| (h.clone(), Err("lookup panicked".into())))
+            })
+            .collect()
+    });
+    let mut best: Option<usize> = None;
+    let mut hits: Vec<(usize, String, String)> = Vec::new();
+    for (host, r) in answers {
+        match r {
+            Ok(v) => {
+                if let Some((tier, names)) = tmux::match_tier(&v, q) {
+                    best = Some(best.map_or(tier, |b| b.min(tier)));
+                    hits.extend(names.into_iter().map(|n| (tier, host.clone(), n)));
+                }
+                listed.push((host, v));
+            }
+            Err(e) => failed.push((host, e)),
+        }
+    }
+    let mut hits: Vec<(String, String)> = hits
+        .into_iter()
+        .filter(|(t, _, _)| Some(*t) == best)
+        .map(|(_, h, n)| (h, n))
+        .collect();
+    let found = match hits.len() {
+        0 => Found::None,
+        1 => {
+            let (host, name) = hits.remove(0);
+            Found::One {
+                host,
+                name,
+                elsewhere: true,
+            }
+        }
+        _ => Found::Many {
+            hits,
+            elsewhere: true,
+        },
+    };
+    Search {
+        found,
+        listed,
+        failed,
+    }
+}
+
+/// One host's sessions, locally or over ssh (`fleet tmux list --json` there).
+fn fetch_host(name: &str) -> HostList {
+    use crate::core::hosts::{self, Scope, Target};
+    match hosts::resolve(
+        crate::core::config::get(),
+        Some(name),
+        false,
+        Scope::SelfHost,
+    ) {
+        Err(e) => Err(e.to_string()),
+        Ok(Target::Local { .. }) => tmux::list_sessions().map_err(|e| e.to_string()),
+        Ok(Target::Remote(r)) => {
+            let args = ["tmux".to_string(), "list".into(), "--json".into()];
+            match hosts::capture_remote(&r, &args, hosts::remote_timeout()) {
+                Err(e) => Err(e.to_string()),
+                Ok(c) if !c.ok() => Err(c.why(&r)),
+                Ok(c) => serde_json::from_str(&c.stdout).map_err(|e| format!("bad JSON: {e}")),
+            }
+        }
+    }
+}
+
+/// Attach to `name` on `host`: here, or by re-running `tmux enter` there.
+fn attach_on(host: &str, name: &str, q: &str) -> Result<i32> {
+    use crate::core::hosts::{self, Scope, Target};
+    match hosts::resolve(
+        crate::core::config::get(),
+        Some(host),
+        false,
+        Scope::SelfHost,
+    )? {
+        Target::Local { .. } => {
+            need_tty(&format!("fleet enter {q}"))?;
+            tmux::attach(name)?;
+            Ok(0)
+        }
+        Target::Remote(r) => {
+            hosts::run_remote(&r, &["tmux".into(), "enter".into(), name.into()], false)
+        }
+    }
+}
+
+/// `fleet enter <q>` with no host named: the default host first, then every
+/// other host fleet can reach over ssh (web-only peers are skipped).
+pub fn enter_anywhere(q: &str) -> Result<i32> {
+    use crate::core::hosts::{self, Scope, Target};
+    if q.is_empty() {
+        return Err(Error::exit(1, "usage: fleet enter <query>"));
+    }
+    let cfg = crate::core::config::get();
+    let dt = hosts::resolve(cfg, None, false, Scope::DefaultHost)?;
+    let default = dt.name().to_string();
+    let others: Vec<String> = cfg
+        .ssh_host_names()
+        .into_iter()
+        .filter(|n| *n != default)
+        .collect();
+    if others.is_empty() {
+        // Nowhere else to look: exactly the single-host behaviour.
+        return match dt {
+            Target::Local { .. } => enter(q).map(|_| 0),
+            Target::Remote(r) => {
+                hosts::run_remote(&r, &["tmux".into(), "enter".into(), q.into()], false)
+            }
+        };
+    }
+    let s = search_hosts(q, &default, &others, fetch_host);
+    for (h, why) in &s.failed {
+        eprintln!("{} {h}: {why} — skipped", "fleet:".yellow());
+    }
+    match s.found {
+        Found::One {
+            host,
+            name,
+            elsewhere,
+        } => {
+            if elsewhere {
+                eprintln!("→ {host}: {name}");
+            }
+            attach_on(&host, &name, q)
+        }
+        Found::Many { hits, elsewhere } => {
+            eprintln!("{} '{q}' matches {} sessions:", "fleet:".red(), hits.len());
+            let w = hits.iter().map(|(h, _)| h.len()).max().unwrap_or(0);
+            for (h, n) in &hits {
+                if elsewhere {
+                    eprintln!("    {}  {n}", pad(h, w));
+                } else {
+                    eprintln!("    {n}");
+                }
+            }
+            let hint = if elsewhere {
+                "hint: fleet -H <host> enter <full-name>"
+            } else {
+                "hint: fleet enter <full-name>"
+            };
+            eprintln!("{}", hint.dimmed());
+            Err(Error::exit(2, ""))
+        }
+        Found::None if s.listed.is_empty() => Err(Error::exit(
+            hosts::EXIT_UNREACHABLE,
+            "no host answered — see: fleet doctor",
+        )),
+        Found::None => {
+            let names: Vec<&str> = s.listed.iter().map(|(h, _)| h.as_str()).collect();
+            eprintln!(
+                "{} no session matching '{q}' on {}",
+                "fleet:".red(),
+                names.join(", ")
+            );
+            let now = chrono::Utc::now().timestamp();
+            for (h, v) in s.listed.iter().filter(|(_, v)| !v.is_empty()) {
+                eprintln!("{}", format!("{h}:").dimmed());
+                eprintln!("{}", format_sessions(v, now));
+            }
+            Err(Error::exit(3, ""))
+        }
+    }
+}
+
 pub fn last() -> Result<()> {
     let v = sessions()?;
     if v.is_empty() {
@@ -547,6 +794,149 @@ mod tests {
     fn span_labels() {
         assert_eq!(span_label("24"), "24h");
         assert_eq!(span_label("30m"), "30m");
+    }
+
+    fn ses(names: &[&str]) -> HostList {
+        Ok(names
+            .iter()
+            .map(|n| TmuxSession {
+                name: n.to_string(),
+                ..Default::default()
+            })
+            .collect())
+    }
+
+    fn others(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A fake host table; `calls` records which hosts were asked.
+    fn fake<'a>(
+        table: Vec<(&'static str, HostList)>,
+        calls: &'a std::sync::Mutex<Vec<String>>,
+    ) -> impl Fn(&str) -> HostList + Sync + 'a {
+        move |h: &str| {
+            calls.lock().unwrap().push(h.to_string());
+            table
+                .iter()
+                .find(|(n, _)| *n == h)
+                .map(|(_, r)| r.clone())
+                .unwrap_or_else(|| Err("unknown".into()))
+        }
+    }
+
+    #[test]
+    fn a_match_on_the_default_host_never_asks_the_others() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let f = fake(
+            vec![("ws", ses(&["api", "web"])), ("laptop", ses(&["api"]))],
+            &calls,
+        );
+        let s = search_hosts("api", "ws", &others(&["laptop"]), f);
+        assert_eq!(
+            s.found,
+            Found::One {
+                host: "ws".into(),
+                name: "api".into(),
+                elsewhere: false
+            }
+        );
+        assert_eq!(*calls.lock().unwrap(), vec!["ws".to_string()]);
+
+        // Ambiguous on the default host stays ambiguous there.
+        let calls = std::sync::Mutex::new(Vec::new());
+        let f = fake(vec![("ws", ses(&["api-1", "api-2"]))], &calls);
+        let s = search_hosts("api", "ws", &others(&["laptop"]), f);
+        assert!(matches!(s.found, Found::Many { elsewhere: false, ref hits } if hits.len() == 2));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn no_match_on_the_default_host_falls_back_to_the_others() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let f = fake(
+            vec![
+                ("ws", ses(&["web"])),
+                ("laptop", ses(&["update-school-schedule"])),
+                ("box", ses(&["other"])),
+            ],
+            &calls,
+        );
+        let s = search_hosts("school", "ws", &others(&["laptop", "box"]), f);
+        assert_eq!(
+            s.found,
+            Found::One {
+                host: "laptop".into(),
+                name: "update-school-schedule".into(),
+                elsewhere: true
+            }
+        );
+        assert_eq!(s.listed.len(), 3);
+    }
+
+    #[test]
+    fn tiers_rank_across_hosts() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        // exact on one host beats a prefix on another
+        let f = fake(
+            vec![
+                ("ws", ses(&[])),
+                ("laptop", ses(&["foo-bar"])),
+                ("box", ses(&["foo"])),
+            ],
+            &calls,
+        );
+        let s = search_hosts("foo", "ws", &others(&["laptop", "box"]), f);
+        assert_eq!(
+            s.found,
+            Found::One {
+                host: "box".into(),
+                name: "foo".into(),
+                elsewhere: true
+            }
+        );
+        // same tier on two hosts → ambiguous, with hosts
+        let f = fake(
+            vec![
+                ("ws", ses(&[])),
+                ("laptop", ses(&["dup"])),
+                ("box", ses(&["dup"])),
+            ],
+            &calls,
+        );
+        let s = search_hosts("dup", "ws", &others(&["laptop", "box"]), f);
+        assert_eq!(
+            s.found,
+            Found::Many {
+                hits: vec![
+                    ("laptop".into(), "dup".into()),
+                    ("box".into(), "dup".into())
+                ],
+                elsewhere: true
+            }
+        );
+    }
+
+    #[test]
+    fn unreachable_hosts_are_reported_not_fatal() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let f = fake(
+            vec![
+                ("ws", Err("timed out after 5s".into())),
+                ("laptop", ses(&["app"])),
+                ("box", Err("unreachable".into())),
+            ],
+            &calls,
+        );
+        let s = search_hosts("app", "ws", &others(&["laptop", "box"]), f);
+        assert!(matches!(s.found, Found::One { ref host, .. } if host == "laptop"));
+        let failed: Vec<&str> = s.failed.iter().map(|(h, _)| h.as_str()).collect();
+        assert_eq!(failed, vec!["ws", "box"]);
+
+        let f = fake(vec![("ws", ses(&["x"])), ("laptop", ses(&["y"]))], &calls);
+        let s = search_hosts("zzz", "ws", &others(&["laptop"]), f);
+        assert_eq!(s.found, Found::None);
+        assert_eq!(s.listed.len(), 2);
     }
 
     #[test]

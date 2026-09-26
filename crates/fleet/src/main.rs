@@ -484,6 +484,20 @@ fn run(cli: Cli) -> Result<i32> {
     }
     let command = cli.command.unwrap_or_else(default_command);
 
+    // `enter` with no host named looks on the default host, then everywhere else.
+    let host_named = cli.host.is_some()
+        || cli.local
+        || cli.as_host.is_some()
+        || std::env::var("FLEET_HOST").is_ok_and(|h| !h.trim().is_empty());
+    if !host_named
+        && let Commands::Enter { query }
+        | Commands::Tmux {
+            cmd: Some(TmuxCmd::Enter { query }),
+        } = &command
+    {
+        return tmux_cmds::enter_anywhere(query);
+    }
+
     if let Placement::Dispatch(scope) = placement(&command) {
         let t = target(cli.host.as_deref(), cli.local, scope)?;
         hosts::debug(&format!("target: {t:?}"));

@@ -126,6 +126,14 @@ alone lists. Alias: `fleet t …`; `enter` (alias `e`), `last` and `new` also ex
 
 Details:
 
+- **`enter` looks on every host** when no host is named (no `-H`, no `FLEET_HOST`, no `--local`):
+  the default host first; if nothing matches there (or it can't be reached), every other host with
+  an `ssh` destination plus this machine, in parallel (web-only peers are skipped). Hits are ranked
+  by the same tiers across hosts. One match → `→ laptop: <name>` on stderr, then it attaches there
+  (`switch-client` inside tmux when it's this machine). Several → listed with their host, exit 2
+  (pick one with `-H`). None → exit 3 naming the hosts searched. An unreachable host is a warning,
+  not a failure, unless no host answered (exit 4). `kill` and `rename` don't fall back — they act on
+  the target host only.
 - **Names** are sanitized the same way by `new` and `rename`: anything outside `A-Za-z0-9_-`
   becomes `-`, runs collapse, leading/trailing `-` are dropped.
 - One title per session (see [architecture → Session titles](architecture.md#session-titles)):

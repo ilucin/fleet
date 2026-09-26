@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::core::tools;
 use crate::error::{Error, Result};
@@ -44,7 +44,8 @@ fn require() -> Result<()> {
 }
 
 /// One tmux session as `list-sessions` reports it.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct TmuxSession {
     pub name: String,
     /// Clients attached right now.
@@ -116,6 +117,12 @@ pub fn current_session() -> Option<String> {
 /// Names matching `q`: exact > exact (case-folded) > prefix > substring. The
 /// first tier with any hit decides.
 pub fn matches(sessions: &[TmuxSession], q: &str) -> Vec<String> {
+    match_tier(sessions, q).map(|(_, v)| v).unwrap_or_default()
+}
+
+/// [`matches`] with the tier that decided (0 = exact … 3 = substring), so hits
+/// from several hosts can be ranked against each other.
+pub fn match_tier(sessions: &[TmuxSession], q: &str) -> Option<(usize, Vec<String>)> {
     let ql = q.to_lowercase();
     let tiers: [&dyn Fn(&str) -> bool; 4] = [
         &|n: &str| n == q,
@@ -123,17 +130,17 @@ pub fn matches(sessions: &[TmuxSession], q: &str) -> Vec<String> {
         &|n: &str| n.to_lowercase().starts_with(&ql),
         &|n: &str| n.to_lowercase().contains(&ql),
     ];
-    for tier in tiers {
+    for (i, tier) in tiers.iter().enumerate() {
         let hits: Vec<String> = sessions
             .iter()
             .filter(|s| tier(&s.name))
             .map(|s| s.name.clone())
             .collect();
         if !hits.is_empty() {
-            return hits;
+            return Some((i, hits));
         }
     }
-    Vec::new()
+    None
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -187,3 +187,43 @@ fn stale_lists_idle_shells_and_keeps_busy_ones() {
     let out = s.fleet(&["tmux", "list", "-q"]);
     assert_eq!(stdout(&out).trim(), "fleet-test-busy");
 }
+
+#[test]
+fn enter_falls_back_to_other_hosts_when_the_default_has_no_match() {
+    let Some(s) = Server::new() else { return };
+    // defaultHost = workstation, which cannot be reached; this machine = laptop.
+    let mut cfg = common::two_hosts();
+    cfg["hosts"]["workstation"]["ssh"] = serde_json::json!("fleet-test-host.invalid");
+    s.env.write_config(&cfg);
+    let out = s.fleet(&["--local", "tmux", "new", "-d", "fleet-test-local"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    // Found here → a note, then the (dry-run) attach on this machine.
+    let out = s.fleet(&["-n", "enter", "test-loc"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        err.contains("workstation:"),
+        "unreachable host warned: {err}"
+    );
+    assert!(err.contains("→ laptop: fleet-test-local"), "{err}");
+    assert!(
+        stdout(&out).contains("attach -t '=fleet-test-local'"),
+        "{}",
+        stdout(&out)
+    );
+
+    // Nothing anywhere → 3, naming the hosts that answered.
+    let out = s.fleet(&["-n", "enter", "zzz-nothing"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("no session matching 'zzz-nothing' on laptop"),
+        "{}",
+        stderr(&out)
+    );
+
+    // A named host means no fallback: straight to that host.
+    let out = s.fleet(&["-n", "--local", "enter", "zzz-nothing"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(!stderr(&out).contains("workstation"), "{}", stderr(&out));
+}

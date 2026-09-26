@@ -95,7 +95,7 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | Intent | Command |
 | --- | --- |
 | "what tmux sessions are there" | `fleet tmux list` (alias `fleet t`; `-q` names only, `--json`) |
-| "attach to X" | `fleet enter <query>` — exact > prefix > substring, case-insensitive; ambiguous = exit 2 with the candidates |
+| "attach to X" | `fleet enter <query>` — exact > prefix > substring, case-insensitive; ambiguous = exit 2 with the candidates. Without `-H` it tries `defaultHost` first, then every other ssh host (prints `→ <host>: <name>`) |
 | "back to the previous one" | `fleet last` |
 | "make a session for X" | `fleet new <name> [-d] [-C <dir>] [-- <cmd…>]` — names are sanitised to `[A-Za-z0-9_-]`; without `-d` it attaches |
 | "kill X" | `fleet tmux kill <query>` (asks; `-f` doesn't) |

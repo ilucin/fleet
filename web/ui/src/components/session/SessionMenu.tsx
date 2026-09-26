@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   AArrowDownIcon,
   AArrowUpIcon,
+  CopyIcon,
   Loader2Icon,
   MessageSquareTextIcon,
   MonitorIcon,
@@ -23,6 +24,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
 import { autoNameSummary, autoNameToast } from '@/lib/autoname'
+import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import type { DetailMode } from '@/lib/chat'
 import { ctxLevel, ctxSummary, relTime, shortCwd } from '@/lib/format'
 import { CTX_TEXT } from '@/lib/styles'
@@ -172,6 +174,7 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
 
   const s = p.session
   const { title } = useSessionTitle(s, `${p.host}/${p.id}`)
+  const attachCmd = sessionAttachCommand(s)
   const lastRunHint = lastRun?.at
     ? `last run ${relTime(lastRun.at)} ago · ${autoNameSummary(lastRun)}`
     : autoName
@@ -295,6 +298,19 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
                   Rename…
                 </Button>
               </Row>
+            ) : null}
+            {s ? (
+              <div className="py-1.5">
+                <Row label="Attach command" hint={attachCmd ? 'Run in a terminal on any fleet host' : 'Only for tmux sessions — this one is an iTerm tab'}>
+                  <Button variant="outline" className="h-9 px-3" disabled={!attachCmd} aria-label="Copy attach command" onClick={() => attachCmd && void copyWithToast(attachCmd)}>
+                    <CopyIcon />
+                    Copy
+                  </Button>
+                </Row>
+                {attachCmd ? (
+                  <code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all text-muted-foreground select-all">{attachCmd}</code>
+                ) : null}
+              </div>
             ) : null}
             <Row label={`Auto-name (${p.host})`} hint={lastRunHint}>
               <Button variant="outline" className="h-9 px-3" disabled={naming} onClick={runNow}>

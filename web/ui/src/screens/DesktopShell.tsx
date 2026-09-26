@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
+  CopyIcon,
   FilterIcon,
   KanbanIcon,
   KeyboardIcon,
@@ -34,6 +35,7 @@ import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSessionList } from '@/hooks/useSessionList'
 import { useTheme } from '@/hooks/useTheme'
 import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
+import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
 import { clampSidebarWidth, SIDEBAR_DEFAULT_W, SIDEBAR_MAX_W, SIDEBAR_MIN_W } from '@/lib/layout'
@@ -281,6 +283,7 @@ export function DesktopShell() {
 
   // --- palette actions -----------------------------------------------------------
   const paletteSessions = useMemo(() => allSessions(fleet).sort(byLastActivity), [fleet])
+  const attachCmd = sessionAttachCommand(selectedSession)
   const actions: { heading: string; items: PaletteAction[] }[] = [
     {
       heading: 'Actions',
@@ -310,6 +313,9 @@ export function DesktopShell() {
           : [{ id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: '[', run: toggleSidebar }]),
         ...(selectedSession && selectedKey
           ? [{ id: 'rename', label: 'Rename session…', icon: <PencilIcon />, shortcut: 'E', keywords: ['title', 'name'], run: () => startEditing('header', selectedKey) }]
+          : []),
+        ...(attachCmd
+          ? [{ id: 'copy-attach', label: 'Copy attach command', icon: <CopyIcon />, keywords: ['tmux', 'terminal', 'enter', attachCmd], run: () => void copyWithToast(attachCmd) }]
           : []),
         { id: 'refresh', label: 'Refresh now', icon: <RefreshCwIcon />, shortcut: 'G R', run: refresh },
         { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: '?', run: () => setHelpOpen(true) },
