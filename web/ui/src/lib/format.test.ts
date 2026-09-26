@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   clockTime,
+  modelLabel,
   ctxLevel,
   ctxSummary,
   firstLine,
@@ -89,5 +90,16 @@ describe('context usage', () => {
     expect(ctxSummary({ used: 124_000, window: 200_000, pct: 62, model: 'claude-x' })).toBe('124k / 200k · 62%')
     expect(ctxSummary(null)).toBe('')
     expect(ctxSummary(undefined)).toBe('')
+  })
+})
+
+describe('modelLabel', () => {
+  test('shortens Claude model ids', () => {
+    expect(modelLabel('claude-opus-5-5')).toBe('Opus 5.5')
+    expect(modelLabel('claude-sonnet-5')).toBe('Sonnet 5')
+    expect(modelLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+    expect(modelLabel('claude-opus-5-5[1m]')).toBe('Opus 5.5 1M')
+    expect(modelLabel('some-other-model')).toBe('some-other-model')
+    expect(modelLabel(null)).toBe('')
   })
 })

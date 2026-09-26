@@ -34,7 +34,7 @@ import {
   stepSize,
   type DetailMode,
 } from '@/lib/chat'
-import { relTime, shortCwd } from '@/lib/format'
+import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
@@ -364,6 +364,11 @@ export function SessionScreen({
               <StatusDot status={status} className="size-2" />
               <span className={cn('shrink-0', STATUS_TEXT[meta.key])}>{gone ? 'gone' : meta.label}</span>
               <HostBadge host={host} className="h-4 px-1 text-[10px]" />
+              {session?.context?.model ? (
+                <span className="shrink-0 text-dim" title={session.context.model}>
+                  {modelLabel(session.context.model)}
+                </span>
+              ) : null}
               <ContextMeter context={session?.context} />
               {pane && session?.cwd ? (
                 <span className="min-w-0 shrink truncate font-mono text-[11px] text-dimmer" title={session.cwd}>

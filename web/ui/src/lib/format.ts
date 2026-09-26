@@ -80,6 +80,16 @@ export function fmtTokens(n: number): string {
 }
 
 /** "124k / 200k · 62%" — '' for a missing or malformed context. */
+/** Short human model name: `claude-opus-5-5` → `Opus 5.5`, `claude-haiku-4-5-20251001` → `Haiku 4.5`, `…[1m]` → `… 1M`. */
+export function modelLabel(id: string | null | undefined): string {
+  if (!id) return ''
+  const oneM = /\[1m\]$/i.test(id)
+  const m = id.replace(/\[1m\]$/i, '').match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i)
+  if (!m) return id
+  const family = m[1].charAt(0).toUpperCase() + m[1].slice(1)
+  return `${family} ${m[2]}${m[3] ? `.${m[3]}` : ''}${oneM ? ' 1M' : ''}`
+}
+
 export function ctxSummary(c: ContextUsage | null | undefined): string {
   if (!c || !Number.isFinite(c.used) || !Number.isFinite(c.window)) return ''
   return `${fmtTokens(c.used)} / ${fmtTokens(c.window)} · ${Math.round(c.pct)}%`
