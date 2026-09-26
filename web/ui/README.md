@@ -147,7 +147,7 @@ src/
   - errors (`sessionErrorMessage`) as a pill over the pane; host-unreachable / not-in-fleet /
     gone banners; the composer locks for a gone session or `backend: unknown`.
 - **Composer**: auto-growing textarea (Enter sends on hardware keyboards, newline on touch;
-  1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down;
+  1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down (mobile: a mini drawer above the input, hidden until you swipe up on the composer or tap its handle; swipe down hides it; desktop: always shown);
   a toast per result; two follow-up polls after steering.
 - **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
   (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),

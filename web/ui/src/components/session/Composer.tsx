@@ -1,9 +1,10 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react'
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, Loader2Icon, SendHorizontalIcon } from 'lucide-react'
 
 import type { QuickReply, SessionKey } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { MAX_SEND_CHARS } from '@/lib/chat'
+import { swipeIntent } from '@/lib/gestures'
 import { cn } from '@/lib/utils'
 
 /** Built-in key chips (not configurable), as in the classic UI. */
@@ -47,6 +48,22 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
   const locked = lockedReason != null
   const empty = text.trim().length === 0
   const tooLong = text.length > MAX_SEND_CHARS
+  // Mobile: quick replies + keys live in a mini drawer above the input, hidden until swiped up.
+  const [chipsOpen, setChipsOpen] = useState(false)
+  const showChips = desktop || chipsOpen
+  const touchY = useRef<number | null>(null)
+  const onTouchStart = (e: TouchEvent) => {
+    // The textarea keeps its own gestures (scrolling, selection).
+    touchY.current = e.target instanceof HTMLTextAreaElement ? null : e.touches[0].clientY
+  }
+  const onTouchEnd = (e: TouchEvent, onHandle: boolean) => {
+    if (touchY.current == null) return
+    const intent = swipeIntent(e.changedTouches[0].clientY - touchY.current)
+    touchY.current = null
+    if (intent === 'open') setChipsOpen(true)
+    else if (intent === 'close') setChipsOpen(false)
+    else if (intent === 'tap' && onHandle) setChipsOpen((o) => !o)
+  }
 
   // Auto-grow up to ~5 rows, then scroll inside.
   useLayoutEffect(() => {
@@ -65,14 +82,43 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
   const isTouch = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0
 
   return (
-    <div className="shrink-0 border-t bg-background/95 pb-safe px-safe backdrop-blur-md">
+    <div
+      className="shrink-0 border-t bg-background/95 pb-safe px-safe backdrop-blur-md"
+      onTouchStart={desktop ? undefined : onTouchStart}
+      onTouchEnd={desktop ? undefined : (e) => onTouchEnd(e, false)}
+    >
+      {desktop ? null : (
+        <button
+          type="button"
+          aria-label={chipsOpen ? 'Hide quick replies' : 'Show quick replies'}
+          aria-expanded={chipsOpen}
+          className="flex h-5 w-full touch-none items-center justify-center outline-none"
+          onTouchStart={(e) => {
+            e.stopPropagation()
+            touchY.current = e.touches[0].clientY
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation()
+            e.preventDefault() // no synthetic click after a touch — the touch already decided
+            onTouchEnd(e, true)
+          }}
+          onClick={() => setChipsOpen((o) => !o)}
+        >
+          <span className={cn('h-1 w-9 rounded-full transition-colors', chipsOpen ? 'bg-muted-foreground/60' : 'bg-muted-foreground/30')} />
+        </button>
+      )}
       <form
-        className={cn(desktop ? 'mx-auto w-full max-w-4xl px-4 pt-2 pb-2' : 'mx-auto w-full max-w-3xl px-3 pt-2 pb-2', locked && 'opacity-60')}
+        className={cn(desktop ? 'mx-auto w-full max-w-4xl px-4 pt-2 pb-2' : 'mx-auto w-full max-w-3xl px-3 pb-2', locked && 'opacity-60')}
         onSubmit={(e) => {
           e.preventDefault()
           void submit()
         }}
       >
+        <div
+          className={cn('grid transition-[grid-template-rows] duration-200 ease-out', showChips ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}
+          inert={!showChips}
+        >
+        <div className="min-h-0 overflow-hidden">
         <div className="no-scrollbar -mx-3 flex gap-1.5 overflow-x-auto px-3 pt-0.5 pb-2" role="toolbar" aria-label="Quick replies and keys">
           {quickReplies.map((q) => (
             <button
@@ -103,6 +149,8 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
               {k.icon ?? k.label}
             </button>
           ))}
+        </div>
+        </div>
         </div>
 
         <div className="flex items-end gap-2">
