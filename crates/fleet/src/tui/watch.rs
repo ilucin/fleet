@@ -316,7 +316,7 @@ struct Rename {
 /// `sync_tmux` carries the `[naming] sync_tmux` setting through: a confirmed
 /// rename is also where the session's tmux session name gets brought in line.
 /// The third field says whether `/rename` actually went out: a session that was
-/// mid-turn is *held*, and its pending suggestion has to survive for the next
+/// waiting on a prompt is *held*, and its pending suggestion has to survive for the next
 /// attempt rather than being consumed by one that never happened.
 fn commit_rename(
     r: &Rename,
@@ -344,15 +344,15 @@ fn commit_rename(
     let opts = commands::RenameOpts {
         sync_tmux,
         // The dashboard has no modifier for it; `tb-fleet rename --force` is the
-        // deliberate path for a session that is always mid-turn.
+        // deliberate path for a session that is always waiting.
         force: false,
     };
     Some(match commands::apply_rename(s, name, opts) {
-        Ok(commands::RenameOutcome::Sent(None)) => ("✎", format!("{} → {name}", s.label()), true),
-        Ok(commands::RenameOutcome::Sent(Some(note))) => {
-            ("✎", format!("{} → {name}  ({note})", s.label()), true)
-        }
-        Ok(commands::RenameOutcome::Held(why)) => ("⏸", why, false),
+        Ok(outcome @ commands::RenameOutcome::Sent(_)) => match outcome.tmux_note() {
+            None => ("✎", format!("{} → {name}", s.headline()), true),
+            Some(note) => ("✎", format!("{} → {name}  ({note})", s.headline()), true),
+        },
+        Ok(commands::RenameOutcome::Held(_, why)) => ("⏸", why, false),
         Err(e) => ("✕", format!("{} → {name} failed: {e}", s.label()), false),
     })
 }
@@ -627,9 +627,10 @@ impl Naming {
 /// Bring a suggestion to the user.
 ///
 /// Prefills the pinned rename buffer when the session can actually take a
-/// `/rename` — and holds it, with a reason, when it can't. A session mid-turn or
-/// sitting on a permission prompt would read the rename as its answer, and a
-/// vanished session is dropped rather than retargeted at whoever took its row.
+/// `/rename` — and holds it, with a reason, when it can't. A session sitting on
+/// a permission prompt would read the rename as its answer (see
+/// [`crate::core::title::Hold`]), and a vanished session is dropped rather than
+/// retargeted at whoever took its row.
 fn offer(key: &str, name: &str, rows: &[Session], renaming: &mut Option<Rename>, bulk: bool) -> Ev {
     let Some(s) = rows.iter().find(|s| s.key() == key) else {
         return Ev::now(
@@ -638,7 +639,7 @@ fn offer(key: &str, name: &str, rows: &[Session], renaming: &mut Option<Rename>,
         );
     };
     let label = s.label();
-    if s.status == "busy" || s.is_waiting() {
+    if crate::core::title::hold(s).is_some() {
         return Ev::now(
             "⏸",
             format!("{label} → {name} held ({}) — N when it's idle", s.status),
@@ -1649,7 +1650,7 @@ mod tests {
         // Three sessions, three consecutive rows.
         assert!(s[2].contains("docs-refresh"), "{:?}", s[2]);
         assert!(s[3].contains("cache-warmup-scheduler"), "{:?}", s[3]);
-        assert!(s[4].contains("app-9d"), "{:?}", s[4]);
+        assert!(s[4].contains("why-is-the"), "{:?}", s[4]);
         // Still numbered: the digits are how a phone client acts on a row.
         assert!(s[2].contains("▸1"), "{:?}", s[2]);
         // The prompt shares the line again, but the repeated base directory does
@@ -1718,7 +1719,7 @@ mod tests {
         assert!(s[3].contains("⧉ frontend"), "{:?}", s[3]);
         assert!(s[4].contains("refresh the install docs"), "{:?}", s[4]);
         // Three items in twelve rows — the events pane gives the row up.
-        assert!(s[8].contains("app-9d"), "{:?}", s);
+        assert!(s[8].contains("why-is"), "{:?}", s);
         assert_cells(&s, 32);
     }
 
@@ -1728,7 +1729,7 @@ mod tests {
         // One line per session, so all three land on consecutive rows.
         assert!(s[2].contains("docs-refresh"), "{:?}", s[2]);
         assert!(s[3].contains("cache-warmup"), "{:?}", s[3]);
-        assert!(s[4].contains("app-9d"), "{:?}", s[4]);
+        assert!(s[4].contains("why-is-the"), "{:?}", s[4]);
         assert_cells(&s, 50);
     }
 
@@ -1932,13 +1933,14 @@ mod tests {
         assert!(!drawn.contains("app-9d"), "{drawn}");
     }
 
-    // …and until one exists the row still has to say *something*.
+    // …and until one exists the row still has to say *something*: the
+    // heuristic slug of the first prompt (`display_title`), not `app-9d`.
     #[test]
-    fn an_untitled_row_falls_back_to_the_session_name() {
+    fn an_untitled_row_falls_back_to_the_heuristic_title() {
         let mut rows = fixture();
         apply_titles(&mut rows, &HashMap::new());
         let drawn = screen_of(120, 20, None, &rows, &[]).join("\n");
-        assert!(drawn.contains("app-9d"), "{drawn}");
+        assert!(drawn.contains("why-is-the-statusline-blank"), "{drawn}");
     }
 
     // Titling is automatic, so the pass has to be a no-op in the steady state:
@@ -2071,18 +2073,22 @@ mod tests {
         assert!(ev.msg.contains("⏎ applies"), "{}", ev.msg);
     }
 
-    // `backend::send` types into a live Claude TUI. A session mid-turn, or one
-    // sitting on a permission prompt, would read `/rename foo` as its answer.
+    // `backend::send` types into a live Claude TUI. A session sitting on a
+    // permission prompt would read `/rename foo` as its answer; a busy one runs
+    // it mid-turn as a local command (core::title::Hold), so it gets the buffer.
     #[test]
-    fn a_busy_or_waiting_session_is_held_not_prompted() {
+    fn a_waiting_session_is_held_a_busy_one_is_prompted() {
         let rows = fixture();
-        for status in ["busy", "waiting"] {
-            let s = rows.iter().find(|r| r.status == status).unwrap();
-            let mut renaming = None;
-            let ev = offer(&s.key(), "some-name", &rows, &mut renaming, false);
-            assert!(renaming.is_none(), "{status} opened a buffer");
-            assert!(ev.msg.contains("held"), "{}", ev.msg);
-        }
+        let s = rows.iter().find(|r| r.status == "waiting").unwrap();
+        let mut renaming = None;
+        let ev = offer(&s.key(), "some-name", &rows, &mut renaming, false);
+        assert!(renaming.is_none(), "waiting opened a buffer");
+        assert!(ev.msg.contains("held"), "{}", ev.msg);
+
+        let s = rows.iter().find(|r| r.status == "busy").unwrap();
+        let mut renaming = None;
+        offer(&s.key(), "some-name", &rows, &mut renaming, false);
+        assert!(renaming.is_some(), "busy is renameable");
     }
 
     // The job outlives the row it was started on. It must be dropped, never

@@ -6,6 +6,7 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
+  PencilIcon,
   PowerIcon,
   SparklesIcon,
   SquareTerminalIcon,
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useSessionTitle } from '@/hooks/useTitles'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
 import { autoNameSummary, autoNameToast } from '@/lib/autoname'
 import type { DetailMode } from '@/lib/chat'
@@ -48,6 +50,8 @@ export interface SessionMenuProps {
   onTermLines: (n: number) => void
   /** Called after a successful close (navigate away). */
   onClosed: () => void
+  /** Open the inline title editor in the header (absent: no session to rename). */
+  onRename?: () => void
 }
 
 const segItem =
@@ -167,6 +171,7 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
   }
 
   const s = p.session
+  const { title } = useSessionTitle(s, `${p.host}/${p.id}`)
   const lastRunHint = lastRun?.at
     ? `last run ${relTime(lastRun.at)} ago · ${autoNameSummary(lastRun)}`
     : autoName
@@ -188,7 +193,7 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
           }
         >
           <Header className={panel ? 'flex flex-col gap-0.5 pt-3 pb-1 text-left' : 'px-0 pt-3 pb-1 text-left'}>
-            <Title className="truncate text-left text-base font-semibold">{s?.name || p.id.slice(0, 8)}</Title>
+            <Title className="truncate text-left text-base font-semibold">{s ? title : p.id.slice(0, 8)}</Title>
             <Description className={cn('truncate text-left font-mono text-xs', panel && 'text-muted-foreground')} title={panel ? (s?.cwd ?? undefined) : undefined}>
               {[p.host, s?.cwd ? shortCwd(s.cwd, 60) : null].filter(Boolean).join(' · ')}
             </Description>
@@ -283,6 +288,14 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
           </Section>
 
           <Section title="Session">
+            {p.onRename ? (
+              <Row label="Title" hint={s?.backend === 'tmux' ? 'Renames Claude; its tmux session follows' : 'Renames the Claude session'}>
+                <Button variant="outline" className="h-9 px-3" onClick={p.onRename}>
+                  <PencilIcon />
+                  Rename…
+                </Button>
+              </Row>
+            ) : null}
             <Row label={`Auto-name (${p.host})`} hint={lastRunHint}>
               <Button variant="outline" className="h-9 px-3" disabled={naming} onClick={runNow}>
                 {naming ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}

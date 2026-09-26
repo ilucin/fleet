@@ -10,6 +10,7 @@ use std::io::{BufRead, Write};
 use colored::Colorize;
 
 use crate::cli::commands::host_label;
+use crate::core::title;
 use crate::core::tmux::{self, KeptClass, Resolve, StaleReport, TmuxSession};
 use crate::error::{Error, Result};
 
@@ -275,8 +276,12 @@ pub fn kill(q: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Renames the tmux session, not the Claude session inside it (that is
-/// `fleet rename`).
+/// Renames a tmux session. When it is one Claude session's own (one window, one
+/// pane, Claude in it) the rename goes through the *title* instead — Claude's
+/// `/rename`, then the tmux name follows as its slug — because the tmux name is
+/// derived from the title and would otherwise be overwritten on the next title
+/// change. A busy/waiting Claude session can't take `/rename`, so then only tmux
+/// is renamed, with a note. Any other tmux session is renamed as asked.
 pub fn rename(q: &str, new: &str) -> Result<()> {
     let name = tmux::sanitize_name(new);
     if name.is_empty() {
@@ -297,6 +302,28 @@ pub fn rename(q: &str, new: &str) -> Result<()> {
                 where_label()
             ),
         ));
+    }
+    if !crate::core::hosts::dry_run()
+        && let Some(s) = title::sole_claude_in(&old)
+    {
+        let t = title::clean_title(new)?;
+        let opts = title::RenameOpts {
+            sync_tmux: true,
+            force: false,
+        };
+        match title::apply_rename(&s, &t, opts) {
+            Ok(outcome @ title::RenameOutcome::Sent(_)) => {
+                println!("renamed Claude session {} → {t}", s.headline());
+                if let Some(n) = outcome.tmux_note() {
+                    println!("{n}");
+                }
+                return Ok(());
+            }
+            Ok(title::RenameOutcome::Held(_, why)) => note(&format!(
+                "Claude title unchanged ({why}); renaming tmux only — the next title change overwrites it"
+            )),
+            Err(e) => note(&format!("Claude title unchanged ({e}); renaming tmux only")),
+        }
     }
     tmux::rename_session(&old, &name)?;
     if !crate::core::hosts::dry_run() {

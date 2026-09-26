@@ -4,7 +4,7 @@ import { autoNameSummary, autoNameToast } from './autoname'
 
 test('autoNameToast', () => {
   expect(autoNameToast({ ok: true, renamed: [{ from: 'a', to: 'fix-login' }] })).toBe('Renamed 1: fix-login')
-  expect(autoNameToast({ ok: true, renamed: [], held: ['x', 'y'] })).toBe('Nothing to rename (2 busy)')
+  expect(autoNameToast({ ok: true, renamed: [], held: ['x', 'y'] })).toBe('Nothing to rename (2 waiting on you)')
   expect(autoNameToast({ ok: true })).toBe('Nothing to rename')
   expect(autoNameToast({ ok: false, error: 'boom' })).toBe('Naming failed: boom')
 })

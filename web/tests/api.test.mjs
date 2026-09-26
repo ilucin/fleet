@@ -35,6 +35,12 @@ function fakeHost(self, sessions) {
       return autoNamer.lastRun;
     },
   };
+  cli.rename = async ({ target, title }) => {
+    calls.push(['rename', target, title]);
+    if (title === 'while waiting') return { ok: false, result: 'held', held: 'waiting', title, message: `${target} is waiting on you — nothing sent (--force overrides)` };
+    if (title === 'explode') throw new Error('tmux: boom');
+    return { ok: true, result: 'renamed', title, from: 'app-9d', held: null, tmux: { renamed: true, from: 'fw-101010', to: 'fix-login', note: '⧉ fw-101010 → fix-login' }, message: `app-9d → ${title}` };
+  };
   return { calls, cli, backend, transcripts, spawner, killer, autoNamer, fleet: createFleet({ cli, self }) };
 }
 
@@ -239,4 +245,58 @@ test('static files carry a weak ETag and answer 304 to If-None-Match', async (t)
   const other = await fetch(`${urls.laptop}/`, { headers: { 'if-none-match': 'W/"nope"' } });
   assert.equal(other.status, 200);
   await other.text();
+});
+
+test('rename is POST-only, validated, served locally or proxied once, and a held session is a 409', async (t) => {
+  const { lap, remote, urls } = await startPair(t);
+  const base = `${urls.laptop}/api/hosts`;
+  assert.equal((await get(`${base}/laptop/sessions/aaaaaaaa/rename`)).status, 405);
+  // The session id goes to the CLI, never the fuzzy id from the URL.
+  const local = await post(`${base}/laptop/sessions/aaaaaaaa/rename`, { title: '  Fix login  ' });
+  assert.equal(local.status, 200);
+  assert.equal(local.body.ok, true);
+  assert.equal(local.body.result, 'renamed');
+  assert.equal(local.body.title, 'Fix login');
+  assert.equal(local.body.tmux.to, 'fix-login');
+  assert.deepEqual(lap.calls.at(-1), ['rename', 'aaaaaaaa-0000-0000-0000-000000000001', 'Fix login']);
+
+  const proxied = await post(`${base}/workstation/sessions/bbbbbbbb/rename`, { title: 'Docs refresh' });
+  assert.equal(proxied.status, 200);
+  assert.deepEqual(remote.calls.at(-1), ['rename', 'bbbbbbbb-0000-0000-0000-000000000002', 'Docs refresh']);
+  assert.equal(lap.calls.filter((c) => c[0] === 'rename').length, 1, 'proxied, not run on the laptop');
+
+  const held = await post(`${base}/workstation/sessions/bbbbbbbb/rename`, { title: 'while waiting' });
+  assert.equal(held.status, 409);
+  assert.equal(held.body.result, 'held');
+  assert.match(held.body.error, /waiting on you/);
+
+  const failed = await post(`${base}/laptop/sessions/aaaaaaaa/rename`, { title: 'explode' });
+  assert.equal(failed.status, 502);
+  assert.match(failed.body.error, /rename failed: tmux: boom/);
+
+  for (const title of [undefined, 42, '   ', 'two\nlines', 'x'.repeat(65)]) {
+    assert.equal((await post(`${base}/laptop/sessions/aaaaaaaa/rename`, { title })).status, 400, String(title));
+  }
+  assert.equal((await post(`${base}/laptop/sessions/zzzzzzzzzz/rename`, { title: 'x' })).status, 404);
+});
+
+test('fleet CLI rename runs `fleet rename <id> <title> --json` and resolves a held report (exit 3)', async () => {
+  const calls = [];
+  let mode = 'ok';
+  const run = async (bin, args, opts) => {
+    calls.push({ args, opts });
+    if (mode === 'held') {
+      throw Object.assign(new Error('exit 3'), { code: 3, stdout: JSON.stringify({ ok: false, result: 'held', held: 'waiting', message: 'x is waiting on you — nothing sent' }) });
+    }
+    if (mode === 'fail') throw Object.assign(new Error('Error: no live session matches "x"'), { code: 1, stdout: '' });
+    return { stdout: JSON.stringify({ ok: true, result: 'sent', title: 'T' }), stderr: '' };
+  };
+  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  assert.equal((await cli.rename({ target: 'abc', title: 'T' })).result, 'sent');
+  assert.deepEqual(calls[0].args, ['rename', 'abc', 'T', '--json']);
+  assert.equal(calls[0].opts.env.NO_COLOR, '1');
+  mode = 'held';
+  assert.equal((await cli.rename({ target: 'abc', title: 'T' })).held, 'waiting');
+  mode = 'fail';
+  await assert.rejects(cli.rename({ target: 'abc', title: 'T' }), /no live session/);
 });

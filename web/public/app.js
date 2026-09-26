@@ -106,9 +106,14 @@ function firstLine(text) {
   return '';
 }
 
+/** The session's one title (`display_title` from the CLI; older CLIs: the name). */
+function sessionTitle(s) {
+  const t = typeof s?.display_title === 'string' ? s.display_title.trim() : '';
+  return t || s?.name || '';
+}
+
+/** The line under the title: the first prompt. */
 function sessionSubtitle(s) {
-  const gen = typeof s.gen_title === 'string' ? s.gen_title.trim() : '';
-  if (gen) return gen;
   const line = firstLine(s.title);
   return line.length > 240 ? `${line.slice(0, 240)}…` : line;
 }
@@ -401,7 +406,7 @@ function createListView() {
   function matchesSearch(s) {
     const q = state.search.trim().toLowerCase();
     if (!q) return true;
-    const hay = [s.name, s.gen_title, s.title, s.cwd, s.tmux_session, s.host]
+    const hay = [s.display_title, s.name, s.gen_title, s.title, s.cwd, s.tmux_session, s.host]
       .filter((v) => typeof v === 'string')
       .join('\n')
       .toLowerCase();
@@ -444,7 +449,7 @@ function createListView() {
         'div',
         { class: 'row-top' },
         h('span', { class: `dot s-${meta.key}` }),
-        h('span', { class: 'row-name', text: s.name || '(unnamed)' }),
+        h('span', { class: 'row-name', text: sessionTitle(s) || '(unnamed)' }),
         h('span', { class: `badge host host-${hostClass(s.host)}`, text: String(s.host) }),
         h('span', { class: `row-status t-${meta.key}`, text: label }),
       ),
@@ -602,7 +607,7 @@ function createDetailView(host, id) {
   let restoreAnchor = false; // set when "Load older" prepends messages
 
   // header ---------------------------------------------------------------
-  const nameEl = h('div', { class: 'detail-name', text: (sess && sess.name) || id.slice(0, 8) });
+  const nameEl = h('div', { class: 'detail-name', text: sessionTitle(sess) || id.slice(0, 8) });
   const subEl = h('div', { class: 'detail-sub' });
   const backBtn = h(
     'button',
@@ -1162,7 +1167,7 @@ function createDetailView(host, id) {
   // render ----------------------------------------------------------------
   function renderHeader() {
     const meta = statusMeta(sess ? sess.status : gone ? 'unknown' : 'unknown');
-    if (sess && sess.name) nameEl.textContent = sess.name;
+    if (sessionTitle(sess)) nameEl.textContent = sessionTitle(sess);
     clear(subEl);
     subEl.append(h('span', { text: host }));
     subEl.append(

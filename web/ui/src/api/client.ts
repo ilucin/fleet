@@ -9,6 +9,7 @@ import type {
   MessagesResponse,
   OkResponse,
   PeekResponse,
+  RenameResponse,
   SessionKey,
   Settings,
   SpawnRequest,
@@ -81,6 +82,8 @@ export const api = {
     request<OkResponse>(sessionPath(host, id, 'send'), { ...o, method: 'POST', body: { text } }),
   keys: (host: string, id: string, key: SessionKey, o: Opts = {}) =>
     request<OkResponse>(sessionPath(host, id, 'keys'), { ...o, method: 'POST', body: { key } }),
+  rename: (host: string, id: string, title: string, o: Opts = {}) =>
+    request<RenameResponse>(sessionPath(host, id, 'rename'), { ...o, method: 'POST', body: { title } }),
   kill: (host: string, id: string, o: Opts = {}) =>
     request<KillResponse>(sessionPath(host, id, 'kill'), { ...o, method: 'POST', body: {} }),
 

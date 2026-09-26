@@ -196,6 +196,8 @@ pub struct Item {
     pub id: String,
     pub name: Option<String>,
     pub gen_title: Option<String>,
+    /// The session's one title (`display_title` in `list --json`), when known.
+    pub display_title: Option<String>,
     pub cwd: Option<String>,
     /// The first prompt (any length; the prompt builder truncates).
     pub title: Option<String>,
@@ -212,6 +214,7 @@ impl Item {
             id: s.key(),
             name: s.name.clone(),
             gen_title: s.gen_title.clone(),
+            display_title: Some(s.headline()),
             cwd: s.cwd.clone(),
             title: s.title.clone(),
         }
@@ -234,6 +237,7 @@ impl Item {
             id,
             name: s("name"),
             gen_title: s("gen_title"),
+            display_title: s("display_title"),
             cwd: s("cwd"),
             title: s("title"),
         })
@@ -241,8 +245,9 @@ impl Item {
 
     /// What the display calls this session.
     pub fn display(&self) -> String {
-        self.gen_title
+        self.display_title
             .clone()
+            .or_else(|| self.gen_title.clone())
             .or_else(|| self.name.clone())
             .unwrap_or_else(|| self.id.chars().take(8).collect())
     }
@@ -421,11 +426,12 @@ Reply with JSON only, no prose, exactly this shape:\n\
 Nothing to change: {\"merge\":[],\"rename\":{}}\n";
 
 fn session_line(i: usize, it: &Item) -> String {
-    let mut line = format!("S{}: {}", i + 1, excerpt(&it.display(), 60));
+    let shown = it.display();
+    let mut line = format!("S{}: {}", i + 1, excerpt(&shown, 60));
     if let Some(n) = it
         .name
         .as_deref()
-        .filter(|n| Some(*n) != it.gen_title.as_deref())
+        .filter(|n| *n != shown && Some(*n) != it.gen_title.as_deref())
     {
         line.push_str(&format!(" (name: {})", excerpt(n, 40)));
     }
@@ -1155,6 +1161,7 @@ mod tests {
             id: id.into(),
             name: Some(name.into()),
             gen_title: None,
+            display_title: None,
             cwd: Some(cwd.into()),
             title: Some(title.into()),
         }

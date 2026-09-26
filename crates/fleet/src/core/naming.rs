@@ -459,6 +459,8 @@ pub enum NameSource {
     Cached,
     /// The model was unavailable or unusable — branch/title guess.
     Heuristic,
+    /// Adopted from the tmux session a human named (`fleet new fix-login`).
+    Tmux,
 }
 
 impl NameSource {
@@ -467,6 +469,7 @@ impl NameSource {
             NameSource::Llm => "llm",
             NameSource::Cached => "cached",
             NameSource::Heuristic => "heuristic",
+            NameSource::Tmux => "tmux",
         }
     }
 }

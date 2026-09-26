@@ -225,13 +225,15 @@ mod tests {
         let mut s = Session {
             pid: 7,
             name: Some("app-9d".into()),
+            name_source: Some("derived".into()),
             cwd: Some("/home/x/Code/app".into()),
             status: "idle".into(),
             title: Some("why is the statusline blank".into()),
             ..Default::default()
         };
+        // Untitled: the heuristic slug of the first prompt stands in.
         let out = plain_table(std::slice::from_ref(&s));
-        assert!(out.contains("app-9d"), "{out}");
+        assert!(out.contains("why-is-the-statusline-blank"), "{out}");
 
         s.gen_title = Some("statusline-blank".into());
         let out = plain_table(std::slice::from_ref(&s));

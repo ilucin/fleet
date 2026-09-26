@@ -43,10 +43,11 @@ export function firstLine(text: string | null | undefined): string {
   return ''
 }
 
-/** The one-line description under a session's name: generated title, else the first prompt line. */
-export function sessionSubtitle(s: Pick<Session, 'gen_title' | 'title'>): string {
-  const gen = typeof s.gen_title === 'string' ? s.gen_title.trim() : ''
-  if (gen) return gen
+/**
+ * The one-line description under a session's title: its first prompt. The title itself
+ * (`sessionTitle`, lib/title.ts) already carries the generated title, so it is not repeated.
+ */
+export function sessionSubtitle(s: Pick<Session, 'title'>): string {
   const line = firstLine(s.title)
   return line.length > 240 ? `${line.slice(0, 240)}…` : line
 }

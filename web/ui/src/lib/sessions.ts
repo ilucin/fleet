@@ -55,7 +55,7 @@ export function allSessions(fleet: FleetResponse | null | undefined): Session[] 
 export function matchesSearch(s: Session, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
-  return [s.name, s.gen_title, s.title, s.cwd, s.tmux_session, s.host]
+  return [s.display_title, s.name, s.gen_title, s.title, s.cwd, s.tmux_session, s.host]
     .filter((v): v is string => typeof v === 'string')
     .join('\n')
     .toLowerCase()

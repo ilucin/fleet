@@ -27,6 +27,12 @@ export interface Session {
   /** First prompt, trimmed to ~300 chars for transport. */
   title?: string | null
   gen_title?: string | null
+  /**
+   * The session's one title, computed by the CLI (core::title::display_title): the chosen
+   * Claude name, else the generated title, else a heuristic. Older CLIs omit it — use
+   * `sessionTitle()` (lib/title.ts), never a field directly.
+   */
+  display_title?: string | null
   /** Context-window usage from the transcript tail; null when unknown (older CLIs omit it). */
   context?: ContextUsage | null
 }
@@ -164,6 +170,21 @@ export interface KillResponse {
   name?: string | null
   process: 'terminated' | 'killed' | 'gone' | 'skipped' | string
   terminal: string
+}
+
+/** POST /api/hosts/:host/sessions/:id/rename → `fleet rename --json` (409 when held). */
+export interface RenameResponse {
+  ok: boolean
+  host: string
+  id: string
+  /** `renamed` (confirmed), `sent` (typed, not reflected yet), `held` (nothing sent). */
+  result: 'renamed' | 'sent' | 'held' | string
+  title: string
+  from?: string
+  /** Why nothing was sent: `waiting` (on a permission prompt / question). */
+  held?: 'waiting' | string | null
+  tmux?: { renamed: boolean; from?: string | null; to?: string | null; note: string } | null
+  message?: string
 }
 
 export interface OkResponse {

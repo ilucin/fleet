@@ -51,8 +51,9 @@ test('shortCwd: home → ~, head-truncated', () => {
 test('firstLine / sessionSubtitle', () => {
   expect(firstLine('\n  \n  hello \nworld')).toBe('hello')
   expect(firstLine(undefined)).toBe('')
-  expect(sessionSubtitle({ gen_title: ' Fix login ', title: 'first prompt' })).toBe('Fix login')
-  expect(sessionSubtitle({ gen_title: null, title: '\nfirst prompt\nmore' })).toBe('first prompt')
+  // The generated title is part of the one title now, never the subtitle.
+  expect(sessionSubtitle({ title: 'first prompt' })).toBe('first prompt')
+  expect(sessionSubtitle({ title: '\nfirst prompt\nmore' })).toBe('first prompt')
   expect(sessionSubtitle({ title: 'x'.repeat(300) })).toBe(`${'x'.repeat(240)}…`)
 })
 

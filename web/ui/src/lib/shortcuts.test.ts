@@ -18,6 +18,8 @@ describe('matchShortcut', () => {
     expect(act('c').action).toBe('new')
     expect(act('n').action).toBe('new')
     expect(act('Escape').action).toBe('back')
+    expect(act('e').action).toBe('rename')
+    expect(act('F2').action).toBe('rename')
     expect(act('?', {}, { shiftKey: true }).action).toBe('help')
     expect(act('G', {}, { shiftKey: true }).action).toBe('last')
     expect(act('[').action).toBe('sidebar')

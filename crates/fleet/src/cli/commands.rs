@@ -12,6 +12,7 @@ use crate::core::backend::{self, Prompt};
 use crate::core::config;
 use crate::core::discovery::{self, Backend, Session, claude_home};
 use crate::core::naming;
+use crate::core::title;
 use crate::error::{Error, Result};
 
 pub use crate::core::config::{NamingConfig, UiConfig};
@@ -100,6 +101,8 @@ pub fn list_rows() -> Vec<Session> {
     // session is *doing* and not only what it's called. Read-only: `list` never
     // generates one.
     naming::stamp_titles(&mut rows);
+    // The one title each view draws, computed once here (docs/architecture.md).
+    title::stamp_display_titles(&mut rows);
     let host = host_label();
     for r in rows.iter_mut() {
         r.host = Some(host.clone());
@@ -148,79 +151,105 @@ pub fn send(target: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
-/// How one rename should be applied.
-#[derive(Clone, Copy, Default)]
-pub struct RenameOpts {
-    /// Bring the session's tmux session name along.
-    pub sync_tmux: bool,
-    /// Send `/rename` even to a busy or waiting session. The hold exists because
-    /// a live turn would read `/rename foo` as its answer; a session that is
-    /// *always* busy would otherwise be unrenameable by any path, so the escape
-    /// hatch is explicit rather than absent.
-    pub force: bool,
+pub use crate::core::title::{
+    Hold, MAX_TITLE as MAX_RENAME, RenameOpts, RenameOutcome, apply_rename,
+    clean_title as clean_name,
+};
+
+/// What `fleet rename --json` prints — one object, whatever happened.
+#[derive(serde::Serialize)]
+pub struct RenameReport {
+    pub ok: bool,
+    /// `renamed` (confirmed in the registry), `sent` (typed, not reflected yet)
+    /// or `held` (nothing sent — see `held`).
+    pub result: &'static str,
+    pub session_id: Option<String>,
+    pub pid: i64,
+    pub host: String,
+    /// The display title before the rename.
+    pub from: String,
+    /// The title asked for (trimmed and capped).
+    pub title: String,
+    /// `busy` / `waiting` when held.
+    pub held: Option<Hold>,
+    /// The tmux side; `null` when sync was off or nothing was sent.
+    pub tmux: Option<TmuxReport>,
+    /// One human line saying what happened.
+    pub message: String,
 }
 
-/// What [`apply_rename`] did.
-pub enum RenameOutcome {
-    /// `/rename` was typed into the session. The note, when present, describes
-    /// what happened to its tmux session name.
-    Sent(Option<String>),
-    /// Nothing was sent, and why.
-    Held(String),
+#[derive(serde::Serialize)]
+pub struct TmuxReport {
+    pub renamed: bool,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub note: String,
 }
 
-/// Drive Claude's own `/rename` for one session, then (optionally) bring its
-/// tmux session name along.
+impl From<&backend::TmuxSync> for TmuxReport {
+    fn from(t: &backend::TmuxSync) -> Self {
+        match t {
+            backend::TmuxSync::Renamed { from, to } => TmuxReport {
+                renamed: true,
+                from: Some(from.clone()),
+                to: Some(to.clone()),
+                note: t.to_string(),
+            },
+            backend::TmuxSync::Skipped(why) => TmuxReport {
+                renamed: false,
+                from: None,
+                to: None,
+                note: why.clone(),
+            },
+        }
+    }
+}
+
+/// Rename a session: Claude's own `/rename` (the source of truth), then the
+/// tmux session name derived from it — one call. The registry (and so every
+/// fleet view) picks the new title up on its next status write.
 ///
-/// The single choke point for every rename: the CLI verbs, `name --apply` and
-/// the dashboard's rename buffer all come through here, so the "never type into
-/// a live turn" rule can't be forgotten in one of them. `backend::send` types
-/// into a real Claude TUI — a session mid-turn, or sitting on a permission
-/// prompt, would receive `/rename foo` as its *answer*.
-pub fn apply_rename(s: &Session, name: &str, o: RenameOpts) -> Result<RenameOutcome> {
-    if !o.force {
-        if s.status == "busy" {
-            return Ok(RenameOutcome::Held(format!(
-                "{} is mid-turn — nothing sent (--force overrides)",
-                s.headline()
-            )));
-        }
-        if s.is_waiting() {
-            return Ok(RenameOutcome::Held(format!(
-                "{} is waiting on you — nothing sent (--force overrides)",
-                s.headline()
-            )));
-        }
-    }
-    backend::send(s, &format!("/rename {name}"))?;
-    if !o.sync_tmux {
-        return Ok(RenameOutcome::Sent(None));
-    }
-    Ok(RenameOutcome::Sent(
-        match backend::rename_tmux_session(s, name) {
-            Ok(backend::TmuxSync::Renamed(msg)) => Some(msg),
-            Ok(backend::TmuxSync::Skipped(why)) => Some(why),
-            // The Claude rename already landed; a tmux failure is a footnote,
-            // not a reason to report the whole thing as failed.
-            Err(e) => Some(format!("tmux not renamed: {e}")),
-        },
-    ))
-}
-
-/// Rename a session by driving Claude's own `/rename` — the registry (and so
-/// every fleet view) picks the new name up on its next status write.
-pub fn rename(target: &str, name: &str, no_tmux_sync: bool, force: bool) -> Result<()> {
+/// Held (busy / waiting) is an error: exit 3 with `--json` (the report is on
+/// stdout), exit 1 otherwise. Nothing is queued — the caller retries when the
+/// session is idle, or passes `--force`.
+pub fn rename(target: &str, name: &str, no_tmux_sync: bool, force: bool, json: bool) -> Result<()> {
     let s = discovery::resolve(target).map_err(Error::Other)?;
     let name = clean_name(name)?;
-    let was = s.label();
+    let mut rows = vec![s];
+    naming::stamp_titles(&mut rows);
+    let s = rows.remove(0);
+    let was = s.headline();
     let opts = RenameOpts {
         sync_tmux: !no_tmux_sync && naming_config().sync_tmux(),
         force,
     };
-    match apply_rename(&s, &name, opts)? {
-        RenameOutcome::Held(why) => return Err(Error::Other(why)),
-        RenameOutcome::Sent(note) => {
-            if let Some(note) = note {
+    let mut report = RenameReport {
+        ok: false,
+        result: "held",
+        session_id: s.session_id.clone(),
+        pid: s.pid,
+        host: host_label(),
+        from: was.clone(),
+        title: name.clone(),
+        held: None,
+        tmux: None,
+        message: String::new(),
+    };
+    let outcome = apply_rename(&s, &name, opts)?;
+    let tmux_note = outcome.tmux_note();
+    match &outcome {
+        RenameOutcome::Held(h, why) => {
+            report.held = Some(*h);
+            report.message = why.clone();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                return Err(Error::exit(3, ""));
+            }
+            return Err(Error::Other(why.clone()));
+        }
+        RenameOutcome::Sent(t) => {
+            report.tmux = t.as_ref().map(TmuxReport::from);
+            if !json && let Some(note) = &tmux_note {
                 println!("{}", note.dimmed());
             }
         }
@@ -228,19 +257,32 @@ pub fn rename(target: &str, name: &str, no_tmux_sync: bool, force: bool) -> Resu
 
     // Confirm from the registry rather than trusting the keystrokes landed.
     let deadline = Instant::now() + Duration::from_secs(10);
+    let mut confirmed = false;
     while Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(400));
         if let Some(now) = discovery::discover().iter().find(|r| r.key() == s.key())
             && now.name.as_deref() == Some(name.as_str())
         {
-            println!("{} → {}", was.dimmed(), name.bold());
-            return Ok(());
+            confirmed = true;
+            break;
         }
     }
-    println!(
-        "sent `/rename {name}` to {} — not reflected yet, check `fleet list`",
-        was.bold()
-    );
+    report.ok = true;
+    if confirmed {
+        report.result = "renamed";
+        report.message = format!("{was} → {name}");
+    } else {
+        report.result = "sent";
+        report.message =
+            format!("sent `/rename {name}` to {was} — not reflected yet, check `fleet list`");
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if confirmed {
+        println!("{} → {}", was.dimmed(), name.bold());
+    } else {
+        println!("{}", report.message);
+    }
     Ok(())
 }
 
@@ -315,7 +357,28 @@ pub fn name(target: Option<String>, o: NameOpts) -> Result<()> {
         );
     }
 
-    for (s, result) in generate(&targets, &cfg, how) {
+    // A still-unnamed session alone in a tmux session somebody named takes that
+    // name as its title (no model call): the tmux name is derived from the title
+    // now, so generating one would clobber the name the user picked.
+    let mut results = Vec::new();
+    let mut rest = Vec::new();
+    for s in targets {
+        match title::adoptable_tmux_name(&s) {
+            Some(n) => results.push((
+                s,
+                Ok(naming::Suggestion {
+                    name: n,
+                    source: naming::NameSource::Tmux,
+                    note: None,
+                }),
+            )),
+            None => rest.push(s),
+        }
+    }
+    if !rest.is_empty() {
+        results.extend(generate(&rest, &cfg, how));
+    }
+    for (s, result) in results {
         let was = s.label();
         let suggestion = match result {
             Ok(s) => s,
@@ -335,13 +398,13 @@ pub fn name(target: Option<String>, o: NameOpts) -> Result<()> {
             continue;
         }
         match apply_rename(&s, new, rename_opts) {
-            Ok(RenameOutcome::Sent(note)) => {
+            Ok(outcome @ RenameOutcome::Sent(_)) => {
                 println!("{}  →  {}", was.dimmed(), new.bold());
-                if let Some(note) = note {
+                if let Some(note) = outcome.tmux_note() {
                     println!("   {}", note.dimmed());
                 }
             }
-            Ok(RenameOutcome::Held(why)) => println!("{} {}", "⏸".yellow(), why.dimmed()),
+            Ok(RenameOutcome::Held(_, why)) => println!("{} {}", "⏸".yellow(), why.dimmed()),
             Err(e) => eprintln!("{} {was}: {e}", "✕".red()),
         }
     }
@@ -401,26 +464,6 @@ fn generate(
             (s.clone(), r)
         })
         .collect()
-}
-
-/// The longest name any path may send. Generated names are capped at
-/// [`naming::MAX_NAME`]; this is the looser cap for one a human typed, and it
-/// exists because the name goes out as `/rename <name>` into a live TUI *and*
-/// becomes a tmux session name.
-pub const MAX_RENAME: usize = 64;
-
-/// A session name has to survive being typed into a TUI prompt as one line.
-/// Over-long names are cropped rather than refused — the user typed something,
-/// and a 300-character tmux session name helps nobody.
-pub fn clean_name(name: &str) -> Result<String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(Error::Other("empty name".into()));
-    }
-    if name.contains(['\n', '\r']) {
-        return Err(Error::Other("name must be a single line".into()));
-    }
-    Ok(name.chars().take(MAX_RENAME).collect::<String>())
 }
 
 /// Everything `spawn` and `handoff` share about *where* the new session lands.
@@ -688,37 +731,6 @@ mod tests {
         assert_eq!(wide.chars().count(), MAX_RENAME);
     }
 
-    // The hold protects a live turn from reading `/rename foo` as its answer.
-    // A session that is essentially always busy still has to be renameable.
-    #[test]
-    fn a_busy_session_is_held_unless_forced() {
-        let busy = Session {
-            pid: 1,
-            status: "busy".into(),
-            name: Some("auth-spike".into()),
-            ..Default::default()
-        };
-        let held = apply_rename(&busy, "x", RenameOpts::default()).unwrap();
-        match held {
-            RenameOutcome::Held(why) => assert!(why.contains("--force"), "{why}"),
-            RenameOutcome::Sent(_) => panic!("a busy session must not be typed into"),
-        }
-        // Forced, the hold is gone: this fixture has no handle, so the send
-        // fails — what matters is that it got as far as trying.
-        let forced = apply_rename(
-            &busy,
-            "x",
-            RenameOpts {
-                sync_tmux: false,
-                force: true,
-            },
-        );
-        assert!(
-            !matches!(forced, Ok(RenameOutcome::Held(_))),
-            "--force must bypass the hold"
-        );
-    }
-
     #[test]
     fn slugs_come_from_the_first_meaningful_line() {
         assert_eq!(
@@ -757,6 +769,7 @@ mod tests {
             waiting_for: None,
             title: None,
             gen_title: None,
+            display_title: None,
             host: None,
             context: None,
         };

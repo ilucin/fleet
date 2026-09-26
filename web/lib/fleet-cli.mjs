@@ -1,6 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contracts (`fleet list --json`, `fleet name --all --apply`, `fleet group`) are documented in one spot (see ARCHITECTURE.md).
+// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet group`) are documented in one
+// spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
 // and adds a header, so lib/backends.mjs drives tmux / iTerm directly.
@@ -44,14 +45,15 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   }
 
   /**
-   * The naming pass: `fleet name --all --apply --no-tmux-sync` (or `-n name --all` for a
-   * dry run). Generates task-shaped names for every session still carrying Claude's
-   * cwd+hash name and types `/rename` into the idle ones (the CLI holds busy/waiting ones).
-   * tmux is left alone here; lib/autoname.mjs syncs only generic tmux names.
+   * The naming pass: `fleet name --all --apply` (or `-n name --all` for a dry run).
+   * Generates task-shaped names for every session still carrying Claude's cwd+hash name
+   * and types `/rename` into them (the CLI holds ones waiting on a prompt). The CLI
+   * brings each renamed session's tmux name along (a slug of the title) — one rename
+   * path for everything, see docs/architecture.md → "Session titles".
    * Resolves { stdout, stderr } (human output, NO_COLOR); throws FleetCliError.
    */
   async function nameAll({ dryRun = false, timeoutMs: t = 300 * 1000 } = {}) {
-    const args = dryRun ? ['-n', 'name', '--all'] : ['name', '--all', '--apply', '--no-tmux-sync'];
+    const args = dryRun ? ['-n', 'name', '--all'] : ['name', '--all', '--apply'];
     try {
       const { stdout, stderr } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
       return { stdout: stdout ?? '', stderr: stderr ?? '' };
@@ -60,6 +62,35 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
       if (killed) throw new FleetCliError(`fleet name timed out after ${Math.round(t / 1000)}s`, { timedOut: true });
       if (err?.code === 'ENOENT') throw new FleetCliError(`fleet binary not found (${bin})`);
       throw new FleetCliError(String(err?.message ?? err));
+    }
+  }
+
+  /**
+   * Rename one session: `fleet rename <target> <title> --json` — Claude's `/rename` (the
+   * title, the source of truth) plus the derived tmux name. Resolves the report
+   * ({ ok, result: renamed|sent|held, held, tmux, message, … }); a held session (waiting
+   * on a prompt, exit 3) resolves too, with `ok: false`. Throws FleetCliError otherwise.
+   */
+  async function rename({ target, title, timeoutMs: t = 20 * 1000 } = {}) {
+    const args = ['rename', String(target), String(title), '--json'];
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      // Held exits 3 with the report on stdout; anything else is a real failure.
+      const report = tryObject(err?.stdout);
+      if (report && report.result === 'held') return report;
+      throw wrap(err, 'fleet rename', t);
+    }
+    return parseObject(stdout, 'fleet rename');
+  }
+
+  function tryObject(text) {
+    try {
+      const v = JSON.parse(String(text ?? '').trim());
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+    } catch {
+      return null;
     }
   }
 
@@ -109,5 +140,5 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, 'fleet group --cached');
   }
 
-  return { bin, list, nameAll, groupRun, groupCached };
+  return { bin, list, nameAll, rename, groupRun, groupCached };
 }

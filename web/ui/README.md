@@ -32,7 +32,9 @@ src/
   api/types.ts        API types (Session, Host, FleetResponse, Message, …) — mirror ARCHITECTURE.md
   api/client.ts       typed fetch client: api.fleet(), api.messages(), api.send(), … + ApiError, sessionErrorMessage
   api/spawnWatch.ts   after a spawn: poll the fleet until the new session registers
-  lib/format.ts       pure display helpers: relTime, clockTime, shortCwd, sessionSubtitle, hostColorSlot
+  lib/format.ts       pure display helpers: relTime, clockTime, shortCwd, sessionSubtitle (first prompt), hostColorSlot
+  lib/title.ts        the one session title: sessionTitle() (display_title + optimistic override), validateTitle(),
+                      titleChanged(), renameFailure() / tmuxNote() toast copy, echoesTitle()
   lib/sessions.ts     status meta/labels, filters, search, sort, listView(), findSession(), sessionHref(),
                       spawnTargets(), findSpawned(), withoutSession()
   lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
@@ -57,10 +59,13 @@ src/
   hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
                       every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now
   hooks/useMediaQuery.ts   useMediaQuery(), useIsDesktop() (≥ 1024px), WIDE_QUERY (≥ 1440px)
+  hooks/useTitles.ts  inline-rename store: startEditing/openTitleEditor/stopEditing, useEditing(scope, key),
+                      useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
+  hooks/useLongPress.ts  touch long-press on a row link (swallows the click that follows)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
-  components/         app components: StatusDot, HostBadge/HostDot, SessionRow, SessionListSkeleton, ScreenHeader,
+  components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board)
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
@@ -96,11 +101,21 @@ src/
 - **Text from sessions is data**: render it as text (React escapes); never `dangerouslySetInnerHTML`.
   Markdown must stay DOM-only with `http(s)` links only, like `../public/markdown.js`.
 - Pure logic goes in `lib/` with a `*.test.ts` next to it.
+- **Titles**: draw a session's name only through `sessionTitle()` / `useSessionTitle()` /
+  `<EditableTitle>` — never `s.name` or `s.gen_title` directly. The CLI's `display_title` is the
+  one title (docs/architecture.md → Session titles); the tmux name is details-panel metadata only.
 
 ## Features
 
 - **List** (`#/`): all sessions across hosts, status + host filter chips, search, unreachable-host
   banners, `+` → New session.
+- **Inline rename** (`EditableTitle`): rows, board cards and the session header show the one
+  title; the tmux session name is not on rows any more (it follows the title — details panel only).
+  Open the editor with the pencil on row hover (desktop), `e` / F2 (the open session's header,
+  else the cursor row/card), ⌘K → Rename session…, a click on the header title, a long press on
+  a row (touch), or ⋯ → Rename…. Enter / ✓ saves, Esc / ✕ / clicking away cancels. Saving is
+  optimistic (spinner) → `POST …/rename`; a 409 (session waiting on a prompt) or an error rolls
+  back with a toast; success toasts the new title and the tmux rename.
 - **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by
   what they work on. Groups come from `GET /api/groups` (the server's periodic `fleet group`
   pass — stable ids, a 2–4 word label, an optional description); sessions no group claims yet
@@ -120,7 +135,7 @@ src/
   opens the session. Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys).
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
-  - header: back, name, status, host, "updated Xs ago", Chat | Term toggle, ⋯;
+  - header: back, title (click to rename), status, host, "updated Xs ago", Chat | Term toggle, ⋯;
   - **Chat** polls `messages` every 3s (60 → 200 → 500 with "Load older", which keeps the same
     message under the thumb); bubbles for user / Claude, quiet progress notes (hideable), centred
     command / system lines, time captions per burst, "Claude is working…" / "Needs you" footer;
@@ -136,7 +151,7 @@ src/
   a toast per result; two follow-up polls after steering.
 - **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
   (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),
-  Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
+  Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
   session details (tmux, backend, pid, id), Close session (two taps within 5s → `api.kill`, back
   to the list, row dropped optimistically).
 - **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;

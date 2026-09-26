@@ -812,12 +812,19 @@ mod tests {
     #[test]
     fn the_generated_title_outranks_the_session_and_tab_names() {
         let mut s = session("app-03", "busy");
+        s.name_source = Some("derived".into());
         s.tab = Some("✳ some tab title".into());
         s.gen_title = Some("upload-retry-limit".into());
         let p = plan(170, 40, 3, width_of("upload-retry-limit"), None);
         let out = drawn(&s, &p, 0, false).join("\n");
         assert!(out.contains("upload-retry-limit"), "{out}");
         assert!(!out.contains("app-03"), "{out}");
+        // A name somebody chose *is* the title: it outranks the generated one.
+        s.name = Some("retry-cap".into());
+        s.name_source = Some("user".into());
+        let out = drawn(&s, &p, 0, false).join("\n");
+        assert!(out.contains("retry-cap"), "{out}");
+        assert!(!out.contains("upload-retry-limit"), "{out}");
     }
 
     // Until the titling pass answers there is still a row to draw.
@@ -834,6 +841,7 @@ mod tests {
     #[test]
     fn the_name_cell_is_sized_to_the_headline() {
         let mut s = session("app-03", "busy");
+        s.name_source = Some("derived".into());
         s.gen_title = Some("results-list-rerender".into());
         let p = plan(170, 40, 3, width_of("results-list-rerender"), None);
         assert_eq!(

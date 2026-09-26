@@ -74,6 +74,19 @@ export function validateSendText(text) {
   return { ok: true, text };
 }
 
+/** Same cap as the CLI (`fleet rename`, core::title::MAX_TITLE). */
+export const MAX_TITLE = 64;
+
+/** A session title for `rename`: trimmed, single line, 1..64 chars. */
+export function validateTitle(title) {
+  if (typeof title !== 'string') return { ok: false, error: 'title must be a string' };
+  const t = title.trim();
+  if (!t) return { ok: false, error: 'title must not be blank' };
+  if (/[\r\n]/.test(t)) return { ok: false, error: 'title must be a single line' };
+  if ([...t].length > MAX_TITLE) return { ok: false, error: `title too long (max ${MAX_TITLE} chars)` };
+  return { ok: true, title: t };
+}
+
 export const ALLOWED_KEYS = ['Enter', 'Escape', 'Up', 'Down'];
 
 export function validateKey(key) {

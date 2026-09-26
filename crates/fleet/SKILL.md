@@ -137,10 +137,11 @@ Keep working on whatever the user kept here — the point of a handoff is that b
 
 ## Session names
 
-The name is Claude's own, from its session registry — fleet reads it, and can *propose* a new one, but only Claude's `/rename` ever sets it. By default a session is named after its cwd plus a short hash (`app-f9`), which is why five sessions in the same repo look alike. Five ways to fix that:
+**One title per session.** The Claude session name is the source of truth — Claude's own, from its session registry; fleet reads it, and can *propose* a new one, but only Claude's `/rename` ever sets it. Every view (list, TUI, web) draws one title, `display_title` in `list --json`: the name when someone chose it, else the generated title, else a slug of the first prompt. The tmux session name is derived from it (a slug, kept in sync on every rename) — don't treat it as a second name. By default a session is named after its cwd plus a short hash (`app-f9`), which is why five sessions in the same repo look alike. Five ways to fix that:
 
 - **At launch:** `spawn`/`handoff --name "<name>"` (passes `claude -n`), so it lands in the fleet already named. Name every session you spawn — one glance at `list` should say *which* piece of work it is, not which folder.
-- **From outside:** `fleet rename <target> "<name>"` — sends `/rename` to that session and confirms the registry picked it up.
+- **From outside:** `fleet rename <target> "<name>"` — sends `/rename` to that session, renames its tmux session to match, and confirms the registry picked it up (`--json` for a machine-readable report).
+- **From the web UI:** click the session header title, the pencil on a row, `e`/F2, or long-press a row on a phone.
 - **In the `watch` TUI:** select a row, press `n`, type, ⏎ (esc cancels). The buffer is pinned to the session you started it on, so a poll re-sorting the list under you can't redirect the rename.
 - **Inside a session:** `/rename <name>` (or `/name`); with no argument Claude names the conversation from its own context.
 - **Let it name itself:** `fleet name <target>` (or `N` in the TUI) — see below.
@@ -166,7 +167,8 @@ That one slug is used two ways, and the difference matters:
 
 Other things worth knowing:
 
-- **Never renames a session mid-turn.** `/rename` is typed into a live Claude TUI, so a busy session, or one sitting on a permission prompt, would read it as its answer. Those are *held* with a note instead — rename them when they go idle. The hold covers **every** path: `rename`, `name --apply` and the TUI's rename buffer. `fleet rename <target> <name> --force` overrides it for a session that is essentially always busy — it really does type into the live turn, so confirm with the user first.
+- **Never renames a session waiting on you.** `/rename` is typed into a live Claude TUI, so a session sitting on a permission prompt or a question would read it as its *answer*. Those are *held* with a note instead — rename them once answered. The hold covers **every** path: `rename`, `name --apply`, the TUI's rename buffer and the web UI. A **busy** session is fine: Claude runs `/rename` as a local command mid-turn without disturbing the turn. `fleet rename <target> <name> --force` overrides the hold — the keys really land in the prompt, so confirm with the user first.
+- **A hand-picked tmux name is kept.** A still-unnamed session alone in a tmux session somebody named (`fleet new fix-login`) takes that name as its title in `name`/`--all` (shown as `(tmux)`) instead of a generated one.
 - **A model answer has to look like a name.** The reply is only accepted when it is a single kebab-case token: anything carrying a space or an apostrophe is a refusal or a CLI error ("I cannot provide a name.", "Credit balance is too low", "Invalid API key · Please run /login"), and those are rejected, retried, and never cached. So `(heuristic)` after a name means "the model said something unusable", not necessarily "the model was down".
 - **`--all` only touches Claude-derived names** (`name_source == "derived"`). A name a human or an earlier pass chose is left alone.
 - **Names are cached** in `~/.claude/fleet-names.json`, keyed by session and by a hash of what was fed to the model, so re-running `name` on an unchanged session is free, and the dashboard opens with last run's titles already on screen rather than a screen of `app-9d`. A cached title whose input has since drifted is still drawn — it describes the work better than the session name does — and is regenerated in the background. Only usable model answers are cached — never a heuristic guess, never a rejected reply. `--refresh` is how you replace an entry. The cache is written atomically — two `watch` instances (say a Mac and a phone) can share it.
@@ -175,7 +177,7 @@ Other things worth knowing:
 
 ### tmux session sync
 
-One tmux session per job is the convention this serves, so a **confirmed** rename also renames the session's tmux session — `⧉ app-3` becomes `⧉ docs-refresh`. It applies to `rename`, `name --apply` and the TUI's rename buffer; `--no-tmux-sync` or config `naming.syncTmux = false` opts out. Handles are pane ids, so a rename can never break `peek`/`send`/focus.
+One tmux session per job is the convention this serves, so the tmux session name is **derived from the title**: every rename also renames the session's tmux session to a slug of it — `⧉ app-3` becomes `⧉ docs-refresh`, `Fix Login` becomes `fix-login`. It applies to `rename`, `name --apply`, the TUI's rename buffer and the web UI; `--no-tmux-sync` or config `naming.syncTmux = false` opts out. Handles are pane ids, so a rename can never break `peek`/`send`/focus. The other direction: `fleet tmux rename` of a tmux session that holds just one Claude session renames that Claude session (the title) — a raw `tmux rename-session` is overwritten the next time the title changes. iTerm tab titles are never touched.
 
 It refuses, with a logged reason rather than an error, when:
 
@@ -184,7 +186,7 @@ It refuses, with a logged reason rather than an error, when:
 - it has more than one window or pane — one-session-one-job visibly doesn't hold there, so the name isn't ours to rewrite;
 - the session is an iTerm tab, or its backend is unknown.
 
-`:`, `.` and whitespace become `-` before tmux sees them (tmux would silently rewrite them to `_`), and a name already taken gets a `-2`/`-3` suffix.
+The slug is lowercase kebab-case (accents folded, ≤ 48 chars), so tmux never rewrites it; a name already taken gets a `-2`/`-3` suffix, and a session already carrying its derived name (suffix included) is left alone.
 
 ### `naming` config
 

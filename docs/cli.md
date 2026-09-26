@@ -43,8 +43,8 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet list [--json] [-a, --all-hosts]` (alias `ls`) | live sessions: title, status, age, context usage (`ctx 62%`), terminal, cwd. `--json` is an array whose rows all carry `host`; `-a` queries every configured host in parallel |
 | `fleet peek <target> [--lines N]` | what the session's terminal shows now (default 40 lines) |
 | `fleet send <target> <text>` | type text into the session and press Enter |
-| `fleet rename <target> <name> [--no-tmux-sync] [--force]` | send Claude's `/rename`; also renames the session's tmux session. Busy sessions are held unless `--force` |
-| `fleet name [<target> \| --all] [--apply] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing; only `--apply` sends it. `--all` = every session with a derived (cwd+hash) name. `--refresh` ignores the cache |
+| `fleet rename <target> <title> [--no-tmux-sync] [--force] [--json]` | rename the session's one title: Claude's `/rename` (the source of truth), then its tmux session follows as a slug of it (`Fix Login` → `fix-login`, `-2` on a collision) when the tmux session is that Claude session's own (one window, one pane). A session **waiting on a prompt** is held (exit 1; `--json`: exit 3) — typed keys would be its answer; busy sessions are fine (Claude runs `/rename` mid-turn without disturbing the turn). `--force` overrides the hold. `--json` prints `{ ok, result: renamed\|sent\|held, session_id, pid, host, from, title, held, tmux: { renamed, from, to, note }, message }` |
+| `fleet name [<target> \| --all] [--apply] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing; only `--apply` sends it (through the same path as `rename`, tmux included). `--all` = every session with a derived (cwd+hash) name. A derived-name session alone in a tmux session somebody named (`fleet new fix-login`) adopts that name (`(tmux)`, no model call) instead of getting a generated one. `--refresh` ignores the cache |
 | `fleet group [-a, --all-hosts] [--json] [--apply] [--refresh] [--consolidate] [--input <file\|->] [--cached]` | sort sessions into work-stream groups (the web Board view) — see [Grouping](#grouping). Reads sessions and asks `claude -p`; never sends anything to a session |
 | `fleet spawn [prompt] --dir <path> [--name <n>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new Claude session in a new tab/pane. Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing) |
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--name <n>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
@@ -121,15 +121,18 @@ alone lists. Alias: `fleet t …`; `enter` (alias `e`), `last` and `new` also ex
 | `fleet tmux last` | attach to the session you were in before the current one |
 | `fleet tmux new [name] [-d] [-C <dir>] [-- cmd]` | attach to, or create, a session (default `main`). `-d` creates without attaching |
 | `fleet tmux kill <query> [-f]` | kill a session (asks first; `-f` skips) |
-| `fleet tmux rename <query> <name>` | rename a tmux session |
+| `fleet tmux rename <query> <name>` | rename a tmux session — when it hosts exactly one Claude session (one window, one pane), the rename goes through that session's title instead (`fleet rename`), so the two stay in sync |
 | `fleet tmux stale [--kill] [--older-than 24h] [--no-fleet-check] [-f] [-q] [--json]` | idle shells nothing uses; lists only unless `--kill` |
 
 Details:
 
 - **Names** are sanitized the same way by `new` and `rename`: anything outside `A-Za-z0-9_-`
   becomes `-`, runs collapse, leading/trailing `-` are dropped.
-- `tmux rename` renames the tmux session; `fleet rename` renames the *Claude* session (and its
-  tmux session with it). Different things.
+- One title per session (see [architecture → Session titles](architecture.md#session-titles)):
+  `fleet rename` sets the Claude name and the tmux name follows. `tmux rename` of a single-Claude
+  tmux session does the same (renames Claude, if it is waiting on a prompt only tmux is renamed,
+  with a note); of any other tmux session it renames just the tmux session. A raw
+  `tmux rename-session` is not watched — it sticks until the title next changes.
 - **stale** = no Claude session in it, an idle shell with no background or suspended job, idle
   longer than `--older-than` (`30m`, `12h`, `7d`, or a number of hours; max `3650d`). Candidates
   are cross-checked against live Claude sessions (the same discovery as `fleet list`); if that

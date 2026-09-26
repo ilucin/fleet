@@ -7,7 +7,7 @@ export function autoNameToast(run: AutoNameRun): string {
   const renamed = run.renamed ?? []
   const held = run.held?.length ?? 0
   if (renamed.length) return `Renamed ${renamed.length}: ${renamed.map((r) => r.to).join(', ')}`
-  return `Nothing to rename${held ? ` (${held} busy)` : ''}`
+  return `Nothing to rename${held ? ` (${held} waiting on you)` : ''}`
 }
 
 /** Short "what happened" for the ⋯ menu: "renamed 2 · 1 held", "failed", "no changes". */

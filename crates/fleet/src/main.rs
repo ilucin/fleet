@@ -112,7 +112,7 @@ enum Commands {
         text: String,
     },
 
-    /// Rename a Claude session (drives Claude's own /rename)
+    /// Rename a session: Claude's own /rename (the title), then its tmux session follows
     Rename {
         /// sessionId prefix, derived name, or pid
         target: String,
@@ -121,9 +121,12 @@ enum Commands {
         /// Leave the session's tmux session name alone
         #[arg(long)]
         no_tmux_sync: bool,
-        /// Rename even a busy session (types into its live turn — be sure)
+        /// Rename even a session waiting on a prompt (the keys land in the prompt — be sure)
         #[arg(long)]
         force: bool,
+        /// Print one JSON object (result renamed/sent/held, tmux sync); held exits 3
+        #[arg(long)]
+        json: bool,
     },
 
     /// Suggest a name for a session from what it is actually working on
@@ -506,7 +509,8 @@ fn run(cli: Cli) -> Result<i32> {
             name,
             no_tmux_sync,
             force,
-        } => commands::rename(&target, &name, no_tmux_sync, force)?,
+            json,
+        } => commands::rename(&target, &name, no_tmux_sync, force, json)?,
         Commands::Name {
             target,
             all,

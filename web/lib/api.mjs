@@ -2,7 +2,7 @@
 // static UI; tests mount it on an ephemeral port with fake dependencies.
 // Endpoint reference: ARCHITECTURE.md → "HTTP API".
 import { HttpError, readJsonBody } from './http.mjs';
-import { clampLines, findSession, resolveHost, validateKey, validateSendText } from './util.mjs';
+import { clampLines, findSession, resolveHost, validateKey, validateSendText, validateTitle } from './util.mjs';
 import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import { fetchPeerHost as defaultFetchPeerHost, proxyToPeer as defaultProxyToPeer } from './peers.mjs';
 import { createSnapshot } from './snapshot.mjs';
@@ -10,8 +10,8 @@ import { DISABLED_GROUPS } from './grouping.mjs';
 
 export const API_VERSION = 1;
 
-const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|kill)$/;
-const POST_ACTIONS = new Set(['send', 'keys', 'kill']);
+const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|kill|rename)$/;
+const POST_ACTIONS = new Set(['send', 'keys', 'kill', 'rename']);
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 
@@ -31,6 +31,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   transcripts lib/transcript.mjs reader
  *   spawner     lib/spawn.mjs spawner
  *   killer      lib/kill.mjs killer (kill action; absent → 501)
+ *   cli         lib/fleet-cli.mjs instance — `rename` (absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
@@ -47,6 +48,7 @@ export function createApi({
   transcripts,
   spawner,
   killer = null,
+  cli = null,
   autoNamer = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
@@ -145,6 +147,27 @@ export function createApi({
         status: 200,
         body: { ok: true, host: config.self, id: session.session_id, name: session.name ?? null, ...result },
       };
+    }
+
+    if (action === 'rename') {
+      if (typeof cli?.rename !== 'function') throw new HttpError('rename is not available on this server', 501);
+      const check = validateTitle(body.title);
+      if (!check.ok) throw new HttpError(check.error, 400);
+      const session = await resolveLocalSession(id);
+      // The session id, never a fuzzy name: `fleet rename` types into a live agent.
+      const target = session.session_id || String(session.pid);
+      let report;
+      try {
+        report = await cli.rename({ target, title: check.title });
+      } catch (err) {
+        throw new HttpError(`rename failed: ${err?.message ?? err}`, err?.timedOut ? 504 : 502);
+      }
+      if (report.result === 'held') {
+        // Waiting on a prompt: nothing was typed. 409 so the UI rolls back and says why.
+        return { status: 409, body: { host: config.self, id: session.session_id, error: report.message || 'session is waiting on you — nothing sent', ...report } };
+      }
+      refreshFleet();
+      return { status: 200, body: { host: config.self, id: session.session_id, ...report, ok: true } };
     }
 
     if (action === 'send') {

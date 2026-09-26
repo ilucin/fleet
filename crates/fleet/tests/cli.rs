@@ -108,8 +108,8 @@ fn name_offers_a_way_past_the_cache() {
     assert!(out.status.success(), "--no-cache is not accepted");
 }
 
-// The busy/waiting hold is the right default, but a session that is essentially
-// always mid-turn must not become unrenameable by every path there is.
+// The waiting hold is the right default, but a session that is essentially
+// always waiting on a prompt must not become unrenameable by every path there is.
 #[test]
 fn rename_help_documents_the_force_escape_hatch() {
     let out = fleet().args(["rename", "--help"]).output().unwrap();
@@ -221,7 +221,7 @@ fn fixture_mode_replaces_discovery() {
         &path,
         r#"[{"pid":42,"session_id":"fixture-1","name":"cache-warmup-scheduler",
              "cwd":"/tmp/wt/api-server","status":"waiting","waiting_for":"input needed",
-             "tmux_session":"api-server","backend":"tmux","name_source":"derived",
+             "tmux_session":"api-server","backend":"tmux","name_source":"user",
              "title":"make the cache warmup idempotent"}]"#,
     )
     .unwrap();
@@ -247,8 +247,50 @@ fn fixture_mode_replaces_discovery() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v[0]["tmux_session"], "api-server");
-    assert_eq!(v[0]["name_source"], "derived");
+    assert_eq!(v[0]["name_source"], "user");
     assert_eq!(v[0]["waiting_for"], "input needed");
+    // The one title, computed in core: the chosen Claude name.
+    assert_eq!(v[0]["display_title"], "cache-warmup-scheduler");
+}
+
+// A derived Claude name never becomes the display title while something better
+// is known — and `rename --json` in fixture mode reports without typing.
+#[test]
+fn display_title_skips_a_derived_name_and_rename_json_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet.json");
+    std::fs::write(
+        &path,
+        r#"[{"pid":42,"session_id":"fixture-1","name":"app-9d","name_source":"derived",
+             "cwd":"/tmp/app","status":"waiting","backend":"tmux","handle":"%99",
+             "title":"why is the statusline blank"}]"#,
+    )
+    .unwrap();
+    let out = fleet()
+        .args(["list", "--json"])
+        .env("FLEET_FIXTURE", &path)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v[0]["display_title"], "why-is-the-statusline-blank");
+    assert_eq!(v[0]["name"], "app-9d");
+
+    // Waiting on a prompt: held, nothing typed, exit 3, and the report says why.
+    let out = fleet()
+        .args(["rename", "fixture-1", "Fix statusline", "--json"])
+        .env("FLEET_FIXTURE", &path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    let r: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(r["ok"], false);
+    assert_eq!(r["result"], "held");
+    assert_eq!(r["held"], "waiting");
+    assert_eq!(r["title"], "Fix statusline");
+    assert!(
+        r["message"].as_str().unwrap().contains("waiting on you"),
+        "{r}"
+    );
 }
 
 // Fixture mode is advertised as a demo/screenshot mode, so it has to be inert:

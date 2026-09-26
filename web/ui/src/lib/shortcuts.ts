@@ -21,6 +21,7 @@ export type ShortcutAction =
   | 'help'
   | 'refresh'
   | 'view'
+  | 'rename'
 
 export interface KeyLike {
   key: string
@@ -70,6 +71,8 @@ const PLAIN: Record<string, ShortcutAction> = {
   '[': 'sidebar',
   i: 'inspector',
   b: 'view',
+  e: 'rename',
+  F2: 'rename',
   '?': 'help',
 }
 
@@ -152,6 +155,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
     title: 'Session',
     items: [
       { keys: [['r']], label: 'Reply (focus the composer)' },
+      { keys: [['e'], ['F2']], label: 'Rename (the open session, else the cursor row)' },
       { keys: [['g', 'c']], label: 'Chat view' },
       { keys: [['g', 't']], label: 'Terminal view' },
       { keys: [['Enter']], label: 'Send (in the composer; also mod+Enter)' },

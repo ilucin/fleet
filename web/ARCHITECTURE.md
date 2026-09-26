@@ -88,6 +88,7 @@ pid, session_id (uuid), name, cwd, status ("busy"|"idle"|"waiting"|"unknown"), u
 tty, backend ("iterm"|"tmux"|"unknown"), handle (iTerm session id | tmux pane id like "%87"),
 tab, tmux_session (string|null), name_source, waiting_for (string|null),
 title (first prompt, may be long), gen_title (string|null),
+display_title (string — THE title to draw, see docs/architecture.md → Session titles),
 context ({ used, window, pct, model } | null — context-window usage, see docs/architecture.md)
 ```
 
@@ -97,9 +98,14 @@ chars (+ `…`) for transport: the first prompt can run to 10 KB and the list sh
 Every other field, `context` included, is passed through untouched (older CLIs omit `context`;
 UIs treat a missing one as unknown).
 
-The naming pass is `fleet name --all --apply --no-tmux-sync` (timeout 5 min, `NO_COLOR=1`); its
-human output is parsed line by line: `<from>  →  <to>` renamed, `⏸ …` held (busy/waiting),
-`✕ …` error, `⧉ …` tmux note.
+The naming pass is `fleet name --all --apply` (timeout 5 min, `NO_COLOR=1`); its human output is
+parsed line by line: `<from>  →  <to>` renamed, `⏸ …` held (waiting on a prompt), `✕ …` error,
+`⧉ …` tmux note (the CLI renames the tmux session with the title).
+
+A rename is `fleet rename <session_id> <title> --json` (timeout 20s): the report
+`{ ok, result: renamed|sent|held, held, tmux: { renamed, from, to, note }, message, … }` on
+stdout; a held session exits 3 with the report still on stdout (`lib/fleet-cli.mjs#rename`
+resolves it), anything else non-zero is an error.
 
 The grouping pass is `fleet group --input - --apply --json` (timeout 5 min, the merged
 `/api/fleet` body on stdin; `lib/run.mjs` takes `opts.input`); at start the server reads the stored
@@ -129,6 +135,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | GET | `/api/hosts/:host/sessions/:id/messages` | `?limit=60` (1..500) | `{ host, id, status, backend, name, limit, messages: [Message], total, truncated, updatedAt, capturedAt }` |
 | POST | `/api/hosts/:host/sessions/:id/send` | `{ text }` (1..8000 chars, not blank) | `{ ok: true }` |
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }`, one of `Enter`, `Escape`, `Up`, `Down` | `{ ok: true }` |
+| POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (trimmed, 1..64 chars, one line) | `{ ok: true, host, id, result, title, from, tmux, message, … }` — the `fleet rename --json` report. **409** `{ error, result: "held", held: "waiting", … }` when the session is waiting on a prompt (nothing typed); 400 bad title; 404 unknown session; 502/504 CLI failure / timeout. Proxied once to a peer like the other session actions |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` | `{ ok, host, name, dir, tmuxSession, command, trusted }` |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
@@ -153,7 +160,7 @@ after `realpath` (symlinks and `..` resolved), is one of this host's `spawnDirs`
 Runs `tmux new-session -d -s <name> -c <dir>`, types `claude -n '<name>' '<prompt>'`, and
 answers a first-run "trust this folder" dialog with "Yes" (`trusted: true` when it did). With no
 `name` (and auto-naming on) it types plain `claude '<prompt>'`: Claude derives `<cwd>-9d`, and the
-next naming pass replaces it and renames the `fw-hhmmss` tmux session to match.
+next naming pass replaces it, and the CLI renames the `fw-hhmmss` tmux session to match.
 The session shows up in `/api/fleet` once Claude registers it; clients poll for a session whose
 `tmux_session` equals `tmuxSession`.
 
@@ -195,20 +202,18 @@ a placeholder page at `/`.
 
 Sessions started without a name keep Claude's cwd+hash fallback (`project-9d`). `fleet name`
 generates task-shaped names (`claude -p`, cached) and applies them with Claude's own `/rename`,
-holding busy and waiting sessions, but only when someone runs it. The web server is the scheduler:
-each host's server runs `fleet name --all --apply --no-tmux-sync` every
+holding sessions waiting on a prompt, but only when someone runs it. The web server is the
+scheduler: each host's server runs `fleet name --all --apply` every
 `web.autoName.intervalMinutes` (default 5, first run 60s after start) and on
 `POST /api/hosts/:host/autoname` (⋯ menu → Run now). It already runs on every host, inside tmux,
 which on a headless machine is often the one place `claude -p` can reach a logged-in keychain (a
 plain ssh shell may not).
 
-tmux is synced by the server, not the CLI: the CLI's sync renames the tmux session whatever it was
-called, which would clobber names picked by hand (`fleet new fix-login`). After the pass (and a
-3s settle when something was renamed) the server re-lists its sessions and renames only tmux
-sessions whose name is *generic* (the web spawner's `fw-hhmmss`, tmux's numeric default, or
-Claude's `<cwd-basename>-xx`), only for Claude sessions whose name is now user-set, and only when
-the tmux session has a single window. Runs are de-duplicated; `/api/health` reports
-`autoName.lastRun`.
+There is one rename path: the CLI renames the Claude session (the title) and the tmux session
+follows as a slug of it, only for a tmux session that is that one Claude session's own. A tmux
+session somebody named by hand (`fleet new fix-login`) is not clobbered — the CLI adopts its name
+as the title instead of generating one. The server touches no tmux names itself (docs/architecture.md
+→ Session titles). Runs are de-duplicated; `/api/health` reports `autoName.lastRun`.
 
 ## Smart grouping
 

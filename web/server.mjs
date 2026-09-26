@@ -42,9 +42,6 @@ const fleet = createFleet({ cli, self: config.self, ttlMs: 2000 });
 const backend = createBackend({ run, tmux: config.tmux });
 const autoNamer = createAutoNamer({
   cli,
-  run,
-  tmux: config.tmux,
-  listSessions: () => fleet.localSessions({ force: true }),
   intervalMs: config.autoName.intervalMinutes * 60 * 1000,
   log,
 });
@@ -67,6 +64,7 @@ const handleApi = createApi({
   transcripts: createTranscriptReader(),
   spawner: createSpawner({ run, tmux: config.tmux, launcher: config.claude }),
   killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
+  cli,
   autoNamer,
   grouper,
   name: NAME,

@@ -62,6 +62,10 @@ pub struct Session {
     /// titling pass, never by the registry, and deliberately independent of both
     /// `name` and `tab`: it is what the TUI puts on a row's first line.
     pub gen_title: Option<String>,
+    /// The one title every view draws — see [`crate::core::title::display_title`].
+    /// Stamped by `list` (`None` inside discovery; [`Session::headline`] computes
+    /// it live). Output only: views must not edit it, renames go through Claude.
+    pub display_title: Option<String>,
     /// The fleet host this session runs on (config `self`, or the name the
     /// caller knows it by). Stamped by `list`; `None` inside discovery.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,6 +92,7 @@ impl Default for Session {
             waiting_for: None,
             title: None,
             gen_title: None,
+            display_title: None,
             host: None,
             context: None,
         }
@@ -114,22 +119,11 @@ impl Session {
         self.status == "waiting"
     }
 
-    /// What the dashboard puts on a row: the generated title when there is one,
-    /// else [`Session::label`].
-    ///
-    /// The title wins over both the Claude session name and the terminal tab
-    /// name **by design**. `app-9d` says where a session runs and a tab title
-    /// says which pane you're looking at; neither says what the session is
-    /// doing, which is the one thing a fleet of a dozen has to be read by. The
-    /// fallback only shows while the titling pass hasn't answered yet (or is
-    /// switched off).
+    /// What every view puts on a row: the session's one title,
+    /// [`crate::core::title::display_title`] — the chosen Claude name, else the
+    /// generated title, else a heuristic, else [`Session::label`].
     pub fn headline(&self) -> String {
-        self.gen_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| self.label())
+        crate::core::title::display_title(self)
     }
 
     /// Short human label: derived name, else short sessionId, else pid.
@@ -297,6 +291,7 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             name: reg.name,
             cwd: reg.cwd,
             gen_title: None,
+            display_title: None,
             host: None,
             context,
         });
@@ -705,6 +700,7 @@ mod tests {
             pid: 42,
             session_id: Some("aaaaaaaa-1111".into()),
             name: Some("app-9d".into()),
+            name_source: Some("derived".into()),
             tab: Some("✳ a tab title".into()),
             ..Default::default()
         };
@@ -719,6 +715,13 @@ mod tests {
         s.gen_title = None;
         s.name = None;
         assert_eq!(s.headline(), "aaaaaaaa");
+        // A name somebody chose outranks the generated title: it is the title.
+        s.name = Some("fix-login".into());
+        s.name_source = Some("user".into());
+        s.gen_title = Some("statusline-blank".into());
+        assert_eq!(s.headline(), "fix-login");
+        s.name = None;
+        s.gen_title = None;
         s.session_id = None;
         assert_eq!(s.headline(), "42");
     }
@@ -729,6 +732,7 @@ mod tests {
         Session {
             pid,
             name: Some(name.into()),
+            name_source: Some("derived".into()),
             gen_title: Some(title.into()),
             ..Default::default()
         }
@@ -820,6 +824,7 @@ mod tests {
         let dup = |pid: i64| Session {
             pid,
             name: Some(format!("work-{pid}")),
+            name_source: Some("derived".into()),
             gen_title: Some("docs-refresh".into()),
             ..Default::default()
         };

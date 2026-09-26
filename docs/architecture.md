@@ -116,7 +116,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
 | `web.ui` | static UI directory to serve instead of the bundled one, or `"classic"` for `web/public`; unset → `web/ui/dist` when built, else `web/public` |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
-| `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule and renames generic tmux sessions to match |
+| `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule (tmux names follow the titles, see [Session titles](#session-titles)) |
 | `web.grouping` | `{ enabled, intervalMinutes }` (default off, 10): this host's web server runs `fleet group` over the whole fleet on that schedule and serves `/api/groups` (see [Smart grouping](#smart-grouping)) |
 | `tmux` | tmux binary; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |
 | `hosts.<name>.fleetBin` | path to `fleet` on that host; `null` → `~/.local/bin/fleet`, then `PATH` |
@@ -124,7 +124,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `claude` | command that launches Claude Code in spawned sessions (default `claude`) |
 | `spawnDirs` | directories offered for new sessions, per host (`paths.<host>`) |
 | `tui` | dashboard preferences: `rows` (`"1"`, `"2"`, `"auto"`), `mouse` |
-| `naming` | generated names: `enabled`, `model` (default `haiku`), `syncTmux`, `autoTitle` |
+| `naming` | generated names: `enabled`, `model` (default `haiku`), `syncTmux` (tmux name follows the title, default on), `autoTitle` |
 | `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
@@ -154,6 +154,38 @@ Targets (`peek <target>`, `send <target>` …) resolve against title, name, sess
 walking exact → prefix → substring → characters-in-order; two matches on the same rung is an error
 listing the candidates, so a loose fragment can never type into the wrong session.
 
+## Session titles
+
+One title per session, one source of truth (`core::title`):
+
+- **The Claude session name is the truth.** `/rename` sets it and Claude persists it in its
+  session registry (`name`, `name_source: "user"`).
+- **`display_title`** is derived once, in core, and shipped in `list --json`: the Claude name when
+  someone chose it (`name_source` ≠ `derived`), else the generated title (`gen_title`), else a
+  slug of the first prompt, else Claude's derived `<cwd>-9d` name, else the short session id / pid.
+  The CLI, TUI and web UIs draw only this; the tmux name is at most metadata (details panel, the
+  TUI's terminal column).
+- **The tmux session name is derived**: a slug of the title (lowercase kebab, common Latin
+  accents folded, ≤ 48 chars), `-2`, `-3`… on a collision; a name already derived from the title
+  (with or without its suffix) is left as is. It is synced on **every** rename — `fleet rename`,
+  `fleet name --apply` (auto-naming), the TUI rename buffer, the web UI — but only when the tmux
+  session is that Claude session's own: one window, one pane. Shared sessions, `fleet` and the
+  dashboard's own session are left alone, with a note saying so. `naming.syncTmux = false` or
+  `--no-tmux-sync` opts out.
+- **Reverse edge**: `fleet tmux rename` of a single-Claude tmux session renames the Claude session
+  (and so the title); raw `tmux rename-session` is not watched and is overwritten the next time the
+  title changes. Auto-naming never clobbers a hand-picked tmux name: a derived-name session alone in
+  a non-generic tmux session (not `fw-hhmmss`, digits or `<cwd>-xx`) adopts that name as its title.
+- **iTerm** tab titles are not touched: Claude already puts its session name in the terminal title,
+  and a tab title set by hand is the user's.
+- **When `/rename` may be typed**: `/rename <title>` + Enter goes into the live Claude TUI. A
+  session **waiting** on a permission prompt or question is held (the keys would answer it; `--force`
+  overrides). A **busy** session is renamed: Claude Code runs `/rename` as a local command the moment
+  it is submitted, mid-turn, and the turn carries on untouched (verified live; an older Claude that
+  queues input would run it after the turn). Nothing is queued by fleet — a held rename is refused
+  with a message and retried by the caller. Known gap: text half-typed into the session's prompt
+  box would be prefixed to `/rename`.
+
 ## JSON contracts
 
 These are stable APIs — the web app, scripts and future UIs depend on them. Add fields freely;
@@ -181,6 +213,7 @@ by — with no config, `local`):
 | `tmux_session` | string \| null | tmux session the pane lives in |
 | `title` | string \| null | first prompt (can be long) |
 | `gen_title` | string \| null | generated title, if cached |
+| `display_title` | string | **the** title every view draws — see [Session titles](#session-titles) |
 | `context` | object \| null | context-window usage (below); `null` when no transcript usage is found |
 | `host` | string | which machine the row came from |
 
@@ -232,6 +265,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | GET | `/api/hosts/:host/sessions/:id/messages?limit=N` | conversation (no tool calls) from the transcript |
 | POST | `/api/hosts/:host/sessions/:id/send` | `{ text }` → typed + Enter |
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }` (Enter, Escape, …) |
+| POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (1–64 chars, one line) → `fleet rename <session_id> <title> --json`; 200 with the report, **409** when held (waiting on a prompt, nothing typed), 400 bad title, 502 CLI failure |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` → new tmux session running claude; `dir` must resolve inside one of the host's `spawnDirs` (else 400) |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` → SIGTERM (then SIGKILL) Claude, then kill its tmux session (or just its window when the session has others) / close its iTerm tab |
 | GET | `/api/groups` | the Board view's groups: `{ enabled, host, intervalMinutes, running, updatedAt, lastRun, groups: [{ id, label, description, source, members: [{ host, id }] }] }`; served by the grouping host, proxied by every other server (`enabled: false` when nobody runs it) |

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ApiError, api, isAbortError, isSessionGone, sessionErrorMessage } from '@/api/client'
 import type { Message, SessionKey } from '@/api/types'
 import { ContextMeter } from '@/components/ContextMeter'
+import { EditableTitle } from '@/components/EditableTitle'
 import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { ChatView } from '@/components/session/ChatView'
@@ -19,6 +20,7 @@ import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
 import { useSettings } from '@/hooks/useSettings'
+import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
 import {
   CHAT_FONT_SIZES,
   CHAT_LIMITS,
@@ -305,7 +307,9 @@ export function SessionScreen({
     setChatLimit(next)
   }
 
-  const name = session?.name || chat?.name || id.slice(0, 8)
+  const titleKey = `${host}/${id}`
+  const { title: shownTitle } = useSessionTitle(session, titleKey)
+  const name = session ? shownTitle : chat?.name || id.slice(0, 8)
 
   const menuProps: SessionMenuProps = {
     open: menuOpen,
@@ -323,6 +327,14 @@ export function SessionScreen({
     onFont: bumpFont,
     termLines,
     onTermLines: setTermLines,
+    onRename: session
+      ? () => {
+          // Mobile: the drawer closes first, then the header turns into the editor.
+          setMenuOpen(false)
+          if (pane) openTitleEditor('header', titleKey)
+          else setTimeout(() => startEditing('header', titleKey), 350)
+        }
+      : undefined,
     onClosed: () => {
       // Drop it from the list now; the next polls confirm (discovery caches ~2s).
       if (fleet) applyFleet(withoutSession(fleet, host, id))
@@ -345,7 +357,9 @@ export function SessionScreen({
             </Button>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] leading-tight font-bold">{name}</div>
+            <div className="flex min-w-0 text-[15px] leading-tight font-bold">
+              {session ? <EditableTitle session={session} scope="header" trigger="click" className="text-[15px] font-bold" /> : <span className="truncate">{name}</span>}
+            </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap">
               <StatusDot status={status} className="size-2" />
               <span className={cn('shrink-0', STATUS_TEXT[meta.key])}>{gone ? 'gone' : meta.label}</span>

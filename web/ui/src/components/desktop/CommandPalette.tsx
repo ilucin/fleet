@@ -9,6 +9,7 @@ import { shortCwd } from '@/lib/format'
 import { paletteFilter } from '@/lib/palette'
 import { statusLabel } from '@/lib/sessions'
 import { sessionKey } from '@/lib/shortcuts'
+import { sessionTitle } from '@/lib/title'
 
 export interface PaletteAction {
   id: string
@@ -52,13 +53,13 @@ export function CommandPalette({ open, onOpenChange, sessions, selectedKey, onOp
                     <CommandItem
                       key={key}
                       value={`session ${key}`}
-                      keywords={[s.name ?? '', s.gen_title ?? '', s.title ?? '', s.cwd ?? '', s.tmux_session ?? '', s.host].filter(Boolean)}
+                      keywords={[s.display_title ?? '', s.name ?? '', s.gen_title ?? '', s.title ?? '', s.cwd ?? '', s.tmux_session ?? '', s.host].filter(Boolean)}
                       onSelect={() => pick(() => onOpenSession(s))}
                       className="gap-2.5 py-2"
                     >
                       <StatusDot status={s.status} className="size-2" />
                       <span className="min-w-0 flex-1 truncate">
-                        <span className="font-medium">{s.name || '(unnamed)'}</span>
+                        <span className="font-medium">{sessionTitle(s)}</span>
                         {s.cwd ? <span className="ml-2 font-mono text-[11px] text-dimmer">{shortCwd(s.cwd, 40)}</span> : null}
                       </span>
                       <span className="shrink-0 text-[11px] text-muted-foreground">{statusLabel(s)}</span>

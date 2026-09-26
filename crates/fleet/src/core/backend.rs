@@ -215,8 +215,17 @@ end run"#,
 /// — so it is never an error the caller has to apologise for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TmuxSync {
-    Renamed(String),
+    Renamed { from: String, to: String },
     Skipped(String),
+}
+
+impl std::fmt::Display for TmuxSync {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TmuxSync::Renamed { from, to } => write!(f, "⧉ {from} → {to}"),
+            TmuxSync::Skipped(why) => f.write_str(why),
+        }
+    }
 }
 
 /// Make a name tmux will store verbatim.
@@ -355,7 +364,7 @@ fn own_tmux_session() -> std::result::Result<Option<String>, String> {
 /// `(windows, panes)` in the session a target belongs to. Errors rather than
 /// guessing `(1, 1)`: that guess reads as "one session, one job" and waves the
 /// rename through on exactly the tmux failure that should have stopped it.
-fn tmux_shape(target: &str) -> std::result::Result<(usize, usize), String> {
+pub(crate) fn tmux_shape(target: &str) -> std::result::Result<(usize, usize), String> {
     let windows: usize = tmux_query(target, "#{session_windows}")?
         .parse()
         .map_err(|_| "tmux gave an unreadable window count".to_string())?;
@@ -375,12 +384,13 @@ fn tmux_shape(target: &str) -> std::result::Result<(usize, usize), String> {
     Ok((windows, panes))
 }
 
-/// Bring a session's tmux *session* name in line with its Claude name — one tmux
-/// session per job is the convention this whole feature serves.
+/// Bring a session's tmux *session* name in line with its title — a slug of it,
+/// see [`crate::core::title::plan_tmux`] for every rule.
 ///
 /// The target is the pane id where we have one: it is session-name independent,
 /// so nothing here can be aimed at the wrong session by a name containing `:`.
-pub fn rename_tmux_session(s: &Session, new: &str) -> Result<TmuxSync> {
+pub fn rename_tmux_session(s: &Session, title: &str) -> Result<TmuxSync> {
+    use crate::core::title::{TmuxPlan, plan_tmux};
     if crate::core::discovery::is_fixture() {
         return Ok(TmuxSync::Skipped("fixture mode: tmux untouched".into()));
     }
@@ -396,20 +406,11 @@ pub fn rename_tmux_session(s: &Session, new: &str) -> Result<TmuxSync> {
     let Some(target) = s.handle.as_deref().filter(|h| !h.is_empty()) else {
         return Ok(TmuxSync::Skipped("tmux session unknown".into()));
     };
-    let desired = sanitize_tmux_name(new);
-    if desired.is_empty() {
-        return Ok(TmuxSync::Skipped(
-            "nothing usable left of that name for tmux".into(),
-        ));
-    }
     // Everything below resolves live from the pane, the guards included.
     let current = match tmux_session_of(target) {
         Ok(c) => c,
         Err(why) => return Ok(TmuxSync::Skipped(format!("tmux session unknown: {why}"))),
     };
-    if desired == current {
-        return Ok(TmuxSync::Skipped(format!("tmux session already {current}")));
-    }
     let (windows, panes) = match tmux_shape(target) {
         Ok(shape) => shape,
         Err(why) => {
@@ -426,18 +427,25 @@ pub fn rename_tmux_session(s: &Session, new: &str) -> Result<TmuxSync> {
             )));
         }
     };
-    if let Some(why) = tmux_guard(&current, own.as_deref(), windows, panes) {
-        return Ok(TmuxSync::Skipped(why));
-    }
-    let unique = unique_tmux_name(&desired, &tmux_session_names());
+    let to = match plan_tmux(
+        title,
+        &current,
+        own.as_deref(),
+        windows,
+        panes,
+        &tmux_session_names(),
+    ) {
+        TmuxPlan::Skip(why) => return Ok(TmuxSync::Skipped(why)),
+        TmuxPlan::Rename { to, .. } => to,
+    };
     let out = Command::new(crate::core::tools::tmux())
-        .args(["rename-session", "-t", target, &unique])
+        .args(["rename-session", "-t", target, &to])
         .output()?;
     if !out.status.success() {
         let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(Error::Other(format!("tmux rename-session: {why}")));
     }
-    Ok(TmuxSync::Renamed(format!("⧉ {current} → {unique}")))
+    Ok(TmuxSync::Renamed { from: current, to })
 }
 
 /// Shell-quote a value for a single-quoted context.
@@ -739,7 +747,7 @@ mod tests {
         };
         let why = match rename_tmux_session(&s, "cache-warmup").unwrap() {
             TmuxSync::Skipped(why) => why,
-            TmuxSync::Renamed(what) => panic!("renamed blind: {what}"),
+            TmuxSync::Renamed { to, .. } => panic!("renamed blind: {to}"),
         };
         assert!(why.contains("tmux session unknown"), "{why}");
 
