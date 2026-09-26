@@ -66,6 +66,8 @@ pub struct Session {
     /// caller knows it by). Stamped by `list`; `None` inside discovery.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// Context-window usage from the transcript tail; `null` when unknown.
+    pub context: Option<crate::core::context::ContextUsage>,
 }
 
 impl Default for Session {
@@ -87,6 +89,7 @@ impl Default for Session {
             title: None,
             gen_title: None,
             host: None,
+            context: None,
         }
     }
 }
@@ -275,6 +278,9 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             (Some(sid), Some(cwd)) => title_for(cwd, sid),
             _ => None,
         };
+        let context = reg.session_id.as_deref().and_then(|sid| {
+            crate::core::context::for_session(&claude_home(), reg.cwd.as_deref(), sid)
+        });
         out.push(Session {
             pid,
             status: reg.status.unwrap_or_else(|| "unknown".into()),
@@ -292,8 +298,10 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             cwd: reg.cwd,
             gen_title: None,
             host: None,
+            context,
         });
     }
+    crate::core::context::apply_native_1m(out.iter_mut().filter_map(|s| s.context.as_mut()));
     out.sort_by_key(|s| std::cmp::Reverse(s.updated_at.unwrap_or(0)));
     Ok(out)
 }
@@ -617,7 +625,7 @@ end tell"#;
 
 // --- transcript title --------------------------------------------------------
 
-fn encode_cwd(cwd: &str) -> String {
+pub(crate) fn encode_cwd(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c == '/' || c == '.' { '-' } else { c })
         .collect()

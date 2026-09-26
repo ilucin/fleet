@@ -27,6 +27,19 @@ export interface Session {
   /** First prompt, trimmed to ~300 chars for transport. */
   title?: string | null
   gen_title?: string | null
+  /** Context-window usage from the transcript tail; null when unknown (older CLIs omit it). */
+  context?: ContextUsage | null
+}
+
+/** `context` on a session row — see docs/architecture.md → "Context usage". */
+export interface ContextUsage {
+  /** Prompt tokens of the last main-thread request (input + cache read + cache creation). */
+  used: number
+  /** Inferred window: 200000 or 1000000. */
+  window: number
+  /** Whole percent, rounded; may exceed 100. */
+  pct: number
+  model?: string | null
 }
 
 export interface SpawnDir {

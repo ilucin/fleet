@@ -1,6 +1,7 @@
 import { Link } from 'wouter'
 
 import type { Session } from '@/api/types'
+import { ContextMeter } from '@/components/ContextMeter'
 import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { STATUS_TEXT } from '@/lib/styles'
@@ -10,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 const chip = 'inline-flex h-4.5 shrink-0 items-center rounded-[5px] border px-1 text-[11px] whitespace-nowrap'
 
-/** One session in the list: status, name, host, status label / waiting_for, subtitle, cwd, tmux, backend, age. */
+/** One session in the list: status, name, host, status label / waiting_for, subtitle, cwd, tmux, backend, context, age. */
 export function SessionRow({ session: s, now }: { session: Session; now: number }) {
   const meta = statusMeta(s.status)
   const subtitle = sessionSubtitle(s)
@@ -38,7 +39,10 @@ export function SessionRow({ session: s, now }: { session: Session; now: number 
         {cwd ? <span className="min-w-0 truncate font-mono">{cwd}</span> : null}
         {s.tmux_session ? <span className={cn(chip, 'border-border text-status-busy/80')}>{s.tmux_session}</span> : null}
         {backend !== 'unknown' ? <span className={cn(chip, 'border-border')}>{backend}</span> : null}
-        <span className="ml-auto shrink-0 tabular-nums">{relTime(s.updated_at, now)}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <ContextMeter context={s.context} />
+          <span className="tabular-nums">{relTime(s.updated_at, now)}</span>
+        </span>
       </div>
     </Link>
   )

@@ -382,6 +382,19 @@ test('fleet trims session titles', async () => {
   assert.equal(host.sessions[0].title.length, TITLE_MAX + 1);
 });
 
+test('fleet passes context usage through untouched', async () => {
+  const context = { used: 124000, window: 200000, pct: 62, model: 'claude-x' };
+  const rows = [
+    { session_id: 'a', status: 'idle', context },
+    { session_id: 'b', status: 'idle', context: null },
+  ];
+  const run = async () => ({ stdout: JSON.stringify(rows), stderr: '' });
+  const host = await createFleet({ cli: createFleetCli({ run }), self: 'laptop' }).localHost();
+  const byId = Object.fromEntries(host.sessions.map((s) => [s.session_id, s]));
+  assert.deepEqual(byId.a.context, context);
+  assert.equal(byId.b.context, null);
+});
+
 test('fleet CLI is invoked as `<bin> list --json`', async () => {
   const calls = [];
   const cli = createFleetCli({

@@ -179,9 +179,35 @@ by — with no config, `local`):
 | `tmux_session` | string \| null | tmux session the pane lives in |
 | `title` | string \| null | first prompt (can be long) |
 | `gen_title` | string \| null | generated title, if cached |
+| `context` | object \| null | context-window usage (below); `null` when no transcript usage is found |
 | `host` | string | which machine the row came from |
 
 `list --all-hosts --json` is the same array across every configured host.
+
+#### Context usage
+
+`context` is `{ used, window, pct, model }`, computed in `core::context` from the tail of the
+session's transcript (`~/.claude/projects/<cwd with / and . as ->/<session_id>.jsonl`, falling
+back to a scan of the project dirs when the session's cwd changed):
+
+- **`used`** (number): prompt tokens of the **last main-thread assistant entry** with real usage —
+  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. Sidechain (subagent)
+  entries, API-error entries, `<synthetic>` and all-zero usage are skipped. Output tokens are not
+  counted (the same sum Claude Code's statusline context percentage uses); the reply is counted as
+  input on the next turn.
+- **`window`** (number): `200000` or `1000000`, inferred — transcripts don't record it. 1M when the
+  model id ends in `[1m]`, when `used` already exceeds 200k, when `settings.json` pins a `[1m]`
+  model of that family, when Claude Code's `~/.claude.json` has recorded that exact model id as
+  `<id>[1m]`, or when another live session on the same model id is past 200k without a suffix
+  (the model is natively 1M). Otherwise 200k — so a 1M session under 200k with none of these
+  signals over-reports its percentage.
+- **`pct`** (number): `round(used / window * 100)`; can exceed 100.
+- **`model`** (string \| null): `message.model` of that entry.
+
+Only the tail is read (256 KiB, widened to 2 MiB then 8 MiB if no usable entry is in it), and the
+result is cached in-process per `(path, size, mtime)`, so the `watch` dashboard re-reads a
+transcript only after it has grown. Views colour `pct` in the same bands: under 60 dim, 60–85
+amber, over 85 red.
 
 ### `fleet tmux list --json` / `fleet tmux stale --json`
 

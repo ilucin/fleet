@@ -64,6 +64,25 @@ fn indent(p: &Plan) -> usize {
     if p.gutter { 5 } else { 4 }
 }
 
+/// Width of the context cell — `ctx 100%`.
+const CTX_CELL: usize = 8;
+
+/// `ctx 62%`, coloured by how full the window is; blank when unknown so the
+/// column still lines up.
+fn ctx_text(s: &Session) -> (String, Style) {
+    match &s.context {
+        Some(c) => {
+            let style = match crate::core::context::level(c.pct) {
+                crate::core::context::Level::Low => dim_style(),
+                crate::core::context::Level::Warn => Style::default().fg(Color::Indexed(214)),
+                crate::core::context::Level::Hot => Style::default().fg(Color::Red),
+            };
+            (format!("ctx {}%", c.pct.min(999)), style)
+        }
+        None => (String::new(), dim_style()),
+    }
+}
+
 /// Width of the age cell — `120m` is the longest thing `ago` produces.
 const AGE_CELL: usize = 4;
 
@@ -193,6 +212,9 @@ pub struct FleetCtx {
     pub term_cell: usize,
     /// Width the name is laid out in when placing line 1's right-hand column.
     pub name_cell: usize,
+    /// Whether rows carry a `ctx NN%` cell: only when some session has a known
+    /// context usage, so a fleet without transcripts keeps its old layout.
+    pub ctx_cell: bool,
 }
 
 impl FleetCtx {
@@ -209,6 +231,7 @@ impl FleetCtx {
             }),
             term_cell: widest(terminal_label).clamp(3, p.term_cell.max(3)),
             name_cell: widest(|s| s.headline()).clamp(12, p.name_width.clamp(12, NAME_CELL_MAX)),
+            ctx_cell: rows.iter().any(|s| s.context.is_some()),
         }
     }
 }
@@ -234,8 +257,9 @@ fn head_width(p: &Plan, ctx: &FleetCtx) -> usize {
     }
     let term = if p.term_on_head { ctx.term_cell + 2 } else { 0 };
     let word = if p.show_status_word { WORD_CELL + 1 } else { 0 };
+    let ctx_w = if ctx.ctx_cell { CTX_CELL + 2 } else { 0 };
     let left = if p.gutter { 5 } else { 4 };
-    let cells = term + word + AGE_CELL;
+    let cells = term + ctx_w + word + AGE_CELL;
     p.width.min(left + ctx.name_cell + 2 + cells)
 }
 
@@ -481,6 +505,10 @@ fn one_row(s: &Session, p: &Plan, ctx: &FleetCtx, idx: usize, selected: bool) ->
         r.push(" ", Style::default());
     }
     r.push(format!("{:>4}  ", ago(s.updated_at)), dim_style());
+    if ctx.ctx_cell && r.room() > CTX_CELL + 20 {
+        let (text, style) = ctx_text(s);
+        r.push(format!("{}  ", column(&text, CTX_CELL)), style);
+    }
 
     if r.room() > 8 {
         let label = terminal_label(s);
@@ -514,6 +542,10 @@ fn head_cells(s: &Session, p: &Plan, ctx: &FleetCtx) -> Vec<(String, Style)> {
             format!("{}  ", column(&label, ctx.term_cell)),
             term_style(&label),
         ));
+    }
+    if ctx.ctx_cell {
+        let (text, style) = ctx_text(s);
+        cells.push((format!("{}  ", column(&text, CTX_CELL)), style));
     }
     if p.show_status_word {
         cells.push((format!("{} ", column(word, WORD_CELL)), st));
@@ -739,6 +771,39 @@ mod tests {
                 "{out:?}"
             );
         }
+    }
+
+    // Context usage rides on line 1 next to the status, at every size the row
+    // has room for it — and a fleet with no known usage draws no empty column.
+    #[test]
+    fn the_context_cell_shows_usage_when_known() {
+        let mut s = session("cache-warmup", "busy");
+        s.context = Some(crate::core::context::ContextUsage::new(
+            124_000,
+            200_000,
+            Some("claude-x".into()),
+        ));
+        for (w, h) in [(170u16, 40u16), (100, 30), (80, 24)] {
+            let p = plan(w, h, 1, 12, None);
+            let out = drawn(&s, &p, 0, false);
+            assert!(out[0].contains("ctx 62%"), "{w}x{h} {out:?}");
+            assert!(out[0].contains("working"), "{w}x{h} {out:?}");
+        }
+        // Compact one-line mode keeps it too.
+        let p = plan(170, 40, 1, 12, Some(false));
+        assert_eq!(p.lines, 1);
+        assert!(drawn(&s, &p, 0, false).join("").contains("ctx 62%"));
+        // Every size still fits the pane with the extra cell.
+        for (w, h) in SIZES {
+            let p = plan(w, h, 1, 46, None);
+            let ctx = ctx_of(&s, &p);
+            for line in session_lines(&s, &p, &ctx, 0, false) {
+                assert_eq!(line.width(), p.width, "{w}x{h}");
+            }
+        }
+        s.context = None;
+        let p = plan(170, 40, 1, 12, None);
+        assert!(!drawn(&s, &p, 0, false)[0].contains("ctx"));
     }
 
     // The whole point of the headline: a row shows what the session is *doing*.

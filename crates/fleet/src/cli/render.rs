@@ -4,7 +4,7 @@
 //! are user-chosen and routinely carry CJK or emoji, which a `chars()` count
 //! reports as half as wide as the terminal actually draws them.
 
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::core::discovery::Session;
@@ -133,6 +133,21 @@ pub fn status_words(status: &str) -> (&'static str, &str) {
     }
 }
 
+/// The CTX column: `ctx 62%` padded to 8, dim under 60%, yellow to 85%, red past
+/// it; blank when the session's usage is unknown.
+pub fn ctx_cell(s: &Session) -> ColoredString {
+    use crate::core::context::{Level, level};
+    let Some(c) = &s.context else {
+        return column("", 8).normal();
+    };
+    let text = column(&format!("ctx {}%", c.pct.min(999)), 8);
+    match level(c.pct) {
+        Level::Low => text.dimmed(),
+        Level::Warn => text.yellow(),
+        Level::Hot => text.red(),
+    }
+}
+
 pub fn plain_table(rows: &[Session]) -> String {
     plain_table_titled(rows, None)
 }
@@ -166,6 +181,7 @@ pub fn plain_table_titled(rows: &[Session], host: Option<&str>) -> String {
         .max()
         .unwrap_or(3)
         .clamp(3, 20);
+    let any_ctx = rows.iter().any(|r| r.context.is_some());
     for r in rows {
         // Pad *before* colouring: `colored` writes raw escapes and ignores the
         // format width, so `{:<9}` on a ColoredString does nothing.
@@ -179,8 +195,13 @@ pub fn plain_table_titled(rows: &[Session], host: Option<&str>) -> String {
         };
         let label = column(&r.headline(), name_w);
         let where_ = r.cwd.as_deref().map(home_rel).unwrap_or_else(|| "?".into());
+        let ctx = if any_ctx {
+            format!("{} ", ctx_cell(r))
+        } else {
+            String::new()
+        };
         out.push(format!(
-            "{dot} {} {state} {:>4}  {:<5} {} {}",
+            "{dot} {} {state} {:>4}  {ctx}{:<5} {} {}",
             label.bold(),
             ago(r.updated_at),
             r.backend.label(),
@@ -216,6 +237,20 @@ mod tests {
         let out = plain_table(std::slice::from_ref(&s));
         assert!(out.contains("statusline-blank"), "{out}");
         assert!(!out.contains("app-9d"), "{out}");
+    }
+
+    #[test]
+    fn the_table_has_a_ctx_column_when_usage_is_known() {
+        let mut s = Session {
+            pid: 7,
+            status: "idle".into(),
+            ..Default::default()
+        };
+        assert!(!plain_table(std::slice::from_ref(&s)).contains("ctx"));
+        s.context = Some(crate::core::context::ContextUsage::new(
+            90_000, 200_000, None,
+        ));
+        assert!(plain_table(std::slice::from_ref(&s)).contains("ctx 45%"));
     }
 
     #[test]

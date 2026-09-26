@@ -3,6 +3,7 @@
 
 pub mod backend;
 pub mod config;
+pub mod context;
 pub mod discovery;
 pub mod hosts;
 pub mod naming;

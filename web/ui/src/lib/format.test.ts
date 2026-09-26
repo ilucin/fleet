@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'vitest'
 
-import { clockTime, firstLine, hostColorSlot, relTime, sessionSubtitle, shortCwd } from './format'
+import {
+  clockTime,
+  ctxLevel,
+  ctxSummary,
+  firstLine,
+  fmtTokens,
+  hostColorSlot,
+  relTime,
+  sessionSubtitle,
+  shortCwd,
+} from './format'
 
 describe('relTime', () => {
   const now = 1_000_000_000_000
@@ -57,4 +67,26 @@ test('hostColorSlot: stable, in range, same hash as the classic UI', () => {
     expect(hostColorSlot(name)).toBe(classic(name))
   }
   expect(hostColorSlot('laptop')).toBe(hostColorSlot('laptop'))
+})
+
+describe('context usage', () => {
+  test('bands match the CLI', () => {
+    expect(ctxLevel(0)).toBe('low')
+    expect(ctxLevel(59)).toBe('low')
+    expect(ctxLevel(60)).toBe('warn')
+    expect(ctxLevel(85)).toBe('warn')
+    expect(ctxLevel(86)).toBe('hot')
+  })
+  test('token counts are compact', () => {
+    expect(fmtTokens(950)).toBe('950')
+    expect(fmtTokens(124_300)).toBe('124k')
+    expect(fmtTokens(200_000)).toBe('200k')
+    expect(fmtTokens(1_000_000)).toBe('1M')
+    expect(fmtTokens(1_250_000)).toBe('1.3M')
+  })
+  test('summary', () => {
+    expect(ctxSummary({ used: 124_000, window: 200_000, pct: 62, model: 'claude-x' })).toBe('124k / 200k · 62%')
+    expect(ctxSummary(null)).toBe('')
+    expect(ctxSummary(undefined)).toBe('')
+  })
 })

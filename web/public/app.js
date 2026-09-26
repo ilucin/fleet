@@ -46,6 +46,15 @@ function statusMeta(status) {
   return STATUS_META[String(status || '').toLowerCase()] || STATUS_META.unknown;
 }
 
+/** `ctx 62%` for a session's context usage (same bands as the CLI); null when unknown. */
+function ctxBadge(c) {
+  if (!c || !Number.isFinite(c.pct)) return null;
+  const pct = Math.round(c.pct);
+  const level = pct > 85 ? 'hot' : pct >= 60 ? 'warn' : 'low';
+  const title = `${Math.round(c.used / 1000)}k / ${Math.round(c.window / 1000)}k tokens${c.model ? ` · ${c.model}` : ''}`;
+  return h('span', { class: `row-ctx ctx-${level}`, text: `ctx ${pct}%`, title });
+}
+
 function relTime(ms, now = Date.now()) {
   const t = Number(ms);
   if (!Number.isFinite(t) || t <= 0) return '';
@@ -446,6 +455,7 @@ function createListView() {
         cwd ? h('span', { class: 'row-cwd', text: cwd }) : null,
         s.tmux_session ? h('span', { class: 'badge tmux', text: String(s.tmux_session) }) : null,
         backend !== 'unknown' ? h('span', { class: `badge ${backend}`, text: backend }) : null,
+        ctxBadge(s.context),
         h('span', { class: 'row-time', text: relTime(s.updated_at, now) }),
       ),
     );

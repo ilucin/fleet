@@ -22,7 +22,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
 import { autoNameSummary, autoNameToast } from '@/lib/autoname'
 import type { DetailMode } from '@/lib/chat'
-import { relTime, shortCwd } from '@/lib/format'
+import { ctxLevel, ctxSummary, relTime, shortCwd } from '@/lib/format'
+import { CTX_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
 
 // Last naming pass per host seen by this tab (a peer's /api/health is not reachable
@@ -165,6 +166,12 @@ export function SessionMenu(p: SessionMenuProps) {
             <DrawerDescription className="truncate text-left font-mono text-xs">
               {[p.host, s?.cwd ? shortCwd(s.cwd, 60) : null].filter(Boolean).join(' · ')}
             </DrawerDescription>
+            {s?.context ? (
+              <p className={cn('truncate text-left text-xs tabular-nums', CTX_TEXT[ctxLevel(s.context.pct)])}>
+                Context {ctxSummary(s.context)}
+                {s.context.model ? <span className="text-dimmer"> · {s.context.model}</span> : null}
+              </p>
+            ) : null}
           </DrawerHeader>
 
           <Section title="View">

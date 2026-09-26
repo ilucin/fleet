@@ -266,6 +266,10 @@ a { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transpar
 .badge.tmux { color: #9ec2a4; border-color: #2c3a2e; }
 .badge.iterm { color: #a9b6cc; border-color: #2c3340; }
 .row-time { flex: 0 0 auto; margin-left: auto; font-variant-numeric: tabular-nums; }
+.row-ctx { flex: 0 0 auto; margin-left: auto; font-variant-numeric: tabular-nums; }
+.row-ctx + .row-time { margin-left: 8px; }
+.ctx-warn { color: var(--waiting); }
+.ctx-hot { color: var(--error); }
 
 /* skeletons */
 .skel { background: var(--bg-elev); border: 1px solid var(--line-soft); border-radius: var(--radius); height: 86px; margin-bottom: 8px; position: relative; overflow: hidden; }

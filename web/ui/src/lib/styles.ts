@@ -1,7 +1,7 @@
 // Static Tailwind class maps (tokens in index.css) — kept out of component files so
 // Fast Refresh works and Tailwind sees every class name literally.
 import type { StatusKey } from '@/lib/sessions'
-import { hostColorSlot } from '@/lib/format'
+import { hostColorSlot, type CtxLevel } from '@/lib/format'
 
 export const STATUS_DOT: Record<StatusKey, string> = {
   waiting: 'bg-status-waiting ring-3 ring-status-waiting/20',
@@ -28,3 +28,15 @@ const HOST_DOT = ['bg-host-0', 'bg-host-1', 'bg-host-2', 'bg-host-3']
 
 export const hostBadgeClass = (host: string | null | undefined) => HOST_BADGE[hostColorSlot(host)]
 export const hostDotClass = (host: string | null | undefined) => HOST_DOT[hostColorSlot(host)]
+
+// Context-window usage bands (ctxLevel): text + meter fill.
+export const CTX_TEXT: Record<CtxLevel, string> = {
+  low: 'text-dimmer',
+  warn: 'text-status-waiting',
+  hot: 'text-status-error',
+}
+export const CTX_FILL: Record<CtxLevel, string> = {
+  low: 'bg-dimmer',
+  warn: 'bg-status-waiting',
+  hot: 'bg-status-error',
+}

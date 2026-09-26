@@ -84,12 +84,15 @@ Local discovery is `fleet list --json` (timeout 8s), an array of:
 pid, session_id (uuid), name, cwd, status ("busy"|"idle"|"waiting"|"unknown"), updated_at (ms),
 tty, backend ("iterm"|"tmux"|"unknown"), handle (iTerm session id | tmux pane id like "%87"),
 tab, tmux_session (string|null), name_source, waiting_for (string|null),
-title (first prompt, may be long), gen_title (string|null)
+title (first prompt, may be long), gen_title (string|null),
+context ({ used, window, pct, model } | null — context-window usage, see docs/architecture.md)
 ```
 
 Empty output → no sessions. Non-JSON, non-array, a timeout or a missing binary → the host
 entry becomes `{ ok: false, error }`; the server never crashes on it. `title` is trimmed to 300
 chars (+ `…`) for transport: the first prompt can run to 10 KB and the list shows one line.
+Every other field, `context` included, is passed through untouched (older CLIs omit `context`;
+UIs treat a missing one as unknown).
 
 The naming pass is `fleet name --all --apply --no-tmux-sync` (timeout 5 min, `NO_COLOR=1`); its
 human output is parsed line by line: `<from>  →  <to>` renamed, `⏸ …` held (busy/waiting),

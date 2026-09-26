@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 
 import { ApiError, api, isAbortError, isSessionGone, sessionErrorMessage } from '@/api/client'
 import type { Message, SessionKey } from '@/api/types'
+import { ContextMeter } from '@/components/ContextMeter'
 import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { ChatView } from '@/components/session/ChatView'
@@ -278,6 +279,7 @@ export function SessionScreen({ host, id }: { host: string; id: string }) {
               <StatusDot status={status} className="size-2" />
               <span className={cn('shrink-0', STATUS_TEXT[meta.key])}>{gone ? 'gone' : meta.label}</span>
               <HostBadge host={host} className="h-4 px-1 text-[10px]" />
+              <ContextMeter context={session?.context} />
               <span className="truncate text-dimmer tabular-nums">
                 {updatedAt ? `· ${relTime(updatedAt, now)} ago` : '· connecting…'}
               </span>

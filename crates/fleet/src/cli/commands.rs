@@ -758,6 +758,7 @@ mod tests {
             title: None,
             gen_title: None,
             host: None,
+            context: None,
         };
         let text = compose("Do it.", "/tmp", Some(&from), "2026-08-17 10:00");
         assert!(text.contains("(app-f9, in /tmp)"));

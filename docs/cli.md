@@ -40,7 +40,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | command | does |
 | --- | --- |
 | `fleet` | `watch` on a terminal; a one-shot `list` when stdout is piped |
-| `fleet list [--json] [-a, --all-hosts]` (alias `ls`) | live sessions: title, status, terminal, cwd, age. `--json` is an array whose rows all carry `host`; `-a` queries every configured host in parallel |
+| `fleet list [--json] [-a, --all-hosts]` (alias `ls`) | live sessions: title, status, age, context usage (`ctx 62%`), terminal, cwd. `--json` is an array whose rows all carry `host`; `-a` queries every configured host in parallel |
 | `fleet peek <target> [--lines N]` | what the session's terminal shows now (default 40 lines) |
 | `fleet send <target> <text>` | type text into the session and press Enter |
 | `fleet rename <target> <name> [--no-tmux-sync] [--force]` | send Claude's `/rename`; also renames the session's tmux session. Busy sessions are held unless `--force` |

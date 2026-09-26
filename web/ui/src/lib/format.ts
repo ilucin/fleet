@@ -1,5 +1,5 @@
 // Pure display helpers (no React, no DOM) — unit-tested in format.test.ts.
-import type { Session } from '@/api/types'
+import type { ContextUsage, Session } from '@/api/types'
 
 /** "12s", "5m", "3h", "4d" since `ms` (epoch ms); '' for missing/invalid. */
 export function relTime(ms: number | null | undefined, now = Date.now()): string {
@@ -58,4 +58,28 @@ export function hostColorSlot(host: string | null | undefined): number {
   let hash = 0
   for (const ch of String(host || '')) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) >>> 0
   return hash % HOST_COLOR_SLOTS
+}
+
+export type CtxLevel = 'low' | 'warn' | 'hot'
+
+/** Same bands as the CLI: <60 calm, 60–85 warn, >85 hot. */
+export function ctxLevel(pct: number): CtxLevel {
+  if (pct > 85) return 'hot'
+  if (pct >= 60) return 'warn'
+  return 'low'
+}
+
+/** 950 → "950", 124_300 → "124k", 1_000_000 → "1M", 1_250_000 → "1.3M". */
+export function fmtTokens(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '?'
+  if (n < 1000) return String(Math.round(n))
+  if (n < 999_500) return `${Math.round(n / 1000)}k`
+  const m = n / 1_000_000
+  return `${Number.isInteger(Math.round(m * 10) / 10) ? Math.round(m) : m.toFixed(1)}M`
+}
+
+/** "124k / 200k · 62%" — '' for a missing or malformed context. */
+export function ctxSummary(c: ContextUsage | null | undefined): string {
+  if (!c || !Number.isFinite(c.used) || !Number.isFinite(c.window)) return ''
+  return `${fmtTokens(c.used)} / ${fmtTokens(c.window)} · ${Math.round(c.pct)}%`
 }
