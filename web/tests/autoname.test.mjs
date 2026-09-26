@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAutoNamer, parseNameOutput } from '../lib/autoname.mjs';
+import { createAutoNamer, createSpawnNamer, parseNameOutput } from '../lib/autoname.mjs';
 import { createFleetCli } from '../lib/fleet-cli.mjs';
 
 test('parseNameOutput splits renamed / tmux / held / errors', () => {
@@ -73,4 +73,56 @@ test('start schedules a first run after the initial delay, stop cancels it', asy
   an.stop();
   assert.equal(n, 1);
   assert.equal(an.lastRun.reason, 'scheduled');
+});
+
+test('fleet CLI nameOne runs `fleet name <id> --apply` with NO_COLOR', async () => {
+  const calls = [];
+  const cli = createFleetCli({ run: async (bin, args, opts) => (calls.push([bin, args, opts.env.NO_COLOR]), { stdout: 'a  →  b\n', stderr: '' }) });
+  const out = await cli.nameOne({ target: 'abc-123' });
+  assert.deepEqual(calls[0], ['fleet', ['name', 'abc-123', '--apply'], '1']);
+  assert.equal(out.stdout, 'a  →  b\n');
+});
+
+test('spawn namer waits for registration and the first reply, then names that one session', async () => {
+  const waits = [];
+  const frames = [
+    [], // not registered yet
+    [{ session_id: 'id-1', tmux_session: 'fw-101010', name_source: 'derived', status: 'busy' }], // first turn
+    [{ session_id: 'id-1', tmux_session: 'fw-101010', name_source: 'derived', status: 'waiting' }], // held
+    [{ session_id: 'id-1', tmux_session: 'fw-101010', name_source: 'derived', status: 'idle' }],
+  ];
+  let i = 0;
+  const named = [];
+  const outputs = ['⏸ work-1a is waiting on you — nothing sent\n', 'work-1a  →  reply-ok\n   ⧉ fw-101010 → reply-ok\n'];
+  const cli = { nameOne: async ({ target }) => (named.push(target), { stdout: outputs.shift(), stderr: '' }) };
+  const logs = [];
+  const namer = createSpawnNamer({
+    cli,
+    listSessions: async () => frames[Math.min(i++, frames.length - 1)],
+    delaysMs: [1, 2, 3, 4, 5],
+    sleep: async (ms) => void waits.push(ms),
+    log: (l) => logs.push(l),
+  });
+  const p = namer.schedule('fw-101010');
+  assert.equal(namer.schedule('fw-101010'), p, 'one pass per session at a time');
+  const res = await p;
+  assert.deepEqual(res, { ok: true, reason: 'renamed', tries: 4, renamed: 'reply-ok' });
+  assert.deepEqual(named, ['id-1', 'id-1'], 'held once, retried');
+  assert.deepEqual(waits, [1, 2, 3, 4]);
+  assert.deepEqual(namer.pending, []);
+  assert.match(logs.at(-1), /fw-101010: → reply-ok tmux: fw-101010 → reply-ok/);
+});
+
+test('spawn namer stops when the session is already named, gives up after its tries', async () => {
+  const cli = { nameOne: async () => assert.fail('must not name a user-named session') };
+  const named = createSpawnNamer({
+    cli,
+    listSessions: async () => [{ session_id: 'id-2', tmux_session: 'fw-2', name_source: 'user', status: 'idle' }],
+    delaysMs: [1, 1],
+    sleep: async () => {},
+  });
+  assert.deepEqual(await named.schedule('fw-2'), { ok: true, reason: 'already named', tries: 1 });
+
+  const never = createSpawnNamer({ cli, listSessions: async () => { throw new Error('discovery down'); }, delaysMs: [1, 1, 1], sleep: async () => {} });
+  assert.deepEqual(await never.schedule('fw-3'), { ok: false, reason: 'gave up', tries: 3 });
 });

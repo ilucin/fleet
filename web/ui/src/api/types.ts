@@ -75,6 +75,12 @@ export interface QuickReply {
   text: string
 }
 
+/** One New session model choice (`web.models`); id '' = no `--model`, Claude's default. */
+export interface ModelOption {
+  id: string
+  label: string
+}
+
 /** GET /api/settings */
 export interface Settings {
   apiVersion: number
@@ -83,6 +89,8 @@ export interface Settings {
   quickReplies: QuickReply[]
   /** `web.uploads.maxMB` of this server (older servers: absent). */
   uploads?: { maxMB: number | null }
+  /** The New session model picker (older servers: absent → lib/models.ts defaults). */
+  models?: ModelOption[]
 }
 
 /** POST /api/hosts/:host/uploads — the stored copy on that host. */
@@ -198,9 +206,12 @@ export interface MessagesResponse {
 export type SessionKey = 'Enter' | 'Escape' | 'Up' | 'Down'
 
 export interface SpawnRequest {
+  /** Still accepted by the server; the UI leaves naming to the auto-namer. */
   name?: string
   dir?: string
   prompt?: string
+  /** A `models` id; '' / absent = Claude's default. */
+  model?: string
 }
 
 export interface SpawnResponse {

@@ -19,7 +19,7 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | "name X / what should this be called" | `fleet name <target>` — suggests; add `--apply` to send it |
 | "name all the unnamed ones" | `fleet name --all [--apply] [--no-tmux-sync]` |
 | "that name is wrong / regenerate it" | `fleet name <target> --refresh` — ignores the cached name and replaces it |
-| "spawn / start a session to …" | `fleet spawn "<prompt>" --dir <path> [--name <name>] [--backend iterm\|tmux] [--window]` |
+| "spawn / start a session to …" | `fleet spawn "<prompt>" --dir <path> [--name <name>] [--model <id>] [--backend iterm\|tmux] [--window]` |
 | "take this to another terminal" | `fleet handoff --file <brief.md> --dir <path> [--name <name>] [--tab] [--no-wait]` — see below |
 | "watch / notify me / anyone stuck" | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` |
 | "what's running everywhere" | `fleet list --all-hosts` (add `--json`; every row carries `host`) |

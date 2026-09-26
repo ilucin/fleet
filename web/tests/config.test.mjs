@@ -117,6 +117,15 @@ test('normalizeConfig web.autoName: defaults off (opt-in) / 5 min, validated, FL
   assert.throws(() => normalizeConfig({ web: { autoName: true } } , { env: {}, home: HOME }), /autoName/);
 });
 
+test('normalizeConfig web.models: default list, { id, label } / bare ids, strict ids', () => {
+  const def = normalizeConfig({}, { env: {}, home: '/h', found: false }).models;
+  assert.deepEqual(def.map((m) => m.id), ['', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001']);
+  const custom = normalizeConfig({ web: { models: [{ id: '', label: 'Auto' }, 'claude-opus-5-5[1m]'] } }, { env: {}, home: '/h' }).models;
+  assert.deepEqual(custom, [{ id: '', label: 'Auto' }, { id: 'claude-opus-5-5[1m]', label: 'claude-opus-5-5[1m]' }]);
+  assert.throws(() => normalizeConfig({ web: { models: 'opus' } }, { env: {}, home: '/h' }), /web.models must be an array/);
+  assert.throws(() => normalizeConfig({ web: { models: [{ id: 'a b' }] } }, { env: {}, home: '/h' }), /web.models entries/);
+});
+
 test('normalizeConfig rejects broken shapes with a pointed message', () => {
   const env = {};
   assert.throws(() => normalizeConfig({ version: 2 }, { env, home: HOME }), /version/);

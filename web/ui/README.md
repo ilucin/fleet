@@ -40,6 +40,7 @@ src/
   lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
   lib/markdown.ts     safe markdown → AST (port of ../public/markdown.js), linkify()
   lib/autoname.ts     naming-pass summaries for toasts / the menu
+  lib/models.ts       New session model picker: DEFAULT_MODELS (mirrors lib/config.mjs), normalizeModels(), pickModel()
   lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
                       fallbackGroups()/repoOf() (client-side group-by-repo, worktree-aware),
                       statusSummary(), boardOrder() (j/k order), groupsStatusText(), regroupToast()
@@ -144,10 +145,13 @@ src/
   ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
   sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)
   of the usual `SessionRow`s. The List view is unchanged.
-- **New session** (drawer): host, directory (radio from that host's `spawnDirs`), optional name
-  and first prompt → `api.spawn`. 400/409 are shown inline; on success a loading toast watches
+- **New session** (drawer): host, directory (radio from that host's `spawnDirs`), model (chips
+  from `/api/settings` → `models`, Default = no `--model`) and an optional first prompt →
+  `api.spawn`. No name field: the server names it (a targeted auto-name pass right after the
+  first reply when `web.autoName` is on, else tmux `fw-hhmmss`). 400/409 are shown inline; on success a loading toast watches
   `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
-  opens the session. Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys).
+  opens the session. Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys)
+  and `fleet.spawnModel` (a model id no longer offered falls back to the first option).
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
   - header: back, title (click to rename), status, host, "updated Xs ago", Chat | Term toggle, ⋯;

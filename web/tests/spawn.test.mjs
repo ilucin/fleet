@@ -22,6 +22,25 @@ test('launchCommand builds claude -n name [prompt]', () => {
   assert.equal(launchCommand({ launcher: 'cc', name: 'job', prompt: "do it's" }), "cc -n 'job' 'do it'\\''s'");
 });
 
+test('launchCommand adds --model <id> (quoted) before -n', () => {
+  assert.equal(launchCommand({ name: 'job', prompt: 'go', model: 'claude-haiku-4-5-20251001' }), "claude --model 'claude-haiku-4-5-20251001' -n 'job' 'go'");
+  assert.equal(launchCommand({ launcher: 'cc', model: 'claude-opus-5-5[1m]' }), "cc --model 'claude-opus-5-5[1m]'");
+  assert.equal(launchCommand({ name: null, prompt: '', model: '' }), 'claude', "'' = Claude's default, no flag");
+});
+
+test('validateSpawnRequest accepts a model id and rejects anything shell-shaped', () => {
+  const opts = { spawnDirs: ['/tmp'] };
+  assert.equal(validateSpawnRequest({ model: 'claude-sonnet-5' }, opts).model, 'claude-sonnet-5');
+  assert.equal(validateSpawnRequest({ model: 'claude-opus-5-5[1m]' }, opts).model, 'claude-opus-5-5[1m]');
+  assert.equal(validateSpawnRequest({}, opts).model, '');
+  assert.equal(validateSpawnRequest({ model: '' }, opts).model, '');
+  for (const bad of ["x'; rm -rf ~", 'a b', '$(id)', 'a;b', '`id`', 'a\nb', 'x'.repeat(101), 42, { id: 'x' }]) {
+    const r = validateSpawnRequest({ model: bad }, opts);
+    assert.equal(r.ok, false, `rejects ${JSON.stringify(bad)}`);
+    assert.match(r.error, /model must be/);
+  }
+});
+
 test('validateSpawnRequest defaults, sanitizes and rejects bad input', () => {
   const ok = validateSpawnRequest({ name: 'My Job', prompt: 'hi' }, { spawnDirs: ['/tmp'] });
   assert.equal(ok.ok, true);
@@ -52,6 +71,20 @@ test('spawner creates the tmux session then types the launcher', async () => {
   assert.deepEqual(calls[2], ['tmux', 'send-keys', '-t', 'job:', '-l', '--', "claude -n 'job' 'go'"]);
   assert.deepEqual(calls[3], ['tmux', 'send-keys', '-t', 'job:', 'Enter']);
   assert.equal(res.trusted, false);
+  assert.equal(res.model, null);
+});
+
+test('spawner types --model when one was picked', async () => {
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push([bin, ...args]);
+    if (args[0] === 'has-session') throw new Error('no such session');
+    return { stdout: '', stderr: '' };
+  };
+  const sp = createSpawner({ run, tmux: 'tmux', launcher: 'claude', sleep: async () => {} });
+  const res = await sp.spawn({ name: 'fw-101010', dir: '/tmp', prompt: 'go', nameGiven: false, model: 'claude-haiku-4-5-20251001' });
+  assert.deepEqual(calls[2], ['tmux', 'send-keys', '-t', 'fw-101010:', '-l', '--', "claude --model 'claude-haiku-4-5-20251001' 'go'"]);
+  assert.equal(res.model, 'claude-haiku-4-5-20251001');
 });
 
 test('spawner accepts the folder-trust prompt when it appears', async () => {

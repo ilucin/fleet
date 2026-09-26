@@ -1,9 +1,10 @@
 // Start a fresh Claude Code session in a new tmux session (one tmux session = one job,
 // same convention as `fleet tmux new`). Mirrors `fleet spawn` (tmux): open the pane in `dir`,
-// then type `claude -n <name> '<prompt>'` into the shell so the user's PATH/profile apply.
+// then type `claude [--model <id>] [-n <name>] '<prompt>'` into the shell so the user's PATH/profile apply.
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { MODEL_ID_RE } from './config.mjs';
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 
@@ -29,10 +30,12 @@ export function defaultName(now = new Date()) {
 }
 
 /** Build the shell line typed into the new pane. */
-export function launchCommand({ launcher = 'claude', name, prompt }) {
+export function launchCommand({ launcher = 'claude', name, prompt, model }) {
   // No name → plain `claude`: it derives `<cwd>-9d` and the auto-namer (lib/autoname.mjs)
   // replaces that with a task-shaped name, tmux session included, once the session is idle.
-  const parts = name ? [launcher, '-n', shq(name)] : [launcher];
+  const parts = [launcher];
+  if (model) parts.push('--model', shq(model));
+  if (name) parts.push('-n', shq(name));
   if (prompt && prompt.trim()) parts.push(shq(prompt));
   return parts.join(' ');
 }
@@ -54,8 +57,15 @@ export function validateSpawnRequest(body, { spawnDirs = [] } = {}) {
     else if (body.prompt.length > 8000) errors.push('prompt too long (max 8000 chars)');
     else prompt = body.prompt;
   }
+  // Typed into a shell: a strict charset on top of the quoting. '' / absent = Claude's default.
+  let model = '';
+  if (body?.model != null && body.model !== '') {
+    if (typeof body.model !== 'string' || !MODEL_ID_RE.test(body.model)) {
+      errors.push('model must be 1-100 chars of letters, digits, . _ [ ] or -');
+    } else model = body.model;
+  }
   if (errors.length) return { ok: false, error: errors.join('; ') };
-  return { ok: true, name, dir, prompt, nameGiven };
+  return { ok: true, name, dir, prompt, nameGiven, model };
 }
 
 /** True when `child` is `root` or lies beneath it (both already resolved). */
@@ -107,8 +117,8 @@ export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDe
     }
   }
 
-  /** @returns {{ name, dir, tmuxSession, command }} */
-  async function spawn({ name, dir, prompt, nameGiven = true }) {
+  /** @returns {{ name, dir, tmuxSession, command, trusted, model }} */
+  async function spawn({ name, dir, prompt, nameGiven = true, model = '' }) {
     let st;
     try {
       st = await fs.stat(dir);
@@ -120,14 +130,14 @@ export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDe
       throw Object.assign(new Error(`tmux session "${name}" already exists`), { status: 409 });
     }
     await run(tmux, ['new-session', '-d', '-s', name, '-c', dir], { timeout: 8000 });
-    const command = launchCommand({ launcher, name: nameGiven ? name : null, prompt });
+    const command = launchCommand({ launcher, name: nameGiven ? name : null, prompt, model });
     // Give the login shell a moment to source its profile before typing into it.
     await wait(enterDelayMs);
     await run(tmux, ['send-keys', '-t', `${name}:`, '-l', '--', command], { timeout: 8000 });
     await wait(150);
     await run(tmux, ['send-keys', '-t', `${name}:`, 'Enter'], { timeout: 8000 });
     const trusted = await acceptTrustPrompt(name);
-    return { name, dir, tmuxSession: name, command, trusted };
+    return { name, dir, tmuxSession: name, command, trusted, model: model || null };
   }
 
   /**

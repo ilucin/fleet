@@ -99,6 +99,19 @@ test('health and settings', async (t) => {
   const s = await get(`${urls.laptop}/api/settings`);
   assert.deepEqual(s.body.hosts, ['laptop', 'workstation']);
   assert.ok(s.body.quickReplies.length > 0);
+  assert.deepEqual(s.body.models[0], { id: '', label: 'Default' });
+  assert.ok(s.body.models.some((m) => m.id === 'claude-haiku-4-5-20251001'));
+});
+
+test('settings exposes web.models when configured', async () => {
+  const host = fakeHost('solo', []);
+  const config = normalizeConfig({ self: 'solo', web: { models: [{ id: 'claude-sonnet-5', label: 'Sonnet' }, 'claude-opus-5-5'] } }, { env: {}, home: '/home/tester' });
+  const api = createApi({ config, ...host, warmFleet: false });
+  const res = await api({ method: 'GET', headers: {} }, new URL('http://x/api/settings'));
+  assert.deepEqual(res.body.models, [
+    { id: 'claude-sonnet-5', label: 'Sonnet' },
+    { id: 'claude-opus-5-5', label: 'claude-opus-5-5' },
+  ]);
 });
 
 test('/api/fleet merges self + peer; ?local=1 does not fetch peers', async (t) => {
@@ -212,6 +225,45 @@ test('spawn without a name lets the auto-namer name it (only when auto-naming is
   assert.equal(remote.calls.at(-1)[1].nameGiven, false);
   await post(`${urls.laptop}/api/hosts/workstation/spawn`, { name: 'job' });
   assert.equal(remote.calls.at(-1)[1].nameGiven, true);
+});
+
+test('spawn passes a valid model through and rejects a bad one (400, nothing spawned)', async (t) => {
+  const { urls, remote } = await startPair(t);
+  const ok = await post(`${urls.laptop}/api/hosts/workstation/spawn`, { model: 'claude-haiku-4-5-20251001' });
+  assert.equal(ok.status, 200);
+  assert.equal(remote.calls.at(-1)[1].model, 'claude-haiku-4-5-20251001');
+  const before = remote.calls.length;
+  const bad = await post(`${urls.laptop}/api/hosts/workstation/spawn`, { model: "x'; touch /tmp/pwned" });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /model must be/);
+  assert.equal(remote.calls.length, before);
+});
+
+function spawnReq(body) {
+  return import('node:stream').then(({ PassThrough }) => {
+    const req = Object.assign(new PassThrough(), { method: 'POST', headers: {} });
+    req.end(JSON.stringify(body));
+    return req;
+  });
+}
+
+test('an unnamed spawn with a first prompt schedules a targeted naming pass (auto-naming on only)', async () => {
+  const scheduled = [];
+  const spawnNamer = { schedule: async (tmux) => void scheduled.push(tmux) };
+  const mk = (enabled) => {
+    const host = fakeHost('solo', []);
+    const config = normalizeConfig({ self: 'solo', web: { autoName: { enabled } }, spawnDirs: [{ path: os.tmpdir() }] }, { env: {}, home: '/home/tester' });
+    return createApi({ config, ...host, spawnNamer, warmFleet: false });
+  };
+  const url = new URL('http://x/api/hosts/solo/spawn');
+  const on = mk(true);
+  const res = await on(await spawnReq({ prompt: 'reply ok' }), url);
+  assert.deepEqual(scheduled, [res.body.tmuxSession]);
+  await on(await spawnReq({}), url); // no first prompt: nothing to name from yet
+  await on(await spawnReq({ name: 'job', prompt: 'x' }), url); // named by hand
+  assert.equal(scheduled.length, 1);
+  await mk(false)(await spawnReq({ prompt: 'reply ok' }), url);
+  assert.equal(scheduled.length, 1, 'auto-naming off: fw-hhmmss fallback, no pass');
 });
 
 test('spawn keeps `claude -n <name>` when auto-naming is off', async () => {

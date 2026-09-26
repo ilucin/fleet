@@ -15,7 +15,7 @@ import { createBackend } from './lib/backends.mjs';
 import { createTranscriptReader } from './lib/transcript.mjs';
 import { createSpawner } from './lib/spawn.mjs';
 import { createKiller } from './lib/kill.mjs';
-import { createAutoNamer } from './lib/autoname.mjs';
+import { createAutoNamer, createSpawnNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { createFiles } from './lib/files.mjs';
@@ -49,6 +49,17 @@ const autoNamer = createAutoNamer({
   intervalMs: config.autoName.intervalMinutes * 60 * 1000,
   log,
 });
+// After an unnamed spawn with a first prompt: name that one session once it has replied.
+const spawnNamer = config.autoName.enabled
+  ? createSpawnNamer({
+      cli,
+      listSessions: async () => {
+        const host = await fleet.localHost({ force: true });
+        return host.ok ? host.sessions : [];
+      },
+      log,
+    })
+  : null;
 const uploader = createUploader({
   dir: config.uploads.dir,
   maxBytes: config.uploads.maxMB * 1024 * 1024,
@@ -76,6 +87,7 @@ const handleApi = createApi({
   killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
   cli,
   autoNamer,
+  spawnNamer,
   uploader,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   grouper,
@@ -121,6 +133,7 @@ function shutdown(signal) {
   shuttingDown = true;
   log(`[fleet-web] ${signal} received, shutting down`);
   autoNamer.stop();
+  spawnNamer?.stop();
   grouper?.stop();
   uploader.stop();
   handleApi.stop();

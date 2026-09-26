@@ -12,6 +12,11 @@
     "dir": null,
     "ui": null,
     "quickReplies": ["Continue.", "Yes", "No", "1", "2"],
+    "models": [
+      { "id": "", "label": "Default" },
+      { "id": "claude-opus-5-5", "label": "Opus 5.5" },
+      { "id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5" }
+    ],
     "autoName": { "enabled": true, "intervalMinutes": 5 },
     "grouping": { "enabled": true, "intervalMinutes": 10 },
     "uploads": { "dir": "~/.local/share/fleet/uploads", "maxMB": 100, "retentionDays": 14 },

@@ -12,6 +12,7 @@ import {
 } from './peers.mjs';
 import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
+import { DEFAULT_MODELS } from './config.mjs';
 
 export const API_VERSION = 1;
 
@@ -40,6 +41,8 @@ export const DEFAULT_QUICK_REPLIES = [
  *   killer      lib/kill.mjs killer (kill action; absent → 501)
  *   cli         lib/fleet-cli.mjs instance — `rename` (absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
+ *   spawnNamer  lib/autoname.mjs#createSpawnNamer — a targeted naming pass after an unnamed
+ *               spawn with a first prompt (only when web.autoName is enabled; absent → none)
  *   uploader    lib/uploads.mjs instance (uploads route; absent → 501)
  *   files       lib/files.mjs instance (files/stat|raw|open; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
@@ -59,6 +62,7 @@ export function createApi({
   killer = null,
   cli = null,
   autoNamer = null,
+  spawnNamer = null,
   uploader = null,
   files = null,
   grouper = null,
@@ -211,6 +215,10 @@ export function createApi({
       const nameGiven = check.nameGiven !== false || !config.autoName?.enabled;
       const result = await spawner.spawn({ ...check, nameGiven });
       refreshFleet();
+      // Name it as soon as it has answered, not at the next periodic pass.
+      if (!nameGiven && check.prompt.trim() && spawnNamer) {
+        spawnNamer.schedule(result.tmuxSession).catch(() => {});
+      }
       return { status: 200, body: { ok: true, host: config.self, ...result } };
     } catch (err) {
       if (err?.status) throw new HttpError(err.message, err.status);
@@ -343,6 +351,7 @@ export function createApi({
           self: config.self,
           hosts: config.hosts,
           quickReplies: config.quickReplies ?? DEFAULT_QUICK_REPLIES,
+          models: config.models ?? DEFAULT_MODELS,
           uploads: { maxMB: config.uploads?.maxMB ?? null },
         },
       };

@@ -28,7 +28,7 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.autoName`, `web.grouping`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
+`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 

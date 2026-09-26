@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import { api } from '@/api/client'
 import { DEFAULT_SETTINGS, SettingsContext, type SettingsState } from '@/hooks/useSettings'
+import { normalizeModels } from '@/lib/models'
 
 /** Loads /api/settings once; the app renders with defaults until (or if never) it answers. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -20,6 +21,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           hosts: Array.isArray(data?.hosts) ? data.hosts : [],
           quickReplies,
           uploadMaxMB: typeof data?.uploads?.maxMB === 'number' ? data.uploads.maxMB : null,
+          models: normalizeModels(data?.models),
           loaded: true,
         })
       })

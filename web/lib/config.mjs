@@ -3,7 +3,8 @@
 // Path: $FLEET_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/fleet/config.json.
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
-//     web: { port, bind, dir, ui, quickReplies, autoName: { enabled, intervalMinutes },
+//     web: { port, bind, dir, ui, quickReplies, models: [ { id, label } ],
+//            autoName: { enabled, intervalMinutes },
 //            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays } },
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
@@ -22,6 +23,18 @@ export const DEFAULT_GROUPING_MINUTES = 10;
 export const DEFAULT_UPLOADS_DIR = '~/.local/share/fleet/uploads';
 export const DEFAULT_UPLOAD_MAX_MB = 100;
 export const DEFAULT_UPLOAD_RETENTION_DAYS = 14;
+
+/** A model id typed after `--model` in a shell: letters, digits and `._[]-` only. */
+export const MODEL_ID_RE = /^[A-Za-z0-9._[\]-]{1,100}$/;
+
+/** The New session form's model picker when `web.models` is unset ('' = no flag, Claude's default). */
+export const DEFAULT_MODELS = [
+  { id: '', label: 'Default' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+];
 
 const BIN_FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin'];
 
@@ -138,7 +151,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImp
 /**
  * Turn the raw shared config into what the server needs:
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
- *     spawnDirs: [{ label, path }], uiDir, quickReplies, autoName: { enabled, intervalMinutes },
+ *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     configFile, configFound }
  */
@@ -205,6 +218,20 @@ export function normalizeConfig(
         }
         return { label: typeof r.label === 'string' && r.label ? r.label : r.text, text: r.text };
       });
+  }
+
+  // web.models: the New session model picker ({ id, label } or a bare id; id '' = no --model).
+  let models = DEFAULT_MODELS;
+  if (web.models != null) {
+    if (!Array.isArray(web.models)) throw new Error('config.web.models must be an array of { id, label }');
+    models = web.models.map((m) => {
+      const r = typeof m === 'string' ? { id: m } : m;
+      if (!isObject(r) || typeof r.id !== 'string' || (r.id !== '' && !MODEL_ID_RE.test(r.id))) {
+        throw new Error('config.web.models entries must be { id, label } with an id of letters, digits and ._[]- (or "" for the default)');
+      }
+      const label = typeof r.label === 'string' && r.label.trim() ? r.label.trim() : r.id || 'Default';
+      return { id: r.id, label };
+    });
   }
 
   // web.autoName: the periodic `fleet name --all --apply` pass (lib/autoname.mjs).
@@ -296,6 +323,7 @@ export function normalizeConfig(
     spawnDirs,
     uiDir,
     quickReplies,
+    models,
     autoName,
     grouping,
     uploads,

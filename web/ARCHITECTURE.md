@@ -31,7 +31,7 @@ lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
-lib/spawn.mjs         new tmux session + `claude [-n <name>] '<prompt>'`, auto-accept folder trust
+lib/spawn.mjs         new tmux session + `claude [--model <id>] [-n <name>] '<prompt>'`, auto-accept folder trust
 lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux session/window or iTerm tab
 lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
 lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
@@ -64,7 +64,8 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.bind` | listen address (default `0.0.0.0` with a config, `127.0.0.1` without one) |
 | `web.ui` | static UI: a directory path, or `"classic"` (= `web/public`); unset/`null` → `web/ui/dist` when built (has `index.html`), else `web/public` |
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
-| `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
+| `web.models` | New session model picker: `[{ id, label }]` or bare ids; id `""` = no `--model` (Claude's default); ids are letters, digits and `._[]-`. Default: Default, Fable 5.1 `claude-fable-5-1`, Opus 5.5 `claude-opus-5-5`, Sonnet 5 `claude-sonnet-5`, Haiku 4.5 `claude-haiku-4-5-20251001` |
+| `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass and the targeted pass after a spawn (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
@@ -134,14 +135,14 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | method | path | request | response |
 | --- | --- | --- | --- |
 | GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun } }` |
-| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB } }` |
+| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }] }` |
 | GET | `/api/fleet` | `?local=1` = this host only | `{ self, hosts: [Host], snapshotAt }` — self first, then peers (`snapshotAt` only on the merged view) |
 | GET | `/api/hosts/:host/sessions/:id/peek` | `?lines=200` (10..2000) | `{ host, id, backend, lines, text, capturedAt }` |
 | GET | `/api/hosts/:host/sessions/:id/messages` | `?limit=60` (1..500) | `{ host, id, status, backend, name, limit, messages: [Message], total, truncated, updatedAt, capturedAt }` |
 | POST | `/api/hosts/:host/sessions/:id/send` | `{ text }` (1..8000 chars, not blank) | `{ ok: true }` |
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }`, one of `Enter`, `Escape`, `Up`, `Down` | `{ ok: true }` |
 | POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (trimmed, 1..64 chars, one line) | `{ ok: true, host, id, result, title, from, tmux, message, … }` — the `fleet rename --json` report. **409** `{ error, result: "held", held: "waiting", … }` when the session is waiting on a prompt (nothing typed); 400 bad title; 404 unknown session; 502/504 CLI failure / timeout. Proxied once to a peer like the other session actions |
-| POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` | `{ ok, host, name, dir, tmuxSession, command, trusted }` |
+| POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt?, model? }` | `{ ok, host, name, dir, tmuxSession, command, trusted, model }` |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
@@ -169,7 +170,12 @@ after `realpath` (symlinks and `..` resolved), is one of this host's `spawnDirs`
 Runs `tmux new-session -d -s <name> -c <dir>`, types `claude -n '<name>' '<prompt>'`, and
 answers a first-run "trust this folder" dialog with "Yes" (`trusted: true` when it did). With no
 `name` (and auto-naming on) it types plain `claude '<prompt>'`: Claude derives `<cwd>-9d`, and the
-next naming pass replaces it, and the CLI renames the `fw-hhmmss` tmux session to match.
+next naming pass replaces it, and the CLI renames the `fw-hhmmss` tmux session to match — with a
+first prompt, a targeted pass for just that session runs as soon as it has answered (see
+Auto-naming). `model` (optional; `""` = Claude's default) must be 1–100 chars of letters, digits
+and `._[]-` (else 400) and is typed as `--model '<id>'`; it is not checked against `web.models`,
+so a client can pick from its own server's list for a peer. The UI sends no `name` any more;
+the field stays for other clients.
 The session shows up in `/api/fleet` once Claude registers it; clients poll for a session whose
 `tmux_session` equals `tmuxSession`.
 
@@ -268,6 +274,13 @@ session somebody named by hand (`fleet new fix-login`) is not clobbered — the 
 as the title instead of generating one. The server touches no tmux names itself (docs/architecture.md
 → Session titles). Runs are de-duplicated; `/api/health` reports `autoName.lastRun`.
 
+After an unnamed spawn with a first prompt (auto-naming on), `createSpawnNamer` names that one
+session without waiting for the schedule: after 8, 10, 12, 15, 20, 25 and 30s (~2 min) it looks
+the session up by its tmux name in a fresh `fleet list`, skips the try while it has not
+registered or is still busy on its first turn, stops once it no longer carries a derived name,
+and otherwise runs `fleet name <session_id> --apply` — done when renamed, retried when held
+(waiting on a prompt) or failed. Out of tries, the periodic pass picks it up.
+
 ## Smart grouping
 
 The Board view's groups come from `fleet group` (docs/architecture.md → Smart grouping). Exactly
@@ -289,7 +302,7 @@ Feature parity with the classic UI below, plus a host filter, theme choice and s
 same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
 paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,
 `fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`,
-`fleet.spawnHost`, `fleet.spawnDirLabel.<host>`), so switching UIs keeps preferences. Built with
+`fleet.spawnHost`, `fleet.spawnDirLabel.<host>`; React only: `fleet.spawnModel`), so switching UIs keeps preferences. Built with
 React 19 + Tailwind v4 + shadcn/ui; markdown is parsed to an AST and rendered as React elements
 (no `innerHTML`, only `http(s)` links). A 404 whose error starts with `unknown session` means the
 session is gone; any other 404 from `messages` means there is no transcript yet. Structure and conventions: [ui/README.md](./ui/README.md). Dev: `npm --prefix ui run dev`

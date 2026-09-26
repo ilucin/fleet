@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 
-import type { QuickReply, SessionKey } from '@/api/types'
+import type { ModelOption, QuickReply, SessionKey } from '@/api/types'
+import { DEFAULT_MODELS } from '@/lib/models'
 
 export interface SettingsState {
   /** This host's name (null until /api/settings answered). */
@@ -11,6 +12,8 @@ export interface SettingsState {
   quickReplies: QuickReply[]
   /** This server's `web.uploads.maxMB` (null: unknown — the target host enforces its own). */
   uploadMaxMB: number | null
+  /** New session model picker (config `web.models`). */
+  models: ModelOption[]
   loaded: boolean
 }
 
@@ -30,7 +33,7 @@ export const QUICK_KEYS: { label: string; key: SessionKey }[] = [
   { label: '↓', key: 'Down' },
 ]
 
-export const DEFAULT_SETTINGS: SettingsState = { self: null, hosts: [], quickReplies: DEFAULT_QUICK_REPLIES, uploadMaxMB: null, loaded: false }
+export const DEFAULT_SETTINGS: SettingsState = { self: null, hosts: [], quickReplies: DEFAULT_QUICK_REPLIES, uploadMaxMB: null, models: DEFAULT_MODELS, loaded: false }
 
 export const SettingsContext = createContext<SettingsState>(DEFAULT_SETTINGS)
 

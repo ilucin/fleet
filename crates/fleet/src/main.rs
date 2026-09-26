@@ -186,6 +186,9 @@ enum Commands {
         /// Display name for the new session (as shown by `list`/`watch`)
         #[arg(long)]
         name: Option<String>,
+        /// Model for the new session (`claude --model <id>`; default: Claude's own)
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
         /// Open a window in this tmux session instead of a new session per job (tmux only)
         #[arg(long)]
         tmux_session: Option<String>,
@@ -210,6 +213,9 @@ enum Commands {
         /// Display name for the new session (as shown by `list`/`watch`)
         #[arg(long)]
         name: Option<String>,
+        /// Model for the new session (`claude --model <id>`; default: Claude's own)
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
         /// Open a window in this tmux session instead of a new session per job (tmux only)
         #[arg(long)]
         tmux_session: Option<String>,
@@ -564,6 +570,7 @@ fn run(cli: Cli) -> Result<i32> {
             dir,
             backend,
             name,
+            model,
             tmux_session,
             window,
         } => commands::spawn(
@@ -572,6 +579,7 @@ fn run(cli: Cli) -> Result<i32> {
                 dir,
                 backend: backend.map(Into::into),
                 name,
+                model,
                 tmux_session,
                 window,
             },
@@ -582,6 +590,7 @@ fn run(cli: Cli) -> Result<i32> {
             dir,
             backend,
             name,
+            model,
             tmux_session,
             tab,
             no_wait,
@@ -592,6 +601,7 @@ fn run(cli: Cli) -> Result<i32> {
                 dir,
                 backend: backend.map(Into::into),
                 name,
+                model,
                 tmux_session,
                 // A handoff means "over there, out of my way" — a window unless told otherwise.
                 window: !tab,

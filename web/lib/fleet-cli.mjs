@@ -1,6 +1,6 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet group`) are documented in one
+// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -62,6 +62,20 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
       if (killed) throw new FleetCliError(`fleet name timed out after ${Math.round(t / 1000)}s`, { timedOut: true });
       if (err?.code === 'ENOENT') throw new FleetCliError(`fleet binary not found (${bin})`);
       throw new FleetCliError(String(err?.message ?? err));
+    }
+  }
+
+  /**
+   * Name one session: `fleet name <target> --apply` — the same generator and rename path as
+   * `nameAll`, for a session just spawned (lib/autoname.mjs#createSpawnNamer). Output as
+   * `nameAll`. Throws FleetCliError.
+   */
+  async function nameOne({ target, timeoutMs: t = 120 * 1000 } = {}) {
+    try {
+      const { stdout, stderr } = await run(bin, ['name', String(target), '--apply'], { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
+      return { stdout: stdout ?? '', stderr: stderr ?? '' };
+    } catch (err) {
+      throw wrap(err, 'fleet name', t);
     }
   }
 
@@ -140,5 +154,5 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, 'fleet group --cached');
   }
 
-  return { bin, list, nameAll, rename, groupRun, groupCached };
+  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached };
 }

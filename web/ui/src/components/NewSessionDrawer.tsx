@@ -10,13 +10,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAttach, useFileDrop } from '@/hooks/useAttach'
 import { useFleet } from '@/hooks/useFleet'
+import { useSettings } from '@/hooks/useSettings'
 import { shortCwd } from '@/lib/format'
+import { pickModel } from '@/lib/models'
 import { storage } from '@/lib/storage'
 import { sessionHref, spawnTargets } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
@@ -24,6 +25,9 @@ import { cn } from '@/lib/utils'
 // Same keys as the classic UI's sheet.
 const HOST_KEY = 'fleet.spawnHost'
 const dirKey = (host: string) => `fleet.spawnDirLabel.${host}`
+const MODEL_KEY = 'fleet.spawnModel'
+// Radix ToggleGroup treats '' as "nothing selected": the default model ('' = no --model) needs a stand-in.
+const DEFAULT_MODEL_VALUE = '__default'
 
 export interface NewSessionDrawerProps {
   open: boolean
@@ -33,8 +37,9 @@ export interface NewSessionDrawerProps {
 }
 
 /**
- * `+` in the list header: host, directory (that host's spawnDirs), optional name and first
- * prompt → POST spawn, then watch the fleet for the new session and open it.
+ * `+` in the list header: host, directory (that host's spawnDirs), model and an optional first
+ * prompt → POST spawn, then watch the fleet for the new session and open it. No name field:
+ * the server's auto-namer names it (tmux `fw-hhmmss` when auto-naming is off).
  */
 export function NewSessionDrawer({ open, onOpenChange, onOpenSession }: NewSessionDrawerProps) {
   return (
@@ -82,7 +87,9 @@ function NewSessionForm({
   const rememberedLabel = dirLabels[host] ?? storage.get(dirKey(host))
   const dir = dirs.find((d) => d.label === rememberedLabel) ?? dirs[0] ?? null
 
-  const [name, setName] = useState('')
+  const { models } = useSettings()
+  const [modelChoice, setModelChoice] = useState<string | null>(() => storage.get(MODEL_KEY))
+  const model = pickModel(models, modelChoice)
   const [prompt, setPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -97,6 +104,10 @@ function NewSessionForm({
     storage.set(HOST_KEY, h)
     setError(null)
   }
+  const chooseModel = (id: string) => {
+    setModelChoice(id)
+    storage.set(MODEL_KEY, id)
+  }
   const pickDir = (label: string) => {
     setDirLabels((m) => ({ ...m, [host]: label }))
     storage.set(dirKey(host), label)
@@ -109,7 +120,7 @@ function NewSessionForm({
     setBusy(true)
     setError(null)
     try {
-      const res = await api.spawn(host, { name: name.trim() || undefined, dir: dir.path, prompt: prompt.trim() ? prompt : undefined })
+      const res = await api.spawn(host, { dir: dir.path, prompt: prompt.trim() ? prompt : undefined, model: model || undefined })
       onDone()
       const id = toast.loading(`Starting ${res.name} on ${host}…`, { description: 'Waiting for Claude to register' })
       watchForSpawned(
@@ -127,7 +138,7 @@ function NewSessionForm({
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0
       const msg = (err as Error)?.message || 'Failed to start'
-      setError(status === 409 ? `${msg} — pick another name.` : msg)
+      setError(status === 409 ? `${msg} — try again.` : msg)
       setBusy(false)
     }
   }
@@ -184,7 +195,7 @@ function NewSessionForm({
 
           <Field label="Directory">
             {dirs.length ? (
-              <div role="radiogroup" aria-label="Directory" className="grid gap-1.5">
+              <div role="radiogroup" aria-label="Directory" className="grid grid-cols-1 gap-1.5">
                 {dirs.map((d) => {
                   const on = d === dir
                   return (
@@ -214,19 +225,28 @@ function NewSessionForm({
             )}
           </Field>
 
-          <Field label="Name" hint="optional · a-z 0-9 - _">
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="auto"
-              maxLength={40}
-              autoCapitalize="off"
-              autoCorrect="off"
-              autoComplete="off"
-              spellCheck={false}
-              className="h-11 rounded-xl bg-card text-base md:text-base"
-            />
-          </Field>
+          {models.length > 1 ? (
+            <Field label="Model">
+              <ToggleGroup
+                type="single"
+                value={model || DEFAULT_MODEL_VALUE}
+                onValueChange={(v) => v && chooseModel(v === DEFAULT_MODEL_VALUE ? '' : v)}
+                aria-label="Model"
+                className="no-scrollbar w-full justify-start overflow-x-auto"
+              >
+                {models.map((m) => (
+                  <ToggleGroupItem
+                    key={m.id || DEFAULT_MODEL_VALUE}
+                    value={m.id || DEFAULT_MODEL_VALUE}
+                    title={m.id || "Claude's default model"}
+                    className="h-10 shrink-0 rounded-full border border-border bg-card px-4 text-sm data-[state=on]:border-primary/50 data-[state=on]:bg-accent"
+                  >
+                    {m.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </Field>
+          ) : null}
 
           <Field label="First prompt" hint="optional">
             <Textarea

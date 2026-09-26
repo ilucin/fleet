@@ -85,6 +85,33 @@ fn resolve_launcher() -> String {
     "claude".to_string()
 }
 
+/// A `--model` id is typed into a shell: letters, digits and `._[]-` only (the
+/// web server enforces the same set). Blank means Claude's own default.
+fn clean_model(raw: &str) -> Result<Option<String>> {
+    let m = raw.trim();
+    if m.is_empty() {
+        return Ok(None);
+    }
+    if m.len() > 100
+        || !m
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._[]-".contains(c))
+    {
+        return Err(Error::Other(format!(
+            "invalid model id \"{m}\" — letters, digits and . _ [ ] - only"
+        )));
+    }
+    Ok(Some(m.to_string()))
+}
+
+/// The launcher with `--model <id>` appended when one was picked.
+fn with_model(launcher: &str, model: Option<&str>) -> String {
+    match model {
+        Some(m) => format!("{launcher} --model {}", crate::core::tools::shq(m)),
+        None => launcher.to_string(),
+    }
+}
+
 /// The name rows are tagged with: `--as-host` (set by the dispatcher), else
 /// config `self`.
 pub fn host_label() -> String {
@@ -473,6 +500,8 @@ pub struct SpawnOpts {
     pub backend: Option<Backend>,
     /// Claude display name for the new session (`claude -n`).
     pub name: Option<String>,
+    /// Model for the new session (`claude --model <id>`); None = Claude's default.
+    pub model: Option<String>,
     pub tmux_session: Option<String>,
     pub window: bool,
 }
@@ -515,8 +544,14 @@ fn default_backend() -> Backend {
 
 pub fn spawn(prompt: Option<String>, opts: SpawnOpts) -> Result<()> {
     let (dir, backend_kind, name) = opts.resolve()?;
+    let model = opts
+        .model
+        .as_deref()
+        .map(clean_model)
+        .transpose()?
+        .flatten();
     let prompt = prompt.unwrap_or_default();
-    let launcher = resolve_launcher();
+    let launcher = with_model(&resolve_launcher(), model.as_deref());
     let desc = backend::spawn(
         backend_kind,
         &dir,
@@ -639,6 +674,12 @@ pub fn handoff(
 ) -> Result<()> {
     let brief = read_brief(brief, file)?;
     let (dir, backend_kind, name) = opts.resolve()?;
+    let model = opts
+        .model
+        .as_deref()
+        .map(clean_model)
+        .transpose()?
+        .flatten();
 
     let from = discovery::origin();
     let now = chrono::Local::now();
@@ -658,7 +699,7 @@ pub fn handoff(
     std::fs::write(&path, &text)?;
 
     let before: HashSet<String> = discovery::discover().iter().map(Session::key).collect();
-    let launcher = resolve_launcher();
+    let launcher = with_model(&resolve_launcher(), model.as_deref());
     let desc = backend::spawn(
         backend_kind,
         &dir,
@@ -729,6 +770,28 @@ mod tests {
         // Character-counted: a multi-byte name must not be split mid-codepoint.
         let wide = clean_name(&"é".repeat(300)).unwrap();
         assert_eq!(wide.chars().count(), MAX_RENAME);
+    }
+
+    // The id is typed into a shell after `--model`: nothing but the id charset gets through.
+    #[test]
+    fn model_ids_are_validated_and_quoted() {
+        assert_eq!(
+            clean_model("  claude-sonnet-5 ").unwrap().as_deref(),
+            Some("claude-sonnet-5")
+        );
+        assert_eq!(
+            clean_model("claude-opus-5-5[1m]").unwrap().as_deref(),
+            Some("claude-opus-5-5[1m]")
+        );
+        assert_eq!(clean_model("  ").unwrap(), None);
+        for bad in ["a b", "x';id'", "$(id)", "a;b", "`id`", &"x".repeat(101)] {
+            assert!(clean_model(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            with_model("claude", Some("claude-haiku-4-5-20251001")),
+            "claude --model 'claude-haiku-4-5-20251001'"
+        );
+        assert_eq!(with_model("cc", None), "cc");
     }
 
     #[test]
