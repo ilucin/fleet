@@ -14,6 +14,7 @@ import type {
   Settings,
   SpawnRequest,
   SpawnResponse,
+  UploadResponse,
 } from './types'
 
 /** A failed request. `status` is the HTTP status, or 0 when the network is unreachable. */
@@ -34,11 +35,16 @@ export interface RequestOptions {
   signal?: AbortSignal
   method?: 'GET' | 'POST'
   body?: unknown
+  /** A raw body (a File for uploads), sent as-is with its own type. */
+  file?: Blob
 }
 
-export async function request<T>(path: string, { signal, method = 'GET', body }: RequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, { signal, method = 'GET', body, file }: RequestOptions = {}): Promise<T> {
   const init: RequestInit = { method, signal, headers: {} }
-  if (body !== undefined) {
+  if (file !== undefined) {
+    init.headers = { 'content-type': file.type || 'application/octet-stream' }
+    init.body = file
+  } else if (body !== undefined) {
     init.headers = { 'content-type': 'application/json' }
     init.body = JSON.stringify(body)
   }
@@ -91,6 +97,10 @@ export const api = {
     request<SpawnResponse>(`${hostPath(host)}/spawn`, { ...o, method: 'POST', body }),
   autoname: (host: string, o: Opts = {}) =>
     request<AutoNameRun>(`${hostPath(host)}/autoname`, { ...o, method: 'POST', body: {} }),
+
+  /** Store a file on `host`; the response carries its absolute path there. */
+  upload: (host: string, file: Blob, name: string, o: Opts = {}) =>
+    request<UploadResponse>(`${hostPath(host)}/uploads?name=${enc(name)}`, { ...o, method: 'POST', file }),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),

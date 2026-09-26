@@ -36,7 +36,8 @@ lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux ses
 lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
 lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
 lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fleet
-lib/peers.mjs         peer fetch + one-hop proxy
+lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
+lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads are streamed through unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
 lib/http.mjs, util.mjs, run.mjs   helpers (body limit, static path safety, execFile wrapper)
@@ -63,6 +64,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
+| `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
 | `fleetBin` | `fleet` binary; `null` → PATH, fallbacks, `~/.local/bin`, `~/.cargo/bin` |
@@ -129,7 +131,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | method | path | request | response |
 | --- | --- | --- | --- |
 | GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun } }` |
-| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }] }` |
+| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB } }` |
 | GET | `/api/fleet` | `?local=1` = this host only | `{ self, hosts: [Host], snapshotAt }` — self first, then peers (`snapshotAt` only on the merged view) |
 | GET | `/api/hosts/:host/sessions/:id/peek` | `?lines=200` (10..2000) | `{ host, id, backend, lines, text, capturedAt }` |
 | GET | `/api/hosts/:host/sessions/:id/messages` | `?limit=60` (1..500) | `{ host, id, status, backend, name, limit, messages: [Message], total, truncated, updatedAt, capturedAt }` |
@@ -140,6 +142,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
+| POST | `/api/hosts/:host/uploads` | `?name=<file name>`, the raw file as the body (any `content-type`) | `{ host, path, name, size }` — `path` is absolute on `:host`. 413 over `web.uploads.maxMB` (no partial file is left) |
 | POST | `/api/hosts/:host/autoname` | `{}` | `{ host, ok, at, ms, reason, dryRun, renamed: [{ from, to }], tmux: ["a → b"], held: [..], errors: [..], error? }` (502 when the pass failed) |
 
 **Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
@@ -177,11 +180,21 @@ it needs is already in the `list --json` row. The UI exposes it in the ⋯ menu 
 
 **Statuses**: 400 bad input, 404 unknown host/session/route (also a `?local=1` request for a
 non-self host), 405 wrong method, 409 existing tmux session or uncontrollable backend,
-413 body over 64 KB, 502 peer unreachable / non-JSON, 503 local discovery failed, 504 peer timeout.
+413 body over 64 KB (an upload: over `web.uploads.maxMB`), 502 peer unreachable / non-JSON, 503 local discovery failed, 504 peer timeout.
 
-**Timeouts / caching**: local list cached 2s; peer `/api/fleet` fetch 6s; proxied session and
-spawn calls 20s (a proxied `autoname` can outlast that and then answers 504, while the pass still
+**Timeouts / caching**: local list cached 2s; peer `/api/fleet` fetch 6s; proxied uploads
+15 min (also the server's whole-request budget); proxied session and spawn calls 20s (a proxied `autoname` can outlast that and then answers 504, while the pass still
 finishes on the peer).
+
+**uploads**: how the UI attaches files — browsers never expose a local path, so the file is
+stored on the host the session runs on and its path is typed into the prompt. The name is
+sanitized (last path segment, control chars dropped, anything but letters/digits/`._-` → `-`,
+no leading dots, ≤ 80 chars with the extension kept, `file` when nothing is left) and stored as
+`<web.uploads.dir>/YYYY-MM-DD/<6 hex>-<name>`, opened exclusively (`wx`) so concurrent uploads of
+one name never clobber each other. The body is streamed to disk: a `content-length` over the limit
+is refused before anything is written, a chunked body is cut off at the limit and its partial file
+deleted. For a peer the body is piped through unbuffered (`content-type` / `content-length` pass
+through) and the peer's answer — a 413 included — comes back as is.
 
 **Warm snapshot**: the merged `/api/fleet` (local discovery + every peer) is kept warm
 (lib/snapshot.mjs). While anyone asked in the last 90s the server rebuilds it every 3s in the

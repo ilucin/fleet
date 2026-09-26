@@ -19,6 +19,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           self: typeof data?.self === 'string' ? data.self : null,
           hosts: Array.isArray(data?.hosts) ? data.hosts : [],
           quickReplies,
+          uploadMaxMB: typeof data?.uploads?.maxMB === 'number' ? data.uploads.maxMB : null,
           loaded: true,
         })
       })

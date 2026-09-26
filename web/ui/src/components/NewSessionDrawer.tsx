@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { CheckIcon, FolderIcon, Loader2Icon, PlayIcon } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { CheckIcon, FolderIcon, Loader2Icon, PaperclipIcon, PlayIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, ApiError } from '@/api/client'
 import { watchForSpawned } from '@/api/spawnWatch'
+import { DropOverlay } from '@/components/DropOverlay'
 import { HostDot } from '@/components/HostBadge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useAttach, useFileDrop } from '@/hooks/useAttach'
 import { useFleet } from '@/hooks/useFleet'
 import { shortCwd } from '@/lib/format'
 import { storage } from '@/lib/storage'
@@ -84,6 +86,11 @@ function NewSessionForm({
   const [prompt, setPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Files dropped on the form / pasted / picked: uploaded to the chosen host, paths go into the prompt.
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const picker = useRef<HTMLInputElement>(null)
+  const { attach, onPaste, progress } = useAttach({ host, textarea: promptRef, setValue: setPrompt })
+  const drop = useFileDrop((files) => void attach(files), !busy)
 
   const pickHost = (h: string) => {
     setHost(h)
@@ -96,7 +103,7 @@ function NewSessionForm({
   }
 
   const start = async () => {
-    if (busy) return
+    if (busy || progress) return
     if (!host) return setError('No reachable host to start a session on.')
     if (!dir) return setError('This host advertises no directories.')
     setBusy(true)
@@ -127,11 +134,13 @@ function NewSessionForm({
 
   return (
     <form
-      className={
+      className={cn(
+        'relative',
         dialog
           ? 'no-scrollbar max-h-[calc(100dvh-4rem)] w-full overflow-y-auto px-5 pt-2 pb-5'
-          : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]'
-      }
+          : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]',
+      )}
+      {...drop.bind}
       onSubmit={(e) => {
         e.preventDefault()
         void start()
@@ -221,12 +230,46 @@ function NewSessionForm({
 
           <Field label="First prompt" hint="optional">
             <Textarea
+              ref={promptRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onPaste={onPaste}
               rows={3}
               placeholder="What should Claude work on?"
               className="max-h-48 min-h-20 rounded-xl bg-card text-base md:text-base"
             />
+            <div className="flex min-w-0 items-center gap-2">
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                tabIndex={-1}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  e.target.value = ''
+                  void attach(files)
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!host || progress != null}
+                onClick={() => picker.current?.click()}
+                className="-ml-2 h-9 shrink-0 rounded-lg px-2 text-muted-foreground"
+              >
+                {progress ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
+                Attach files
+              </Button>
+              <span className="min-w-0 truncate text-xs text-dimmer" role="status">
+                {progress
+                  ? `Uploading ${progress.name}${progress.total > 1 ? ` (${progress.index}/${progress.total})` : ''}…`
+                  : dialog
+                    ? `or drop / paste them — stored on ${host}`
+                    : `stored on ${host}`}
+              </span>
+            </div>
           </Field>
 
           {error ? (
@@ -235,12 +278,13 @@ function NewSessionForm({
             </Alert>
           ) : null}
 
-          <Button type="submit" className="h-11 w-full rounded-xl text-[15px]" disabled={busy || !dir}>
+          <Button type="submit" className="h-11 w-full rounded-xl text-[15px]" disabled={busy || !dir || progress != null}>
             {busy ? <Loader2Icon className="animate-spin" /> : <PlayIcon />}
             {busy ? 'Starting…' : `Start on ${host}`}
           </Button>
         </div>
       )}
+      <DropOverlay show={drop.dragging} hint={host ? `Uploaded to ${host}; the path goes into the first prompt` : undefined} />
     </form>
   )
 }

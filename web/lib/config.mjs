@@ -4,7 +4,7 @@
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
 //     web: { port, bind, dir, ui, quickReplies, autoName: { enabled, intervalMinutes },
-//            grouping: { enabled, intervalMinutes } },
+//            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays } },
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
@@ -19,6 +19,9 @@ export const DEFAULT_SELF = 'local';
 export const SUPPORTED_VERSION = 1;
 export const DEFAULT_AUTONAME_MINUTES = 5;
 export const DEFAULT_GROUPING_MINUTES = 10;
+export const DEFAULT_UPLOADS_DIR = '~/.local/share/fleet/uploads';
+export const DEFAULT_UPLOAD_MAX_MB = 100;
+export const DEFAULT_UPLOAD_RETENTION_DAYS = 14;
 
 const BIN_FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin'];
 
@@ -136,7 +139,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImp
  * Turn the raw shared config into what the server needs:
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, autoName: { enabled, intervalMinutes },
- *     grouping: { enabled, intervalMinutes, host },
+ *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     configFile, configFound }
  */
 export function normalizeConfig(
@@ -242,6 +245,30 @@ export function normalizeConfig(
     host: groupingHost,
   };
 
+  // web.uploads: where dropped/pasted files are stored (lib/uploads.mjs).
+  const wu = web.uploads == null ? {} : web.uploads;
+  if (!isObject(wu)) throw new Error('config.web.uploads must be an object { dir, maxMB, retentionDays }');
+  let uploadsDir = DEFAULT_UPLOADS_DIR;
+  if (wu.dir != null) {
+    if (typeof wu.dir !== 'string' || !wu.dir.trim()) throw new Error('config.web.uploads.dir must be a non-empty string');
+    uploadsDir = wu.dir.trim();
+  }
+  uploadsDir = expandHome(uploadsDir, home);
+  if (!path.isAbsolute(uploadsDir)) throw new Error(`config.web.uploads.dir must be absolute or start with ~: ${wu.dir}`);
+  let maxMB = DEFAULT_UPLOAD_MAX_MB;
+  if (wu.maxMB != null) {
+    maxMB = Number(wu.maxMB);
+    if (!Number.isFinite(maxMB) || maxMB <= 0) throw new Error(`config.web.uploads.maxMB must be a number > 0: ${wu.maxMB}`);
+  }
+  let retentionDays = DEFAULT_UPLOAD_RETENTION_DAYS;
+  if (wu.retentionDays != null) {
+    retentionDays = Number(wu.retentionDays);
+    if (!Number.isFinite(retentionDays) || retentionDays < 0) {
+      throw new Error(`config.web.uploads.retentionDays must be a number >= 0 (0 = keep forever): ${wu.retentionDays}`);
+    }
+  }
+  const uploads = { dir: path.normalize(uploadsDir), maxMB, retentionDays };
+
   return {
     self: self.trim(),
     port,
@@ -256,6 +283,7 @@ export function normalizeConfig(
     quickReplies,
     autoName,
     grouping,
+    uploads,
   };
 }
 

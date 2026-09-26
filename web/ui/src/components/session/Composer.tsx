@@ -1,8 +1,9 @@
 import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type TouchEvent } from 'react'
-import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, Loader2Icon, SendHorizontalIcon } from 'lucide-react'
+import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, Loader2Icon, PaperclipIcon, SendHorizontalIcon } from 'lucide-react'
 
 import type { QuickReply, SessionKey } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { useAttach } from '@/hooks/useAttach'
 import { MAX_SEND_CHARS } from '@/lib/chat'
 import { swipeIntent } from '@/lib/gestures'
 import { cn } from '@/lib/utils'
@@ -37,14 +38,22 @@ export interface ComposerProps {
   desktop?: boolean
   /** The textarea, for "reply" shortcuts. */
   inputRef?: React.Ref<HTMLTextAreaElement>
+  /** The session's host: attached files are uploaded there. */
+  host: string
+  /** Receives `attach(files)`, for drop zones around the composer (the session pane). */
+  attachRef?: React.Ref<(files: File[]) => void>
 }
 
 const MAX_TEXTAREA_PX = 21 * 5 + 22 // ~5 rows + padding
 
-export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef }: ComposerProps) {
+export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef, host, attachRef }: ComposerProps) {
   const [text, setText] = useState('')
   const ta = useRef<HTMLTextAreaElement>(null)
   useImperativeHandle(inputRef, () => ta.current as HTMLTextAreaElement, [])
+  // Dropped / pasted / picked files: uploaded to the session's host, paths typed at the caret.
+  const { attach, onPaste, progress } = useAttach({ host, textarea: ta, setValue: setText, disabledReason: lockedReason })
+  useImperativeHandle(attachRef, () => (files: File[]) => void attach(files), [attach])
+  const picker = useRef<HTMLInputElement>(null)
   const locked = lockedReason != null
   const empty = text.trim().length === 0
   const tooLong = text.length > MAX_SEND_CHARS
@@ -154,11 +163,36 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
         </div>
 
         <div className="flex items-end gap-2">
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            tabIndex={-1}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? [])
+              e.target.value = '' // the same file can be picked again
+              void attach(files)
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Attach files"
+            title={desktop ? 'Attach files (or drop / paste them)' : 'Attach files'}
+            disabled={locked || progress != null}
+            onClick={() => picker.current?.click()}
+            className={cn('shrink-0 rounded-full text-muted-foreground [&_svg:not([class*=size-])]:size-5', desktop ? 'size-11' : '-mr-1 size-11')}
+          >
+            {progress ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
+          </Button>
           <textarea
             ref={ta}
             rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (isTouch && !desktop) return
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -189,7 +223,14 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
             {sending ? <Loader2Icon className="animate-spin" /> : <SendHorizontalIcon />}
           </Button>
         </div>
-        {lockedReason || text.length > MAX_SEND_CHARS - 1000 ? (
+        {progress ? (
+          <div className="flex min-w-0 items-center gap-1.5 px-2 pt-1.5 text-xs text-muted-foreground" role="status">
+            <span className="truncate">
+              Uploading {progress.name}
+              {progress.total > 1 ? ` (${progress.index}/${progress.total})` : ''}…
+            </span>
+          </div>
+        ) : lockedReason || text.length > MAX_SEND_CHARS - 1000 ? (
           <div className={cn('px-2 pt-1.5 text-xs', tooLong ? 'text-destructive' : 'text-dimmer')}>
             {lockedReason ?? `${text.length} / ${MAX_SEND_CHARS}`}
           </div>

@@ -142,6 +142,8 @@ export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = 
   });
 
   server.headersTimeout = 30000;
-  server.requestTimeout = 60000;
+  // Whole-request budget: generous enough for a large upload over a slow link (uploads are
+  // capped by web.uploads.maxMB); headersTimeout still cuts off stalled clients early.
+  server.requestTimeout = 15 * 60 * 1000;
   return server;
 }

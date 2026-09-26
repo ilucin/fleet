@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ApiError, api, isAbortError, isSessionGone, sessionErrorMessage } from '@/api/client'
 import type { Message, SessionKey } from '@/api/types'
 import { ContextMeter } from '@/components/ContextMeter'
+import { DropOverlay } from '@/components/DropOverlay'
 import { EditableTitle } from '@/components/EditableTitle'
 import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
@@ -15,6 +16,7 @@ import { SessionMenu, SessionMenuBody, type SessionMenuProps } from '@/component
 import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useFileDrop } from '@/hooks/useAttach'
 import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
@@ -242,6 +244,10 @@ export function SessionScreen({
     : backend === 'unknown'
       ? "Backend is unknown — this session can't be steered."
       : null
+
+  // Files dropped anywhere on the session go through the composer (upload → path at the caret).
+  const attachRef = useRef<(files: File[]) => void>(null)
+  const drop = useFileDrop((files) => attachRef.current?.(files), lockedReason == null)
 
   const activeErr = mode === 'chat' ? chatErr : peekErr
   const noTranscript = mode === 'chat' && chatErr instanceof ApiError && chatErr.status === 404 && !isSessionGone(chatErr)
@@ -484,14 +490,17 @@ export function SessionScreen({
         onKey={sendKey}
         desktop={pane}
         inputRef={composerRef}
+        host={host}
+        attachRef={attachRef}
       />
+      <DropOverlay show={drop.dragging} hint={`Uploaded to ${host}; the path goes into the message`} />
     </>
   )
 
   if (pane) {
     return (
       <div className="flex h-full min-w-0 flex-1 overflow-hidden bg-background">
-        <section aria-label={`Session ${name}`} className="flex min-w-0 flex-1 flex-col">
+        <section aria-label={`Session ${name}`} className="relative flex min-w-0 flex-1 flex-col" {...drop.bind}>
           {column}
         </section>
         {inspector ? (
@@ -504,7 +513,7 @@ export function SessionScreen({
   }
 
   return (
-    <div className="fixed-app flex flex-col overflow-hidden bg-background">
+    <div className="fixed-app flex flex-col overflow-hidden bg-background" {...drop.bind}>
       {column}
       <SessionMenu {...menuProps} />
     </div>

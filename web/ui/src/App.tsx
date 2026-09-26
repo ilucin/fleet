@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FleetProvider } from '@/providers/FleetProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
+import { usePreventFileNavigation } from '@/hooks/useAttach'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { ThemeProvider } from '@/providers/ThemeProvider'
 import { DesktopShell } from '@/screens/DesktopShell'
@@ -20,6 +21,8 @@ export default function App() {
   // ≥ lg: master–detail shell; below it the mobile screens, untouched. Crossing the
   // breakpoint swaps trees (the hash route is shared, so the open session stays open).
   const desktop = useIsDesktop()
+  // A file dropped outside a drop zone must not navigate the app away.
+  usePreventFileNavigation()
   return (
     <ThemeProvider>
       <SettingsProvider>

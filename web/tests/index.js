@@ -12,3 +12,4 @@ import './autoname.test.mjs';
 import './snapshot.test.mjs';
 import './ui.test.mjs';
 import './grouping.test.mjs';
+import './uploads.test.mjs';

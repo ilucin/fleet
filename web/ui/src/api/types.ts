@@ -81,6 +81,17 @@ export interface Settings {
   self: string
   hosts: string[]
   quickReplies: QuickReply[]
+  /** `web.uploads.maxMB` of this server (older servers: absent). */
+  uploads?: { maxMB: number | null }
+}
+
+/** POST /api/hosts/:host/uploads — the stored copy on that host. */
+export interface UploadResponse {
+  host: string
+  /** Absolute path on `host`. */
+  path: string
+  name: string
+  size: number
 }
 
 export interface AutoNameRun {

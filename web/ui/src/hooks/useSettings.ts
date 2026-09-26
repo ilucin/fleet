@@ -9,6 +9,8 @@ export interface SettingsState {
   hosts: string[]
   /** Composer text chips (config `web.quickReplies`). */
   quickReplies: QuickReply[]
+  /** This server's `web.uploads.maxMB` (null: unknown — the target host enforces its own). */
+  uploadMaxMB: number | null
   loaded: boolean
 }
 
@@ -28,7 +30,7 @@ export const QUICK_KEYS: { label: string; key: SessionKey }[] = [
   { label: '↓', key: 'Down' },
 ]
 
-export const DEFAULT_SETTINGS: SettingsState = { self: null, hosts: [], quickReplies: DEFAULT_QUICK_REPLIES, loaded: false }
+export const DEFAULT_SETTINGS: SettingsState = { self: null, hosts: [], quickReplies: DEFAULT_QUICK_REPLIES, uploadMaxMB: null, loaded: false }
 
 export const SettingsContext = createContext<SettingsState>(DEFAULT_SETTINGS)
 

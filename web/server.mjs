@@ -16,6 +16,7 @@ import { createSpawner } from './lib/spawn.mjs';
 import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
+import { createUploader } from './lib/uploads.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -45,6 +46,12 @@ const autoNamer = createAutoNamer({
   intervalMs: config.autoName.intervalMinutes * 60 * 1000,
   log,
 });
+const uploader = createUploader({
+  dir: config.uploads.dir,
+  maxBytes: config.uploads.maxMB * 1024 * 1024,
+  retentionDays: config.uploads.retentionDays,
+  log,
+});
 // Only the grouping host runs the pass; the fleet accessors are bound once the API exists.
 let fleetAccess = null;
 const grouper = config.grouping.enabled
@@ -66,6 +73,7 @@ const handleApi = createApi({
   killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
   cli,
   autoNamer,
+  uploader,
   grouper,
   name: NAME,
   version: VERSION,
@@ -91,6 +99,8 @@ server.listen(config.port, config.bind, () => {
   } else {
     log('[fleet-web] autoname off (web.autoName.enabled = false)');
   }
+  uploader.start();
+  log(`[fleet-web] uploads ${config.uploads.dir} (max ${config.uploads.maxMB} MB, kept ${config.uploads.retentionDays || '∞'} days)`);
   if (grouper) {
     grouper.start();
     log(`[fleet-web] grouping every ${config.grouping.intervalMinutes}m (fleet group, all hosts)`);
@@ -108,6 +118,7 @@ function shutdown(signal) {
   log(`[fleet-web] ${signal} received, shutting down`);
   autoNamer.stop();
   grouper?.stop();
+  uploader.stop();
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();

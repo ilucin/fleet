@@ -4,7 +4,11 @@
 import { HttpError, readJsonBody } from './http.mjs';
 import { clampLines, findSession, resolveHost, validateKey, validateSendText, validateTitle } from './util.mjs';
 import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
-import { fetchPeerHost as defaultFetchPeerHost, proxyToPeer as defaultProxyToPeer } from './peers.mjs';
+import {
+  fetchPeerHost as defaultFetchPeerHost,
+  proxyToPeer as defaultProxyToPeer,
+  streamToPeer as defaultStreamToPeer,
+} from './peers.mjs';
 import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 
@@ -14,6 +18,7 @@ const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages
 const POST_ACTIONS = new Set(['send', 'keys', 'kill', 'rename']);
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
+const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -33,11 +38,12 @@ export const DEFAULT_QUICK_REPLIES = [
  *   killer      lib/kill.mjs killer (kill action; absent → 501)
  *   cli         lib/fleet-cli.mjs instance — `rename` (absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
+ *   uploader    lib/uploads.mjs instance (uploads route; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
  *   name, version, startedAt   for /api/health
- *   fetchPeerHost, proxyToPeer (optional, for tests)
+ *   fetchPeerHost, proxyToPeer, streamToPeer (optional, for tests)
  * @returns {(req, url) => Promise<{status, body}>}  throws HttpError / BackendError.
  *   The function carries `.refreshFleet()` and `.stop()` (clears the background refresh).
  */
@@ -50,6 +56,7 @@ export function createApi({
   killer = null,
   cli = null,
   autoNamer = null,
+  uploader = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -57,8 +64,10 @@ export function createApi({
   startedAt = Date.now(),
   fetchPeerHost = defaultFetchPeerHost,
   proxyToPeer = defaultProxyToPeer,
+  streamToPeer = defaultStreamToPeer,
   peerFleetTimeoutMs = 6000,
   peerProxyTimeoutMs = 20000,
+  peerUploadTimeoutMs = 15 * 60 * 1000,
   warmFleet = true,
   fleetRefreshMs = 3000,
   fleetIdleAfterMs = 90 * 1000,
@@ -264,11 +273,22 @@ export function createApi({
   }
 
   /** Serve locally when `host` is self, proxy (once, with ?local=1) when it is a peer. */
-  async function forHost({ req, url, host, local }) {
+  async function forHost({ req, url, host, local, stream = false }) {
     const target = resolveHost(host, config);
     if (target.kind === 'unknown') throw new HttpError(`unknown host: ${host}`, 404);
     if (target.kind === 'self') return local();
     if (url.searchParams.get('local') === '1') throw new HttpError(`unknown host: ${host}`, 404); // never chain
+    if (stream) {
+      // Uploads: the raw body goes through unbuffered.
+      const proxied = await streamToPeer(target.url, {
+        method: req.method,
+        pathname: url.pathname,
+        search: url.search.replace(/^\?/, ''),
+        req,
+        timeoutMs: peerUploadTimeoutMs,
+      });
+      return { status: proxied.status, body: proxied.body };
+    }
     const rawBody = req.method === 'POST' ? JSON.stringify(await readJsonBody(req)) : null;
     const proxied = await proxyToPeer(target.url, {
       method: req.method,
@@ -310,6 +330,7 @@ export function createApi({
           self: config.self,
           hosts: config.hosts,
           quickReplies: config.quickReplies ?? DEFAULT_QUICK_REPLIES,
+          uploads: { maxMB: config.uploads?.maxMB ?? null },
         },
       };
     }
@@ -362,6 +383,22 @@ export function createApi({
           const result = await autoNamer.runOnce('manual');
           refreshFleet();
           return { status: result.ok ? 200 : 502, body: { host: config.self, ...result } };
+        },
+      });
+    }
+
+    const u = UPLOAD_ROUTE.exec(url.pathname);
+    if (u) {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return forHost({
+        req,
+        url,
+        host: decodeURIComponent(u[1]),
+        stream: true,
+        local: async () => {
+          if (!uploader) throw new HttpError('uploads are not available on this server', 501);
+          const stored = await uploader.store(req, url.searchParams.get('name'));
+          return { status: 200, body: { host: config.self, ...stored } };
         },
       });
     }

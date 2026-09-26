@@ -47,6 +47,8 @@ src/
   lib/shortcuts.ts    desktop keyboard map: matchShortcut() (key + typing/chord context → action),
                       isTypingTarget(), stepCursor(), sessionKey(), SHORTCUT_HELP (the `?` dialog)
   lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
+  lib/attach.ts       attachments: insertPaths() (paths at the caret, padded), formatPath() (quote on spaces),
+                      uploadName() (clipboard images → pasted-<stamp>.<ext>), overLimit(), formatBytes(), dragHasFiles()
   lib/layout.ts       sidebar width bounds + clampSidebarWidth()
   lib/storage.ts      localStorage that never throws
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
@@ -62,11 +64,13 @@ src/
   hooks/useTitles.ts  inline-rename store: startEditing/openTitleEditor/stopEditing, useEditing(scope, key),
                       useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
   hooks/useLongPress.ts  touch long-press on a row link (swallows the click that follows)
+  hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
+                      useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
   hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
-                      Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board)
+                      Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
   components/session/ detail screen parts: ChatView, TermView, Composer, SessionMenu (drawer) /
@@ -149,6 +153,18 @@ src/
 - **Composer**: auto-growing textarea (Enter sends on hardware keyboards, newline on touch;
   1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down (mobile: a mini drawer above the input, hidden until you swipe up on the composer or tap its handle; swipe down hides it; desktop: always shown);
   a toast per result; two follow-up polls after steering.
+- **Attachments**: files dropped on the session (anywhere on the desktop pane or the mobile
+  screen), pasted into the composer (⌘/Ctrl+V with files on the clipboard — plain text pastes as
+  usual) or picked with the paperclip (`multiple`) are uploaded one by one to the session's host
+  (`POST /api/hosts/:host/uploads`, see ../ARCHITECTURE.md) and their absolute paths are typed
+  at the caret, space-separated, double-quoted only when they contain spaces. A plain absolute
+  path (not `@path`, which Claude Code resolves against the cwd) is what Claude reads — images
+  included. A dashed "Drop to attach" overlay shows while dragging files; a spinner replaces the
+  paperclip and "Uploading <name> (i/n)…" shows under the input; errors (413 too large, host
+  unreachable, a host whose server predates uploads) toast. Files over this server's
+  `uploads.maxMB` (`/api/settings`) are refused before uploading. The New session form does the
+  same for the first prompt (drop on the form, paste, "Attach files"), uploading to the chosen
+  host. A file dropped outside a zone never navigates the app away.
 - **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
   (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),
   Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),

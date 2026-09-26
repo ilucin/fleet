@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+
 import { sortSessions } from './util.mjs';
 
 function withLocalFlag(search) {
@@ -92,4 +95,56 @@ export async function proxyToPeer(baseUrl, { method = 'GET', pathname, search = 
     const status = /timed out/.test(message) ? 504 : 502;
     return { status, body: { error: `peer ${baseUrl} unreachable: ${message}` } };
   }
+}
+
+/**
+ * Proxy a request whose body is a stream (an upload) to a peer without buffering it:
+ * `req` is piped into the peer request, `content-type` / `content-length` pass through.
+ * The peer may answer before the body is done (413): the rest is then drained locally.
+ * Returns { status, body } like proxyToPeer.
+ */
+export function streamToPeer(baseUrl, { method = 'POST', pathname, search = '', req, timeoutMs = 15 * 60 * 1000 } = {}) {
+  const target = new URL(`${baseUrl}${pathname}?${withLocalFlag(search)}`);
+  const headers = { accept: 'application/json' };
+  for (const h of ['content-type', 'content-length']) if (req.headers?.[h]) headers[h] = req.headers[h];
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.unpipe(out);
+      if (!req.readableEnded) req.resume();
+      resolve(result);
+    };
+    const out = (target.protocol === 'https:' ? https : http).request(target, { method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('error', (err) => done({ status: 502, body: { error: `peer ${baseUrl} unreachable: ${err.message}` } }));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        try {
+          done({ status: res.statusCode ?? 502, body: text ? JSON.parse(text) : {} });
+        } catch {
+          done({ status: 502, body: { error: 'peer returned non-JSON response' } });
+        }
+      });
+    });
+    const timer = setTimeout(() => {
+      out.destroy();
+      done({ status: 504, body: { error: `peer ${baseUrl} unreachable: timed out after ${timeoutMs}ms` } });
+    }, timeoutMs);
+    out.on('error', (err) => {
+      // A peer that answered early (413) and closed shows up here as EPIPE/ECONNRESET after
+      // the response; `settled` then wins.
+      done({ status: 502, body: { error: `peer ${baseUrl} unreachable: ${describeError(err, timeoutMs)}` } });
+    });
+    req.on('close', () => {
+      if (!req.complete) {
+        out.destroy();
+        done({ status: 400, body: { error: 'upload aborted by the client' } });
+      }
+    });
+    req.pipe(out);
+  });
 }
