@@ -19,6 +19,7 @@ import { createAutoNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { createFiles } from './lib/files.mjs';
+import { createTouchedIndex } from './lib/touched.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -76,7 +77,7 @@ const handleApi = createApi({
   cli,
   autoNamer,
   uploader,
-  files: createFiles({ home: os.homedir(), run }),
+  files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   grouper,
   name: NAME,
   version: VERSION,

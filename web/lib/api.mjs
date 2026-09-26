@@ -438,10 +438,10 @@ export function createApi({
     const body = action === 'raw' ? null : await readJsonBody(req);
     const session = await resolveLocalSession(id);
     const cwd = typeof session.cwd === 'string' && session.cwd ? session.cwd : null;
-    if (action === 'stat') return { status: 200, body: { host: config.self, id: session.session_id, ...(await files.stat(body.paths, cwd)) } };
-    if (action === 'open') return { status: 200, body: { host: config.self, ...(await files.open(body.path, cwd)) } };
+    if (action === 'stat') return { status: 200, body: { host: config.self, id: session.session_id, ...(await files.stat(body.paths, cwd, { session })) } };
+    if (action === 'open') return { status: 200, body: { host: config.self, ...(await files.open(body.path, cwd, { session })) } };
     const download = ['1', 'true'].includes(url.searchParams.get('download') ?? '');
-    return files.raw(url.searchParams.get('path'), cwd, { download });
+    return files.raw(url.searchParams.get('path'), cwd, { download, session });
   }
 
   handleApi.refreshFleet = refreshFleet;

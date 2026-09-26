@@ -1,7 +1,10 @@
 // Files an agent mentions in chat ("Updated docs/setup.md:12"): stat them (so the UI links
 // only the ones that exist), stream one for the in-app preview, or open it on this host.
-// Paths resolve against the session's cwd; after realpath they must stay inside $HOME or
-// that cwd (symlinks out are refused), and a few secret stores are never served.
+// Paths resolve against the session's cwd; a relative path missing there falls back to files
+// the session touched (lib/touched.mjs: "Updated docs/x.md" after editing /…/other-repo/docs/x.md),
+// then to their ancestor dirs and the configured `web.files.roots`. Whatever the route, after
+// realpath the file must stay inside $HOME or that cwd (symlinks out are refused), and a few
+// secret stores are never served.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +18,11 @@ export const PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
 const SNIFF_BYTES = 4096;
 const STAT_TTL_MS = 5000;
 const STAT_CACHE_MAX = 2000;
+/** Fallback bounds for a relative path missing under the cwd. */
+const MAX_TOUCHED_MATCHES = 20; // touched files ending in /<rel> that are checked
+const MAX_TOUCHED_SCAN = 500; // touched files whose ancestors become candidate roots
+const MAX_ANCESTOR_DEPTH = 8;
+const MAX_CANDIDATE_ROOTS = 40;
 
 const MARKDOWN_EXT = new Set(['.md', '.markdown', '.mdx', '.mdown', '.mkd']);
 const IMAGE_TYPES = {
@@ -156,10 +164,13 @@ function displayPath(abs, { cwd, home }) {
  *   run        lib/run.mjs (for `open`)
  *   platform   process.platform
  *   hasBinary  (name) → boolean, for xdg-open (default: PATH lookup)
+ *   touched    lib/touched.mjs index ({ get(session) }) — optional; enables the fallbacks
+ *   roots      extra absolute dirs a relative path may be under (`web.files.roots`); they only
+ *              add candidates — the sandbox stays $HOME + cwd
  */
-export function createFiles({ home, run, platform = process.platform, hasBinary = pathHas, now = Date.now } = {}) {
+export function createFiles({ home, run, platform = process.platform, hasBinary = pathHas, now = Date.now, touched = null, roots: extraRoots = [] } = {}) {
   const realHome = safeRealpathSync(home) ?? path.resolve(home);
-  const cache = new Map(); // `${cwd}\0${input}` → { at, entry }
+  const cache = new Map(); // `${session}\0${touched version}\0${cwd}\0${input}` → { at, entry }
 
   async function roots(cwd) {
     const out = [realHome];
@@ -170,16 +181,80 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
     return out;
   }
 
+  /** The session's touched paths ({ version, paths }) or null — never throws. */
+  async function touchedFor(session) {
+    if (!touched || !session) return null;
+    try {
+      return await touched.get(session);
+    } catch {
+      return null;
+    }
+  }
+
   /**
-   * Resolve + check one mention. → { input, path, rel, line?, col?, abs, real?, stat?, error?, status? }
+   * Resolve + check one mention. → { input, path, rel, line?, col?, abs, real?, stat?, error?, status?, resolvedVia? }
    * `status` 403 = outside the allowed roots / a secret store, 404 = missing, 400 = unusable.
+   * `resolvedVia` (found only): cwd (as written: relative to the cwd, `~/…` or absolute),
+   * touched (a file the session touched ends in /<path>) or root (<candidate root>/<path>).
+   * `touchedPaths` — touchedFor(session), passed in so a batch reads it once.
    */
-  async function locate(input, cwd) {
+  async function locate(input, cwd, touchedPaths = null) {
     const spec = parsePathSpec(input);
     const base = { input, ...(spec.line ? { line: spec.line } : {}), ...(spec.col ? { col: spec.col } : {}) };
     const abs = resolveUserPath(spec.path, { cwd, home: realHome });
     if (!abs) return { ...base, path: spec.path, status: 400, error: 'bad path' };
     const allowed = await roots(cwd);
+    const direct = await check(abs, base, cwd, allowed);
+    if (direct.stat) return { ...direct, resolvedVia: 'cwd' };
+    if (direct.status !== 404 || !touchedPaths) return direct;
+    const p = spec.path;
+    if (p.startsWith('~') || path.isAbsolute(p)) return direct;
+    const rel = path.normalize(p).replace(/\/+$/, '');
+    if (!rel || rel === '.' || rel === '..' || rel.startsWith(`..${path.sep}`)) return direct;
+    for (const cand of candidates(rel, touchedPaths, cwd)) {
+      const hit = await check(cand.abs, base, cwd, allowed);
+      if (hit.stat) return { ...hit, resolvedVia: cand.via };
+    }
+    return direct;
+  }
+
+  /** Fallback locations for a relative `rel`, best first: touched files, then candidate roots. */
+  function* candidates(rel, touchedPaths, cwd) {
+    const suffix = `${path.sep}${rel}`;
+    let matches = 0;
+    for (const t of touchedPaths.paths) {
+      if (!t.endsWith(suffix)) continue;
+      yield { abs: t, via: 'touched' };
+      if (++matches >= MAX_TOUCHED_MATCHES) break;
+    }
+    const seen = new Set(cwd ? [path.resolve(cwd)] : []);
+    const dirs = [];
+    const scan = touchedPaths.paths.slice(0, MAX_TOUCHED_SCAN);
+    // Ancestors of touched files up to (not including) $HOME, nearest first, most recent file first.
+    outer: for (const t of scan) {
+      let d = path.dirname(t);
+      for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
+        if (d === realHome || d === path.dirname(d) || !inside(d, realHome)) break;
+        if (!seen.has(d)) {
+          seen.add(d);
+          dirs.push(d);
+          if (dirs.length >= MAX_CANDIDATE_ROOTS) break outer;
+        }
+        d = path.dirname(d);
+      }
+    }
+    for (const r of extraRoots) {
+      const d = path.resolve(r);
+      if (!seen.has(d)) {
+        seen.add(d);
+        dirs.push(d);
+      }
+    }
+    for (const d of dirs) yield { abs: path.join(d, rel), via: 'root' };
+  }
+
+  /** The sandbox + existence check of one absolute candidate. */
+  async function check(abs, base, cwd, allowed) {
     const out = { ...base, path: abs, rel: displayPath(abs, { cwd, home: realHome }) };
     // Lexical check first (cheap, and never stats anything outside), then the real path.
     const lexicalRoots = [path.resolve(home), realHome, ...(cwd ? [path.resolve(cwd)] : []), ...allowed];
@@ -212,11 +287,11 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
     }
   }
 
-  async function statOne(input, cwd) {
-    const key = `${cwd}\0${input}`;
+  async function statOne(input, cwd, session, touchedPaths) {
+    const key = `${session?.session_id ?? ''}\0${touchedPaths?.version ?? ''}\0${cwd}\0${input}`;
     const hit = cache.get(key);
     if (hit && now() - hit.at < STAT_TTL_MS) return hit.entry;
-    const loc = await locate(input, cwd);
+    const loc = await locate(input, cwd, touchedPaths);
     let entry;
     if (!loc.stat) {
       entry = {
@@ -237,6 +312,7 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
         ...(loc.line ? { line: loc.line } : {}),
         ...(loc.col ? { col: loc.col } : {}),
         exists: true,
+        resolvedVia: loc.resolvedVia,
         isFile,
         isDir: loc.stat.isDirectory(),
         size: loc.stat.size,
@@ -249,19 +325,20 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
     return entry;
   }
 
-  /** POST …/files/stat — `paths` from the client, deduplicated, capped. */
-  async function stat(paths, cwd) {
+  /** POST …/files/stat — `paths` from the client, deduplicated, capped. `session` enables the fallbacks. */
+  async function stat(paths, cwd, { session = null } = {}) {
     if (!Array.isArray(paths)) throw new HttpError('paths must be an array of strings', 400);
     if (paths.length > MAX_STAT_PATHS) throw new HttpError(`too many paths (max ${MAX_STAT_PATHS})`, 400);
     const unique = [...new Set(paths.filter((p) => typeof p === 'string' && p.trim() && p.length <= MAX_PATH_LENGTH))];
-    const files = await Promise.all(unique.map((p) => statOne(p, cwd)));
+    const touchedPaths = await touchedFor(session);
+    const files = await Promise.all(unique.map((p) => statOne(p, cwd, session, touchedPaths)));
     return { cwd: cwd ?? null, home: realHome, files };
   }
 
   /** Locate a file for raw/open; throws HttpError 400/403/404. */
-  async function requireFile(input, cwd) {
+  async function requireFile(input, cwd, session) {
     if (typeof input !== 'string' || !input.trim()) throw new HttpError('path is required', 400);
-    const loc = await locate(input.trim(), cwd);
+    const loc = await locate(input.trim(), cwd, await touchedFor(session));
     if (!loc.stat) throw new HttpError(`${loc.error}: ${loc.path}`, loc.status ?? 404);
     return loc;
   }
@@ -270,8 +347,8 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
    * GET …/files/raw — { status, headers, stream } (the app pipes `stream` to the response).
    * Inline text/markdown over PREVIEW_MAX_BYTES → 413; `download` → attachment, no cap.
    */
-  async function raw(input, cwd, { download = false } = {}) {
-    const loc = await requireFile(input, cwd);
+  async function raw(input, cwd, { download = false, session = null } = {}) {
+    const loc = await requireFile(input, cwd, session);
     if (!loc.stat.isFile()) throw new HttpError(`not a file: ${loc.path}`, 400);
     const kind = await kindOf(loc.real, loc.stat);
     if (!download && (kind === 'text' || kind === 'markdown') && loc.stat.size > PREVIEW_MAX_BYTES) {
@@ -304,8 +381,8 @@ export function createFiles({ home, run, platform = process.platform, hasBinary 
    * POST …/files/open — open the file with its default app on THIS host. Anything that would
    * run (executable bit, .command/.app/.sh/…) is revealed in its folder instead.
    */
-  async function open(input, cwd) {
-    const loc = await requireFile(input, cwd);
+  async function open(input, cwd, { session = null } = {}) {
+    const loc = await requireFile(input, cwd, session);
     const isDir = loc.stat.isDirectory();
     const runnable = isDir ? extOf(loc.real) === '.app' : (loc.stat.mode & 0o111) !== 0 || RUNNABLE_EXT.has(extOf(loc.real));
     const cmd = openCommand(loc.real, { reveal: runnable });

@@ -14,3 +14,4 @@ import './ui.test.mjs';
 import './grouping.test.mjs';
 import './uploads.test.mjs';
 import './files.test.mjs';
+import './touched.test.mjs';

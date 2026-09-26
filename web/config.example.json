@@ -14,7 +14,8 @@
     "quickReplies": ["Continue.", "Yes", "No", "1", "2"],
     "autoName": { "enabled": true, "intervalMinutes": 5 },
     "grouping": { "enabled": true, "intervalMinutes": 10 },
-    "uploads": { "dir": "~/.local/share/fleet/uploads", "maxMB": 100, "retentionDays": 14 }
+    "uploads": { "dir": "~/.local/share/fleet/uploads", "maxMB": 100, "retentionDays": 14 },
+    "files": { "roots": [] }
   },
   "grouping": { "enabled": true, "model": "haiku", "host": "workstation" },
   "tmux": null,

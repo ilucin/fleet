@@ -269,6 +269,21 @@ export function normalizeConfig(
   }
   const uploads = { dir: path.normalize(uploadsDir), maxMB, retentionDays };
 
+  // web.files.roots: extra dirs a relative path in chat may be under (lib/files.mjs fallback).
+  const wf = web.files == null ? {} : web.files;
+  if (!isObject(wf)) throw new Error('config.web.files must be an object { roots }');
+  const fileRoots = [];
+  if (wf.roots != null) {
+    if (!Array.isArray(wf.roots)) throw new Error('config.web.files.roots must be an array of directories');
+    for (const r of wf.roots) {
+      if (typeof r !== 'string' || !r.trim()) throw new Error('config.web.files.roots entries must be non-empty strings');
+      const d = expandHome(r.trim(), home);
+      if (!path.isAbsolute(d)) throw new Error(`config.web.files.roots entries must be absolute or start with ~: ${r}`);
+      fileRoots.push(path.normalize(d));
+    }
+  }
+  const files = { roots: fileRoots };
+
   return {
     self: self.trim(),
     port,
@@ -284,6 +299,7 @@ export function normalizeConfig(
     autoName,
     grouping,
     uploads,
+    files,
   };
 }
 

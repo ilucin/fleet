@@ -37,7 +37,8 @@ lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sy
 lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
 lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fleet
 lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
-lib/files.mjs         files mentioned in chat: resolve against the session cwd, $HOME/cwd sandbox, stat/kind, raw stream, open
+lib/files.mjs         files mentioned in chat: resolve against the session cwd (+ touched/roots fallback), $HOME/cwd sandbox, stat/kind, raw stream, open
+lib/touched.mjs       absolute paths a session's tool calls touched, parsed incrementally from its transcript (for lib/files.mjs)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
@@ -66,6 +67,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
+| `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
 | `fleetBin` | `fleet` binary; `null` → PATH, fallbacks, `~/.local/bin`, `~/.cargo/bin` |
@@ -190,10 +192,22 @@ symlink escapes — inside this host's `$HOME` or the session cwd; anything else
 `.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`, `.password-store`, `.config/gh`, `Library/Keychains`,
 and files named `.env`, `.env.*`, `.envrc`, `.netrc`, `.pgpass`. A symlinked dir pointing out of
 `$HOME` (e.g. to another volume) is refused too.
-**FileStat** = `{ input, path (absolute), rel (cwd-relative, else ~/…), line?, col?, exists, forbidden?, isFile?, isDir?, size?, mtime?, kind? }`;
+A relative path missing under the cwd (a session in one repo that edited another and wrote
+"Updated docs/x.md") falls back, in order: (1) an absolute path the session touched —
+`file_path`/`path`/`notebook_path` of its tool calls and files its shell commands wrote
+(`> f`, `tee f`, relative ones against a preceding `cd <dir>`), then (weaker) other absolute paths
+in commands and tool results — that ends in `/<path>` at a segment boundary, most recently touched first;
+(2) `<root>/<path>` for candidate roots: ancestors of touched files below `$HOME` (nearest and most
+recent first, bounded), then `web.files.roots`. Paths containing `..` never fall back. Every
+candidate passes the same sandbox + secrets check; the first that exists wins. lib/touched.mjs
+reads the transcript incrementally (only the bytes it grew by; the first read scans at most the
+last 16 MB; ≤ 2000 paths per session), so a stat costs one `fs.stat` of the transcript when
+nothing changed. `raw`/`open` resolve through the same function, and stat returns the absolute
+`path`, which the UI passes back.
+**FileStat** = `{ input, path (absolute), rel (cwd-relative, else ~/…), line?, col?, exists, forbidden?, resolvedVia? (`cwd` | `touched` | `root`, found only), isFile?, isDir?, size?, mtime?, kind? }`;
 `kind` by extension (markdown `.md`/`.markdown`/`.mdx`…, image png/jpg/gif/webp/avif/bmp/ico/svg,
 pdf, known binaries → other), else a sniff of the first 4 KB (no NUL, valid UTF-8 → text). Stat
-results are cached 5 s per (cwd, path). **raw** sets `content-type` by kind — every text kind,
+results are cached 5 s per (session, transcript offset, cwd, path). **raw** sets `content-type` by kind — every text kind,
 markdown and HTML included, as `text/plain; charset=utf-8` — plus `content-disposition`
 (inline / attachment with `download=1`), `x-content-type-options: nosniff`, `x-fleet-kind`,
 `cache-control: no-store` and (except PDFs, which Chrome won't show under it)
