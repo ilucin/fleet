@@ -66,9 +66,10 @@ export function EditableTitle({ session, scope, fallbackKey, className, trigger 
           onClick={open}
           onPointerDown={(e) => e.stopPropagation()}
           className={cn(
-            // Takes no room until the row is hovered or focused, so titles keep their width.
-            'hidden size-6 shrink-0 items-center justify-center rounded-md text-dimmer outline-none',
-            'group-hover/row:inline-flex group-focus-visible/row:inline-flex hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50',
+            // Always laid out but invisible until the row is hovered/focused, and the negative
+            // margin keeps its 24px box inside the text line — so hovering never shifts the row.
+            'invisible -my-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-dimmer outline-none',
+            'group-hover/row:visible group-focus-visible/row:visible focus-visible:visible hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50',
             'pointer-coarse:hidden',
           )}
         >
