@@ -216,6 +216,9 @@ pub fn launchd_plist(
     log: &Path,
 ) -> String {
     let e = |p: &Path| xml_escape(&p.display().to_string());
+    // ProcessType=Interactive: without it launchd schedules the agent (and every `ps`/`tmux`
+    // it spawns) as a background job and macOS throttles them — with Low Power Mode on,
+    // `fleet list --json` took 11s instead of 0.3s and every host showed as unreachable.
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -234,6 +237,7 @@ pub fn launchd_plist(
     <key>FLEET_NODE</key><string>{node}</string>
     <key>PATH</key><string>{path}</string>
   </dict>
+  <key>ProcessType</key><string>Interactive</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{log}</string>
@@ -483,6 +487,7 @@ mod tests {
         assert!(p.contains("<string>serve</string>"));
         assert!(p.contains("/cfg/a&amp;b.json"), "{p}");
         assert!(p.contains("<key>KeepAlive</key><true/>"));
+        assert!(p.contains("<key>ProcessType</key><string>Interactive</string>"));
         assert!(p.contains("<key>FLEET_NODE</key><string>/opt/homebrew/bin/node</string>"));
         assert!(p.contains(LAUNCHD_LABEL));
     }
