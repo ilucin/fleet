@@ -1,7 +1,8 @@
 import { Fragment, memo, useContext, type ReactNode } from 'react'
 
-import { FileLinksContext, type FileLinkApi, type FileLinkSource } from '@/hooks/useFileLinks'
+import { FileLinksContext, HighlightContext, type FileLinkApi, type FileLinkSource } from '@/hooks/useFileLinks'
 import { linkify, parseMarkdown, type Block, type Inline } from '@/lib/markdown'
+import { splitRanges, termRanges } from '@/lib/notes'
 import { splitPaths } from '@/lib/paths'
 import { cn } from '@/lib/utils'
 
@@ -9,6 +10,21 @@ import { cn } from '@/lib/utils'
 // (escaped), links are only the http(s) hrefs the parser let through. No innerHTML.
 // Inside a <FileLinksContext> provider, file paths the provider accepts render as buttons
 // (never hrefs) that open the in-app preview; without one, paths stay plain text.
+
+function Highlighted({ v }: { v: string }) {
+  const terms = useContext(HighlightContext)
+  const ranges = terms.length ? termRanges(v, terms) : []
+  if (!ranges.length) return v
+  return splitRanges(v, ranges).map((p, i) =>
+    p.hit ? (
+      <mark key={i} data-hit className="rounded-[3px] bg-status-waiting/30 text-foreground">
+        {p.v}
+      </mark>
+    ) : (
+      <Fragment key={i}>{p.v}</Fragment>
+    ),
+  )
+}
 
 const linkClass =
   'text-primary underline decoration-primary/40 underline-offset-2 break-all active:opacity-70 [overflow-wrap:anywhere]'
@@ -50,16 +66,16 @@ function FileLink({ links, raw, source, children }: { links: FileLinkApi; raw: s
 }
 
 function TextWithPaths({ v, links }: { v: string; links: FileLinkApi | null }) {
-  if (!links) return v
+  if (!links) return <Highlighted v={v} />
   const parts = splitPaths(v, (raw) => links.isLink(raw, 'text'))
-  if (parts.length === 1 && parts[0].t === 'text') return v
+  if (parts.length === 1 && parts[0].t === 'text') return <Highlighted v={v} />
   return parts.map((p, i) =>
     p.t === 'path' ? (
       <FileLink key={i} links={links} raw={p.v} source="text">
         {p.v}
       </FileLink>
     ) : (
-      <Fragment key={i}>{p.v}</Fragment>
+      <Highlighted key={i} v={p.v} />
     ),
   )
 }
@@ -106,6 +122,16 @@ function Inlines({ nodes }: { nodes: Inline[] }) {
           <Fragment key={i}>{n.raw}</Fragment>
         )
       }
+      case 'wiki':
+        return links?.isLink(n.target, 'wiki') ? (
+          <FileLink key={i} links={links} raw={n.target} source="wiki">
+            {n.label}
+          </FileLink>
+        ) : (
+          <span key={i} title={`No note named “${n.target}”`} className="text-muted-foreground underline decoration-dimmer decoration-dashed underline-offset-[3px]">
+            {n.label}
+          </span>
+        )
       case 'strong':
         return (
           <strong key={i} className="font-semibold text-foreground">
@@ -227,10 +253,13 @@ function BlockView({ b }: { b: Block }) {
   }
 }
 
-/** Claude's markdown, rendered safely. Memoised: a poll that returns the same text re-renders nothing. */
-export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
+/**
+ * Claude's markdown, rendered safely. Memoised: a poll that returns the same text re-renders nothing.
+ * `notes`: the notes explorer's dialect (`[[wiki]]` links, h4–h6, comment lines dropped).
+ */
+export const Markdown = memo(function Markdown({ text, className, notes = false }: { text: string; className?: string; notes?: boolean }) {
   const links = useContext(FileLinksContext)
-  const blocks = parseMarkdown(text, links ? { files: true } : undefined)
+  const blocks = parseMarkdown(text, notes ? { notes: true } : links ? { files: true } : undefined)
   return (
     <div className={cn('space-y-2 [overflow-wrap:anywhere]', className)}>
       {blocks.map((b, i) => (

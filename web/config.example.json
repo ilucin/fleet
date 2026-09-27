@@ -22,7 +22,8 @@
     "grouping": { "enabled": true, "intervalMinutes": 10 },
     "briefs": { "enabled": false, "model": "haiku", "idleMs": 60000, "minIntervalMs": 900000, "maxDeltaChars": 12000, "maxCallsPerHour": 12 },
     "uploads": { "dir": "~/.local/share/fleet/uploads", "maxMB": 100, "retentionDays": 14 },
-    "files": { "roots": [] }
+    "files": { "roots": [] },
+    "notes": { "root": "~/Code/notes", "name": "Notes", "searchCmd": null, "exclude": ["drafts"] }
   },
   "grouping": { "enabled": true, "model": "haiku", "host": "workstation" },
   "tmux": null,

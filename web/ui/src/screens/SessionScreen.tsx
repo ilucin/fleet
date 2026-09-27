@@ -536,6 +536,7 @@ export function SessionScreen({
         inputRef={composerRef}
         host={host}
         attachRef={attachRef}
+        draftKey={sessionKey}
       />
       <DropOverlay show={drop.dragging} hint={`Uploaded to ${host}; the path goes into the message`} />
       <FilePreview host={host} id={id} file={preview} onClose={() => setPreviewOf(null)} desktop={pane} />

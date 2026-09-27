@@ -19,6 +19,7 @@ import { createAutoNamer, createSpawnNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { createFiles } from './lib/files.mjs';
+import { createNotes } from './lib/notes.mjs';
 import { createTouchedIndex } from './lib/touched.mjs';
 import { createBriefExtractor } from './lib/brief-extract.mjs';
 import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
@@ -110,6 +111,7 @@ const handleApi = createApi({
   spawnNamer,
   uploader,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
+  notes: createNotes({ config: config.notes, home: os.homedir(), run }),
   briefs,
   grouper,
   name: NAME,

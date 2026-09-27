@@ -14,7 +14,7 @@ import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 import { DEFAULT_MODELS } from './config.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
-import { withBriefEditor, withSessionEditors } from './editor.mjs';
+import { editorUrl, withBriefEditor, withSessionEditors } from './editor.mjs';
 
 export const API_VERSION = 1;
 
@@ -25,6 +25,7 @@ const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
 const FILES_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/files\/(stat|raw|open)$/;
 const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenerate)?$/;
+const NOTES_ROUTE = /^\/api\/hosts\/([^/]+)\/notes\/(tree|search|file|raw)$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -49,6 +50,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   uploader    lib/uploads.mjs instance (uploads route; absent → 501)
  *   files       lib/files.mjs instance (files/stat|raw|open; absent → 501)
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
+ *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
@@ -70,6 +72,7 @@ export function createApi({
   uploader = null,
   files = null,
   briefs = null,
+  notes = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -87,8 +90,11 @@ export function createApi({
   fleetIdleAfterMs = 90 * 1000,
   logError = () => {},
 }) {
+  // Each host advertises whether it has a notes explorer (like its spawnDirs).
+  const notesInfo = () => (notes ? { notes: { name: notes.name ?? null } } : {});
+
   async function buildFleet({ force = false } = {}) {
-    const selfHost = { ...(await fleet.localHost({ force })), spawnDirs: config.spawnDirs };
+    const selfHost = { ...(await fleet.localHost({ force })), spawnDirs: config.spawnDirs, ...notesInfo() };
     const peerNames = Object.keys(config.peers);
     const peerHosts = await Promise.all(
       peerNames.map((n) => fetchPeerHost(n, config.peers[n], { timeoutMs: peerFleetTimeoutMs })),
@@ -112,7 +118,7 @@ export function createApi({
   async function handleFleet(url) {
     if (url.searchParams.get('local') === '1') {
       // Peers poll this: the local host (2s TTL cache), never the merged snapshot.
-      const selfHost = withSessionEditors({ ...(await fleet.localHost()), spawnDirs: config.spawnDirs }, config);
+      const selfHost = withSessionEditors({ ...(await fleet.localHost()), spawnDirs: config.spawnDirs, ...notesInfo() }, config);
       return { status: 200, body: { self: config.self, hosts: [selfHost] } };
     }
     if (snapshot) return { status: 200, body: await snapshot.get() };
@@ -360,6 +366,7 @@ export function createApi({
           quickReplies: config.quickReplies ?? DEFAULT_QUICK_REPLIES,
           models: config.models ?? DEFAULT_MODELS,
           uploads: { maxMB: config.uploads?.maxMB ?? null },
+          notes: notes ? { enabled: true, name: notes.name ?? null } : { enabled: false },
         },
       };
     }
@@ -465,7 +472,32 @@ export function createApi({
       return r;
     }
 
+    const n = NOTES_ROUTE.exec(url.pathname);
+    if (n) {
+      const [, rawHost, action] = n;
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      const host = decodeURIComponent(rawHost);
+      const r = await forHost({ req, url, host, streamResponse: action === 'raw', local: () => localNotes(action, url) });
+      // Editor links are built by the server the browser asked (its `web.editor` and ssh aliases).
+      if (r.status === 200 && r.body && !r.stream) {
+        if (action === 'tree') return { ...r, body: { ...r.body, editorUrl: editorUrl(config, host, r.body.rootAbs) } };
+        if (action === 'file') return { ...r, body: { ...r.body, editorUrl: editorUrl(config, host, r.body.abs) } };
+      }
+      return r;
+    }
+
     throw new HttpError('not found', 404);
+  }
+
+  async function localNotes(action, url) {
+    if (!notes) throw new HttpError('notes are not configured on this host (web.notes.root)', 501);
+    if (action === 'tree') return { status: 200, body: { host: config.self, ...(await notes.tree()) } };
+    if (action === 'search') {
+      const limit = clampLines(url.searchParams.get('limit'), 50, 1, 200);
+      return { status: 200, body: { host: config.self, ...(await notes.search(url.searchParams.get('q'), { limit })) } };
+    }
+    if (action === 'file') return { status: 200, body: { host: config.self, ...(await notes.file(url.searchParams.get('path'))) } };
+    return notes.raw(url.searchParams.get('path'));
   }
 
   /** A live session, or — for GET/PUT — a gone one whose brief file is still there (exact id). */

@@ -43,6 +43,7 @@ lib/brief-format.mjs  session brief file format: parse/serialise, resource + Git
 lib/brief-extract.mjs brief resources + todos from a transcript (incremental, no model); the conversation delta for the model
 lib/briefs.mjs        brief store (atomic files), budgeted `claude -p` generation, background pass (see Session briefs)
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
+lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
@@ -75,6 +76,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
 | `web.briefs` | `{ enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns, minNewChars, maxBriefChars }`, default `{ false, "haiku", 60000, 900000, 12000, 12, 2, 2000, 3000 }` (opt-in): background brief generation on this host (see Session briefs); GET/PUT and a manual regenerate work when off |
+| `web.notes` | `{ root, name?, searchCmd?, exclude? }`, default none (off): the notes explorer over the markdown notes under `root` (`~` expanded, absolute). `name` defaults to the root's basename; `searchCmd` is an argv array (or a space-separated string) run with cwd = root — `{query}` is the query as one argument, `{args}` one argument per word, neither → the query is appended; `exclude` = extra names / root-relative paths to hide (see Notes) |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
@@ -143,7 +145,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | method | path | request | response |
 | --- | --- | --- | --- |
 | GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun }, grouping, briefs: { enabled, model, callsLastHour, maxCallsPerHour, generating, lastRun } }` |
-| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }] }` |
+| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }], notes: { enabled, name? } }` |
 | GET | `/api/fleet` | `?local=1` = this host only | `{ self, hosts: [Host], snapshotAt }` — self first, then peers (`snapshotAt` only on the merged view) |
 | GET | `/api/hosts/:host/sessions/:id/peek` | `?lines=200` (10..2000) | `{ host, id, backend, lines, text, capturedAt }` |
 | GET | `/api/hosts/:host/sessions/:id/messages` | `?limit=60` (1..500) | `{ host, id, status, backend, name, limit, messages: [Message], total, truncated, updatedAt, capturedAt }` |
@@ -160,6 +162,10 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | GET | `/api/hosts/:host/sessions/:id/files/raw` | `?path=<as in chat or absolute>`, `&download=1` | the file's bytes (streamed; see Files). 400 no path / a directory, 403 outside the sandbox, 404 missing, 413 text over 5 MB inline |
 | POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` | `{ ok, host, path, revealed, command }` — 403/404 as raw, 501 no `open`/`xdg-open` on the host, 502 the opener failed |
 | GET | `/api/hosts/:host/sessions/:id/brief` | | `Brief` (below). No brief yet → the empty skeleton with `exists: false` (not an error). A session that is gone: served from its file by full id, else 404 |
+| GET | `/api/hosts/:host/notes/tree` | | `{ host, name, root (~/…), rootAbs, searchEngine: builtin \| command, files: [NoteEntry], truncated, scannedAt, editorUrl }` — 501 when `web.notes.root` is unset on that host, 503 when the root is missing |
+| GET | `/api/hosts/:host/notes/search` | `?q=<query>&limit=50` (1..200) | `{ host, q, engine, fallback?, results: [{ path, kind, title, mtime, score, matches: [{ line, text, ranges: [[start, end]] }], more }], total, ms }` |
+| GET | `/api/hosts/:host/notes/file` | `?path=<root-relative>` | `{ host, path, abs, kind, size, mtime, title, encrypted, meta: [[key, value \| [values]]], body, bodyLine, text, editorUrl }` — 400 bad path / an image, 404 not listed, 413 over 2 MB |
+| GET | `/api/hosts/:host/notes/raw` | `?path=<root-relative image>` | the image bytes (streamed, also through a peer); 400 for anything but an image |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` (≤ 60000 chars; frontmatter optional — the server keeps its own keys) | `Brief` after the edit (`editedAt` set; resource lines removed by the edit become `dismissed`). 400 not a string |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` | **202** `{ host, id, started, queued, generating: true }` — returns at once, poll GET until `generating` is false. `started: false, queued: false` = one for this session is already running; `queued: true` = waiting for another session's call. **429** `{ error, retryAfterMs }` at `maxCallsPerHour`; 404 no transcript / gone session |
 
@@ -176,8 +182,8 @@ are filled in by the server that received the request (lib/editor.mjs), also for
 answer — see docs/architecture.md → Session briefs → Open in editor.
 Proxied to a peer like the other session routes (PUT bodies included).
 
-**Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
-Each host advertises its own `spawnDirs` (absolute paths on that host).
+**Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], notes?: { name }, sessions: [Session] }`.
+Each host advertises its own `spawnDirs` (absolute paths on that host) and, when it has `web.notes.root`, `notes`.
 
 **Session** = the `fleet list --json` object + `host` + `editorUrl` (for its cwd; set by the server that answered). Sorted `waiting` → `busy` → `idle` →
 `unknown`, then `updated_at` descending.
@@ -247,6 +253,31 @@ the 20s timeout covers the response head only). **open** runs `open <path>` (mac
 `xdg-open <path>` via execFile (argv, never a shell); a file with an executable bit or a
 runnable extension (`.app`, `.command`, `.sh`, `.py`, `.pkg`, `.webloc`, …) is revealed instead
 (`open -R` / `xdg-open <dir>`, `revealed: true`).
+
+**notes** (the notes explorer, `web.notes`). Everything is root-relative: a path must be plain
+(no leading `/`, no `..`, no hidden segment, no NUL / backslash — else 400), resolve after
+`realpath` inside the root's realpath (a symlink out is refused) and be a file the tree lists
+(else 404). The tree lists `.md`/`.markdown`/`.mdx`…, common text files (`.txt`, `.json`, `.yaml`,
+`.sh`, …) and images, at most 5000, 16 levels deep; skipped: every entry starting with `.`
+(`.git`, `.obsidian`, `.env`…), `node_modules`, `__pycache__`, `exclude` entries, the simple
+patterns of the root `.gitignore` (`name`, `dir/`, `/anchored`, `*.ext`, `**`; negations and
+character classes ignored) and symlinked directories (no cycles or duplicate subtrees; symlinked
+files inside the root are listed). The `$HOME` secrets deny list of files applies too. Blocks
+armored as `-----BEGIN AGE ENCRYPTED FILE-----` are replaced by `[encrypted]` in every answer
+and never searched (`encrypted: true`). `NoteEntry` = `{ path, kind: markdown | text | image,
+size, mtime, title?, encrypted? }`; `title` = frontmatter `title`, else the first `# heading`,
+else the file name. Frontmatter (`key: value`, `key: [a, b]`, `key:` + `- item` lines) comes back
+split into `meta` and `body` (`bodyLine` = the body's first line). The tree is cached 3 s; note
+texts are cached in memory by mtime + size (≤ 64 MB).
+**Built-in search**: the query is split into words (`"quoted phrases"` kept, ≤ 8, ≤ 200 chars);
+a note matches when every word is in its path, title, text or — for `#tag` — its frontmatter
+`tags`; ranked by tag / title / file-name / path hits, body occurrences and matching headings,
+then recency; up to 3 matching lines per note (≤ 180 chars around the first match) with
+`ranges`. **`searchCmd`**: run with a 10 s timeout; stdout is read as `path:line:text` lines (grep
+-n / rg) or a path line followed by indented match lines; paths (root-relative or absolute) that
+are not listed files are dropped; exit 1 with no output = no matches; any other failure falls
+back to the built-in search with `fallback` set. `editorUrl` is filled in by the server that
+received the request, like brief links. Proxied to a peer like the other host routes (raw streamed).
 
 **Statuses**: 400 bad input, 404 unknown host/session/route (also a `?local=1` request for a
 non-self host), 405 wrong method, 409 existing tmux session or uncontrollable backend,
@@ -334,7 +365,7 @@ the model-free extraction (so a brief exists as soon as someone looks), never th
 
 ## UI (`ui/`, React)
 
-Feature parity with the classic UI below, plus a host filter, a Settings screen (`#/settings`: text
+Feature parity with the classic UI below, plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
 size for the whole UI, terminal text, theme, progress notes) and a Details panel (the session brief,
 then session details): same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
 paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,

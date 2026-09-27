@@ -355,6 +355,34 @@ export function normalizeConfig(
   }
   const files = { roots: fileRoots };
 
+  // web.notes: the notes explorer (lib/notes.mjs) — off unless `root` is set.
+  const wn = web.notes == null ? {} : web.notes;
+  if (!isObject(wn)) throw new Error('config.web.notes must be an object { root, name, searchCmd, exclude }');
+  let notes = null;
+  if (wn.root != null) {
+    if (typeof wn.root !== 'string' || !wn.root.trim()) throw new Error('config.web.notes.root must be a non-empty string');
+    const root = expandHome(wn.root.trim(), home);
+    if (!path.isAbsolute(root)) throw new Error(`config.web.notes.root must be absolute or start with ~: ${wn.root}`);
+    if (wn.name != null && (typeof wn.name !== 'string' || !wn.name.trim())) throw new Error('config.web.notes.name must be a non-empty string');
+    let searchCmd = null;
+    if (wn.searchCmd != null) {
+      const argv = typeof wn.searchCmd === 'string' ? wn.searchCmd.trim().split(/\s+/) : wn.searchCmd;
+      if (!Array.isArray(argv) || !argv.length || argv.some((a) => typeof a !== 'string' || !a)) {
+        throw new Error('config.web.notes.searchCmd must be an argv array of strings, e.g. ["rg", "-n", "-i", "-F", "{query}"]');
+      }
+      searchCmd = [expandHome(argv[0], home), ...argv.slice(1)];
+    }
+    if (wn.exclude != null && (!Array.isArray(wn.exclude) || wn.exclude.some((e) => typeof e !== 'string' || !e.trim()))) {
+      throw new Error('config.web.notes.exclude must be an array of names or root-relative paths');
+    }
+    notes = {
+      root: path.normalize(root),
+      name: wn.name?.trim() || path.basename(path.normalize(root)),
+      searchCmd,
+      exclude: (wn.exclude ?? []).map((e) => e.trim().replace(/^\/+|\/+$/g, '')),
+    };
+  }
+
   // web.briefs: per-session briefs (lib/briefs.mjs) — the budget knobs for its model calls.
   const wb = web.briefs == null ? {} : web.briefs;
   if (!isObject(wb)) throw new Error('config.web.briefs must be an object { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour }');
@@ -392,6 +420,7 @@ export function normalizeConfig(
     grouping,
     uploads,
     files,
+    notes,
     briefs,
   };
 }

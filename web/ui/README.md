@@ -58,6 +58,9 @@ src/
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
                       font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
+  lib/notes.ts        notes explorer: buildTree(), notesHref() / parseNotesLocation() (`#/notes/<host>/<path>`),
+                      indexNotes() + resolveNoteLink() (relative + `[[wiki]]` links), splitRanges(), highlightTerms()
+  lib/drafts.ts       one-shot composer drafts (setDraft / takeDraft) — "Send to session" from a note
   lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
                       (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
   lib/storage.ts      localStorage that never throws
@@ -79,6 +82,8 @@ src/
                       per-session stat cache, debounced batched POST …/files/stat
   hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
+  hooks/useNotes.ts   useNotesHosts() (hosts whose fleet entry has `notes`), useNotesTree() (cached, 30s poll),
+                      useNotesSearch() (debounced, aborts the previous), useNoteFile()
   hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
                       PrefsProvider (text size → <html> font-size, terminal text, progress notes)
@@ -89,16 +94,18 @@ src/
                       GroupsStatus (last run + Regroup), StatusSummaryDots
   components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, DetailsPanel (the desktop
                       details column) / DetailsDrawer (mobile ⋯), BriefSection (its top), LatestButton
-  components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
+  components/desktop/ Sidebar (+ SidebarRail when collapsed, NotesLink), CommandPalette (⌘K), ShortcutsDialog (?)
+  components/notes/   NoteTree, NoteResults / RecentNotes, NoteView (frontmatter, body, actions), SendNoteDialog
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
                       SettingsScreen (`#/settings`; `layout="pane"` on desktop),
+                      NotesScreen (`#/notes[/<host>[/<path>]]`; `layout="pane"` on desktop),
                       DesktopShell (≥ lg master–detail + the keyboard handler)
   App.tsx             providers + wouter hash router; picks DesktopShell or the mobile screens
 ```
 
 ## Conventions
 
-- **Routing**: wouter with hash location, same URLs as the classic UI (`#/`, `#/s/<host>/<id>`; plus `#/settings`),
+- **Routing**: wouter with hash location, same URLs as the classic UI (`#/`, `#/s/<host>/<id>`; plus `#/settings`, `#/notes…`),
   so no server SPA fallback is needed and old bookmarks/PWA installs keep working.
 - **Data**: one `FleetProvider` polls `/api/fleet` for the whole app; screens read it with
   `useFleet()` (`fleet`, `fleetAt`, `error`, `refreshing`, `refresh()`, `applyFleet()`).
@@ -232,6 +239,25 @@ src/
   font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
   it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`). Per
   viewer (localStorage), for every session.
+- **Notes** (`#/notes[/<host>[/<path>]]`; ../ARCHITECTURE.md → notes): browse, search and read the
+  markdown notes of any host with `web.notes.root` (hosts come from `/api/fleet` entries carrying
+  `notes`; the last one used is `fleet.notesHost`). Reached from the notes button in the mobile
+  list header, the sidebar footer / rail and the board header, ⌘K → Notes… (the palette also
+  lists the first notes host's 300 most recent notes) and `g n`. Folder tree (expanded folders
+  per host in `fleet.notesOpen.<host>`, the open note's folders expand), search (180 ms debounce,
+  previous request aborted; words AND-ed, `"phrases"`, `#tag`; Enter opens the first hit, Esc
+  clears) with snippets and the matches marked, "Recently changed" when there is no query. A
+  note: title, host, path, age; Source / Rendered, Copy path, **Send to session** (pick a session
+  on the note's host: it opens with the absolute path in its composer, nothing is sent), **Open in
+  VS Code / Cursor** (`editorUrl`, hidden on touch); frontmatter as a compact key → value grid
+  (tags as chips, URLs linked); the body via `<Markdown notes>` — `[[wiki]]` links (path, then
+  relative, then by file name, nearest folder first), relative `[t](other.md)` links and images
+  resolve against the tree and open inside the explorer (a missing target is dashed text);
+  words of the active search are marked and a note opened from a hit scrolls to the first mark.
+  Encrypted blocks show a notice. Desktop: the explorer replaces the sidebar / board — header
+  (← Sessions, name, host picker, search `/`, root, editor link), then tree | results or recent |
+  note. Mobile: the browse/search screen (recent + tree, or results), a note is its own screen;
+  swipe right = back on both.
 - **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;
   `index.html` sets theme-color (kept in sync with the theme), apple-mobile-web-app meta,
   `viewport-fit=cover` and `interactive-widget=resizes-content`. No service worker (the app is
@@ -289,6 +315,7 @@ open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through
 | `Esc` | leave the field; otherwise close the pane or Settings (`#/`) |
 | `[`, ⌘/Ctrl+`B` | toggle the sidebar |
 | `b` | switch List / Board |
+| `g n` | notes explorer (again, or `Esc`: back to the sessions) |
 | `i` | toggle the details panel (brief + session details) |
 | `g r` | refresh now |
 | ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions (Settings…, Open in VS Code), filters, theme |

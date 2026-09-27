@@ -3,8 +3,8 @@ import { createContext, useCallback, useEffect, useMemo, useRef, useSyncExternal
 import { ApiError, api } from '@/api/client'
 import type { FileStat } from '@/api/types'
 
-/** Where a path candidate came from in the markdown: a code span, plain text, or a `[t](rel)` link. */
-export type FileLinkSource = 'code' | 'text' | 'file'
+/** Where a path candidate came from in the markdown: a code span, plain text, a `[t](rel)` link or a `[[wiki]]` link (notes). */
+export type FileLinkSource = 'code' | 'text' | 'file' | 'wiki'
 
 /**
  * What <Markdown> asks while rendering: should this candidate be a link, and what a click
@@ -18,6 +18,9 @@ export interface FileLinkApi {
 }
 
 export const FileLinksContext = createContext<FileLinkApi | null>(null)
+
+/** Words <Markdown> marks in text nodes (the notes explorer, while a search is active). */
+export const HighlightContext = createContext<string[]>([])
 
 const BATCH = 200
 const DEBOUNCE_MS = 150

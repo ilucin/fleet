@@ -11,12 +11,13 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { ThemeProvider } from '@/providers/ThemeProvider'
 import { DesktopShell } from '@/screens/DesktopShell'
 import { ListScreen } from '@/screens/ListScreen'
+import { NotesScreen } from '@/screens/NotesScreen'
 import { SessionScreen } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 
 /**
  * Hash routing, same URLs as the classic UI: `#/` (list), `#/s/<host>/<session_id>` (detail),
- * plus `#/settings` (this viewer's preferences).
+ * plus `#/settings` (this viewer's preferences) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
  */
@@ -42,6 +43,9 @@ export default function App() {
                   </Route>
                   <Route path="/settings">
                     <SettingsScreen />
+                  </Route>
+                  <Route path={/^\/notes(?:\/.*)?$/}>
+                    <NotesScreen />
                   </Route>
                   <Route path="/s/:host/:id">
                     {(p) => <SessionScreen key={`${p.host}/${p.id}`} host={p.host} id={p.id} />}
