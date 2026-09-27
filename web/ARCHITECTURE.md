@@ -39,9 +39,10 @@ lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fl
 lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
 lib/files.mjs         files mentioned in chat: resolve against the session cwd (+ touched/roots fallback), $HOME/cwd sandbox, stat/kind, raw stream, open
 lib/touched.mjs       absolute paths a session's tool calls touched, parsed incrementally from its transcript (for lib/files.mjs)
-lib/brief-format.mjs  session brief file format: parse/serialise, resource merge, model-output check, continue prompt (pure)
-lib/brief-extract.mjs brief resources + todo plan from a transcript (incremental, no model); the conversation delta for the model
+lib/brief-format.mjs  session brief file format: parse/serialise, resource + Git-line merge, model-output check, continue prompt (pure)
+lib/brief-extract.mjs brief resources + todos from a transcript (incremental, no model); the conversation delta for the model
 lib/briefs.mjs        brief store (atomic files), budgeted `claude -p` generation, background pass (see Session briefs)
+lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
@@ -65,6 +66,8 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `hosts.<name>.web` | peer base URL for every host ≠ self; hosts without `web` are not peers |
 | `web.port` | listen port (default 7777) |
 | `web.bind` | listen address (default `0.0.0.0` with a config, `127.0.0.1` without one) |
+| `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: scheme of `editorUrl` on briefs and session rows; `null` = none. Other values → config error |
+| `hosts.<name>.ssh` | used here only for `editorUrl`: the Remote-SSH alias of that host (must be letters, digits, `._@-`) |
 | `web.ui` | static UI: a directory path, or `"classic"` (= `web/public`); unset/`null` → `web/ui/dist` when built (has `index.html`), else `web/public` |
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
 | `web.models` | New session model picker: `[{ id, label }]` or bare ids; id `""` = no `--model` (Claude's default); ids are letters, digits and `._[]-`. Default: Default, Fable 5.1 `claude-fable-5-1`, Opus 5.5 `claude-opus-5-5`, Sonnet 5 `claude-sonnet-5`, Haiku 4.5 `claude-haiku-4-5-20251001` |
@@ -160,17 +163,23 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` (≤ 60000 chars; frontmatter optional — the server keeps its own keys) | `Brief` after the edit (`editedAt` set; resource lines removed by the edit become `dismissed`). 400 not a string |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` | **202** `{ host, id, started, queued, generating: true }` — returns at once, poll GET until `generating` is false. `started: false, queued: false` = one for this session is already running; `queued: true` = waiting for another session's call. **429** `{ error, retryAfterMs }` at `maxCallsPerHour`; 404 no transcript / gone session |
 
-**Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text }], plan: [{ done, text }] }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt }` —
+**Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text, branch, linked }], todos: [{ done, text }], plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` —
 `markdown` is the whole file (frontmatter included, canonical form); `kind` is `PR` | `Issue` |
-`Artifact` | `Spec` | `File` | `Branch` | `Worktree` | `Link` | `null` (a hand-written line);
-`url` or `path` is set, `text` is the bullet as written; `continuePrompt` is the first prompt for a
-new session that continues this one; `enabled` = background generation is on for that host.
+`Artifact` | `Spec` | `File` | `Git` | `Link` | `null` (a hand-written line), or the legacy
+`Branch` | `Worktree`; `url` or `path` is set, `text` is the bullet as written; for `Git`, `path`
+is the checkout root, `branch` the branch (null = detached) and `linked` whether it is a linked
+worktree (both null on other kinds); `parsed.plan` is a **deprecated** alias of `parsed.todos`
+(same array, one release); `continuePrompt` is the first prompt for a new session that continues
+this one; `enabled` = background generation is on for that host; `absCwd` / `gitRoot` are
+absolute paths on the session's host (null when unknown / outside git); `editor` / `editorUrl`
+are filled in by the server that received the request (lib/editor.mjs), also for a proxied
+answer — see docs/architecture.md → Session briefs → Open in editor.
 Proxied to a peer like the other session routes (PUT bodies included).
 
 **Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
 Each host advertises its own `spawnDirs` (absolute paths on that host).
 
-**Session** = the `fleet list --json` object + `host`. Sorted `waiting` → `busy` → `idle` →
+**Session** = the `fleet list --json` object + `host` + `editorUrl` (for its cwd; set by the server that answered). Sorted `waiting` → `busy` → `idle` →
 `unknown`, then `updated_at` descending.
 
 **Message** = `{ role: "user"|"assistant"|"system", kind: "user"|"assistant"|"command"|"system", text, ts, final? }`.

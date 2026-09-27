@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 use crate::error::{Error, Result};
 
 /// Frontmatter keys in the order they are written; unknown keys follow, as found.
-const META_ORDER: [&str; 9] = [
+const META_ORDER: [&str; 10] = [
     "session",
     "host",
     "cwd",
@@ -23,12 +23,13 @@ const META_ORDER: [&str; 9] = [
     "editedAt",
     "todos",
     "dismissed",
+    "git",
 ];
 pub const MAX_DISMISSED: usize = 200;
 /// The server refuses a longer edit (413); so do we.
 pub const MAX_EDIT_CHARS: usize = 60000;
-const RESOURCE_KINDS: [&str; 8] = [
-    "PR", "Issue", "Artifact", "Spec", "File", "Branch", "Worktree", "Link",
+const RESOURCE_KINDS: [&str; 9] = [
+    "PR", "Issue", "Artifact", "Spec", "File", "Git", "Branch", "Worktree", "Link",
 ];
 
 // ------------------------------------------------------------------ storage
@@ -154,11 +155,16 @@ pub struct Resource {
     pub url: Option<String>,
     pub path: Option<String>,
     pub text: String,
+    /// `Git` lines: the branch (`None` when detached); `None` for every other kind.
+    pub branch: Option<String>,
+    /// `Git` lines: a linked worktree (`true`) or the main checkout (`false`).
+    pub linked: Option<bool>,
     pub key: String,
 }
 
+/// A `## Todos` checkbox line.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct PlanItem {
+pub struct Todo {
     pub done: bool,
     pub text: String,
 }
@@ -177,10 +183,10 @@ pub struct Brief {
     pub preamble: String,
     pub summary: String,
     pub resources_text: String,
-    pub plan_text: String,
+    pub todos_text: String,
     pub extra: Vec<Extra>,
     pub resources: Vec<Resource>,
-    pub plan: Vec<PlanItem>,
+    pub todos: Vec<Todo>,
 }
 
 impl Brief {
@@ -375,7 +381,7 @@ fn has_ws_hash(s: &str) -> bool {
     false
 }
 
-// ------------------------------------------------------------------ resource / plan lines
+// ------------------------------------------------------------------ resource / todo lines
 
 /// Strip markdown noise from a URL's surroundings: trailing punctuation, a closing paren run.
 pub fn clean_url(url: &str) -> String {
@@ -395,6 +401,10 @@ pub fn resource_key(
     path: Option<&str>,
     text: &str,
 ) -> String {
+    if kind == Some("Git") {
+        // One per brief: replaced in place by the server, dismissed as a whole.
+        return "git".into();
+    }
     if let Some(u) = url.filter(|u| !u.is_empty()) {
         let u = u.split('#').next().unwrap_or("");
         return u.trim_end_matches('/').to_string();
@@ -556,6 +566,19 @@ pub fn parse_resource_line(text: &str) -> Resource {
         kind = Some(c.to_string());
         value = v.trim();
     }
+    if kind.as_deref() == Some("Git") {
+        let (branch, path, linked) = parse_git_value(value);
+        return Resource {
+            key: resource_key(kind.as_deref(), None, path.as_deref(), t),
+            kind,
+            label: branch.clone().or_else(|| path.clone()),
+            url: None,
+            path,
+            text: t.to_string(),
+            branch,
+            linked,
+        };
+    }
     let mut url = None;
     let mut label = None;
     let mut path = None;
@@ -581,8 +604,58 @@ pub fn parse_resource_line(text: &str) -> Resource {
         url,
         path,
         text: t.to_string(),
+        branch: None,
+        linked: None,
         key,
     }
+}
+
+/// A `Git:` value — `` `branch` · worktree `~/path` `` (a linked worktree) or `` · repo `~/path` ``
+/// (the main checkout), `detached` in place of the branch. → (branch, path, linked).
+fn parse_git_value(value: &str) -> (Option<String>, Option<String>, Option<bool>) {
+    // `/(?:^|\s)(worktree|repo)\s+`([^`]+)`/i`
+    let mut root: Option<(usize, bool, &str)> = None;
+    for (i, _) in value.char_indices() {
+        if i > 0 && !value[..i].ends_with(is_ws) {
+            continue;
+        }
+        let rest = &value[i..];
+        let word = ["worktree", "repo"].into_iter().find(|w| {
+            rest.get(..w.len())
+                .is_some_and(|h| h.eq_ignore_ascii_case(w))
+        });
+        let Some(w) = word else { continue };
+        let after = &rest[w.len()..];
+        let span = after.trim_start_matches(is_ws);
+        if span.len() == after.len() {
+            continue;
+        }
+        if let Some(inner) = span.strip_prefix('`')
+            && let Some(n) = inner.find('`')
+            && n > 0
+        {
+            root = Some((i, w == "worktree", &inner[..n]));
+            break;
+        }
+    }
+    // `/^`([^`]+)`/`, before the root
+    let branch = value
+        .strip_prefix('`')
+        .and_then(|r| r.find('`').filter(|n| *n > 0).map(|n| &r[..n]))
+        .filter(|_| root.is_none_or(|(i, _, _)| i > 0))
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(String::from);
+    let path = match root {
+        Some((_, _, p)) => p.trim(),
+        None if branch.is_some() => "",
+        None => value.trim(),
+    };
+    (
+        branch,
+        (!path.is_empty()).then(|| path.to_string()),
+        root.map(|(_, linked, _)| linked),
+    )
 }
 
 /// `/^\s*[-*+]\s+(.*)$/`
@@ -596,7 +669,7 @@ fn bullet(line: &str) -> Option<&str> {
 }
 
 /// `/^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/`
-pub fn parse_plan_line(line: &str) -> Option<PlanItem> {
+pub fn parse_todo_line(line: &str) -> Option<Todo> {
     let r = bullet(line)?;
     let r = r.strip_prefix('[')?;
     let mark = r.chars().next()?;
@@ -607,7 +680,7 @@ pub fn parse_plan_line(line: &str) -> Option<PlanItem> {
     if !r.starts_with(is_ws) {
         return None;
     }
-    Some(PlanItem {
+    Some(Todo {
         done: mark != ' ',
         text: r.trim().to_string(),
     })
@@ -653,12 +726,12 @@ fn join(lines: &[&str]) -> String {
 // ------------------------------------------------------------------ whole brief
 
 /// Parse a brief (with or without frontmatter). Tolerant: missing sections, any order, extra
-/// sections and text, `*` bullets, `[X]`.
+/// sections and text, `*` bullets, `[X]`; a legacy `## Plan` reads as `## Todos`.
 pub fn parse_brief(text: &str) -> Brief {
     let (meta, body) = parse_frontmatter(text);
     let mut summary: Vec<&str> = Vec::new();
     let mut resources: Vec<&str> = Vec::new();
-    let mut plan: Vec<&str> = Vec::new();
+    let mut todos: Vec<&str> = Vec::new();
     let mut pre: Vec<&str> = Vec::new();
     let mut extra: Vec<(String, Vec<&str>)> = Vec::new();
     #[derive(Clone, Copy)]
@@ -666,7 +739,7 @@ pub fn parse_brief(text: &str) -> Brief {
         Pre,
         Summary,
         Resources,
-        Plan,
+        Todos,
         Extra(usize),
     }
     let mut cur = Cur::Pre;
@@ -675,7 +748,7 @@ pub fn parse_brief(text: &str) -> Brief {
             cur = match h.to_lowercase().as_str() {
                 "summary" => Cur::Summary,
                 "resources" => Cur::Resources,
-                "plan" => Cur::Plan,
+                "todos" | "plan" => Cur::Todos,
                 _ => {
                     extra.push((h, Vec::new()));
                     Cur::Extra(extra.len() - 1)
@@ -687,25 +760,25 @@ pub fn parse_brief(text: &str) -> Brief {
             Cur::Pre => pre.push(line),
             Cur::Summary => summary.push(line),
             Cur::Resources => resources.push(line),
-            Cur::Plan => plan.push(line),
+            Cur::Todos => todos.push(line),
             Cur::Extra(i) => extra[i].1.push(line),
         }
     }
     let resources_text = join(&resources);
-    let plan_text = join(&plan);
+    let todos_text = join(&todos);
     let parsed_resources = resources_text
         .split('\n')
         .filter_map(bullet)
         .filter(|b| !b.trim().is_empty())
         .map(parse_resource_line)
         .collect();
-    let parsed_plan = plan_text.split('\n').filter_map(parse_plan_line).collect();
+    let parsed_todos = todos_text.split('\n').filter_map(parse_todo_line).collect();
     Brief {
         meta,
         preamble: join(&pre),
         summary: join(&summary),
         resources_text,
-        plan_text,
+        todos_text,
         extra: extra
             .into_iter()
             .map(|(heading, lines)| Extra {
@@ -714,7 +787,7 @@ pub fn parse_brief(text: &str) -> Brief {
             })
             .collect(),
         resources: parsed_resources,
-        plan: parsed_plan,
+        todos: parsed_todos,
     }
 }
 
@@ -738,7 +811,7 @@ pub fn serialize_body(b: &Brief) -> String {
     out.push('\n');
     out.push_str(&sec("Resources", &b.resources_text));
     out.push('\n');
-    out.push_str(&sec("Plan", &b.plan_text));
+    out.push_str(&sec("Todos", &b.todos_text));
     for s in &b.extra {
         out.push('\n');
         out.push_str(&sec(&s.heading, &s.body));
@@ -857,14 +930,14 @@ pub fn continue_prompt(brief: &Brief, host: Option<&str>, cwd: Option<&str>) -> 
     if !brief.resources_text.is_empty() {
         out.push(format!("Resources:\n{}", brief.resources_text));
     }
-    if !brief.plan_text.is_empty() {
-        out.push(format!("Plan:\n{}", brief.plan_text));
+    if !brief.todos_text.is_empty() {
+        out.push(format!("Todos:\n{}", brief.todos_text));
     }
-    let open = brief.plan.iter().find(|i| !i.done);
+    let open = brief.todos.iter().find(|i| !i.done);
     out.push(format!(
         "{}. Check the current state (git status, the files and PRs above) before changing anything, and tell me briefly what you found first.",
         match open {
-            Some(i) => format!("Pick up the first open plan item (\"{}\")", i.text),
+            Some(i) => format!("Pick up the first open todo (\"{}\")", i.text),
             None => "Pick up where it left off".into(),
         }
     ));
@@ -881,10 +954,15 @@ pub struct Where<'a> {
     pub self_name: &'a str,
     /// The live session's cwd, if it is live.
     pub cwd: Option<&'a str>,
+    /// The session's directory, absolute (no `~`), when known.
+    pub abs_cwd: Option<&'a str>,
+    /// The git checkout root (repo or linked worktree) containing it, absolute.
+    pub git_root: Option<&'a str>,
 }
 
-/// `fleet brief --json`: the web API's GET shape (`generating` / `enabled` are the server's to
-/// know and left out), plus `body` (the markdown without frontmatter) and `path`.
+/// `fleet brief --json`: the web API's GET shape (`generating` / `enabled` and the editor link
+/// are the server's to know and left out), plus `body` (the markdown without frontmatter) and
+/// `path`. `parsed.plan` is a deprecated alias of `parsed.todos` (one release).
 pub fn view(id: &str, brief: &Brief, exists: bool, w: &Where, path: &Path) -> Value {
     let host = brief.meta_str("host").unwrap_or_else(|| w.self_name.into());
     let cwd = w.cwd.map(String::from).or_else(|| brief.meta_str("cwd"));
@@ -899,9 +977,13 @@ pub fn view(id: &str, brief: &Brief, exists: bool, w: &Where, path: &Path) -> Va
             "summary": brief.summary,
             "resources": brief.resources.iter().map(|r| json!({
                 "kind": r.kind, "label": r.label, "url": r.url, "path": r.path, "text": r.text,
+                "branch": r.branch, "linked": r.linked,
             })).collect::<Vec<_>>(),
-            "plan": brief.plan,
+            "todos": brief.todos,
+            "plan": brief.todos,
         },
+        "absCwd": w.abs_cwd,
+        "gitRoot": w.git_root,
         "updated": get("updated"),
         "editedAt": get("editedAt"),
         "generatedAt": get("generatedAt"),
@@ -1007,13 +1089,13 @@ mod tests {
         assert!(b.meta.is_empty());
         assert_eq!(b.summary, "hello");
         assert_eq!(
-            b.plan,
+            b.todos,
             [
-                PlanItem {
+                Todo {
                     done: true,
                     text: "Done it".into()
                 },
-                PlanItem {
+                Todo {
                     done: false,
                     text: "next".into()
                 }
@@ -1021,7 +1103,7 @@ mod tests {
         );
         assert_eq!(
             serialize_brief(&empty_brief(SID)),
-            format!("---\nsession: {SID}\n---\n## Summary\n\n## Resources\n\n## Plan\n")
+            format!("---\nsession: {SID}\n---\n## Summary\n\n## Resources\n\n## Todos\n")
         );
     }
 
@@ -1058,6 +1140,33 @@ mod tests {
         );
         assert_eq!(classify_url_kind("https://github.com/o/r/pull/x"), "Link");
         assert_eq!(clean_url("https://x.dev/a_(b))."), "https://x.dev/a_(b)");
+    }
+
+    #[test]
+    fn git_lines_parse_like_the_server() {
+        let r = parse_resource_line("Git: `feat-x` · worktree `~/Code/p/.worktrees/x`");
+        assert_eq!(r.kind.as_deref(), Some("Git"));
+        assert_eq!(r.branch.as_deref(), Some("feat-x"));
+        assert_eq!(r.path.as_deref(), Some("~/Code/p/.worktrees/x"));
+        assert_eq!(r.linked, Some(true));
+        assert_eq!(r.label.as_deref(), Some("feat-x"));
+        assert_eq!(r.key, "git");
+        let d = parse_resource_line("Git: detached · repo `~/Code/p`");
+        assert_eq!(
+            (d.branch, d.path.as_deref(), d.linked, d.label.as_deref()),
+            (None, Some("~/Code/p"), Some(false), Some("~/Code/p"))
+        );
+        let hand = parse_resource_line("git: `main` — merged, safe to delete");
+        assert_eq!(
+            (hand.kind.as_deref(), hand.branch.as_deref(), hand.path),
+            (Some("Git"), Some("main"), None)
+        );
+        let other = parse_resource_line("File: `src/a.ts`");
+        assert_eq!((other.branch, other.linked), (None, None));
+        // A legacy `## Plan` reads as Todos and is written back as `## Todos`.
+        let b = parse_brief("## Plan\n- [ ] a\n");
+        assert_eq!(b.todos.len(), 1);
+        assert!(serialize_brief(&b).ends_with("## Todos\n- [ ] a\n"));
     }
 
     #[test]

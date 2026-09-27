@@ -14,6 +14,7 @@ import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 import { DEFAULT_MODELS } from './config.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
+import { withBriefEditor, withSessionEditors } from './editor.mjs';
 
 export const API_VERSION = 1;
 
@@ -92,7 +93,8 @@ export function createApi({
     const peerHosts = await Promise.all(
       peerNames.map((n) => fetchPeerHost(n, config.peers[n], { timeoutMs: peerFleetTimeoutMs })),
     );
-    return { self: config.self, hosts: [selfHost, ...peerHosts] };
+    // Editor links are this server's to build: its `web.editor` and its ssh aliases for peers.
+    return { self: config.self, hosts: [selfHost, ...peerHosts].map((h) => withSessionEditors(h, config)) };
   }
 
   // The merged fleet, served stale-while-revalidate so a page load never waits on
@@ -110,7 +112,7 @@ export function createApi({
   async function handleFleet(url) {
     if (url.searchParams.get('local') === '1') {
       // Peers poll this: the local host (2s TTL cache), never the merged snapshot.
-      const selfHost = { ...(await fleet.localHost()), spawnDirs: config.spawnDirs };
+      const selfHost = withSessionEditors({ ...(await fleet.localHost()), spawnDirs: config.spawnDirs }, config);
       return { status: 200, body: { self: config.self, hosts: [selfHost] } };
     }
     if (snapshot) return { status: 200, body: await snapshot.get() };
@@ -450,12 +452,17 @@ export function createApi({
       const allowed = regen ? ['POST'] : ['GET', 'PUT'];
       if (!allowed.includes(req.method)) throw new HttpError('method not allowed', 405);
       const id = decodeURIComponent(rawId);
-      return forHost({
+      const host = decodeURIComponent(rawHost);
+      const r = await forHost({
         req,
         url,
-        host: decodeURIComponent(rawHost),
+        host,
         local: () => localBrief({ action: regen ? 'regenerate' : req.method, id, req }),
       });
+      // The serving host knows only its absolute paths; the editor link (local folder vs
+      // Remote-SSH with our alias for that host) is built here, for proxied bodies too.
+      if (!regen && r.status === 200) return { ...r, body: withBriefEditor(r.body, host, config) };
+      return r;
     }
 
     throw new HttpError('not found', 404);

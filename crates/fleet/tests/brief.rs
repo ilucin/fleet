@@ -93,7 +93,18 @@ fn json_has_the_web_api_shape() {
     );
     assert_eq!(v["parsed"]["resources"][0]["kind"], "PR");
     assert_eq!(v["parsed"]["resources"][0]["label"], "owner/repo#12");
-    assert_eq!(v["parsed"]["plan"][2]["done"], false);
+    assert_eq!(v["parsed"]["todos"][2]["done"], false);
+    assert_eq!(
+        v["parsed"]["plan"], v["parsed"]["todos"],
+        "deprecated alias, one release"
+    );
+    let git = &v["parsed"]["resources"][3];
+    assert_eq!(
+        (&git["kind"], &git["branch"], &git["linked"]),
+        (&"Git".into(), &"fix-login".into(), &true.into())
+    );
+    assert_eq!(v["absCwd"], t.cwd().as_str(), "the live cwd, absolute");
+    assert!(v["gitRoot"].is_null(), "a temp dir is not a checkout");
     // A live session's cwd wins over the brief's (as in the server's view).
     let prompt = v["continuePrompt"].as_str().unwrap();
     assert!(
@@ -126,7 +137,7 @@ fn missing_brief_prints_the_skeleton_and_says_so() {
     let t = T::new();
     let out = t.cmd().args(["brief", "app-9d"]).output().unwrap();
     assert!(out.status.success());
-    assert_eq!(stdout(&out), "## Summary\n\n## Resources\n\n## Plan\n");
+    assert_eq!(stdout(&out), "## Summary\n\n## Resources\n\n## Todos\n");
     assert!(stderr(&out).contains("no brief yet"));
     let v: serde_json::Value = serde_json::from_slice(
         &t.cmd()
@@ -166,7 +177,7 @@ fn set_is_a_human_edit() {
     assert!(saved.contains(
         "dismissed: [\"https://github.com/owner/repo/pull/9\",\"https://github.com/owner/repo/pull/12\",\"branch:fix-login\""
     ), "{saved}");
-    assert!(saved.ends_with("## Summary\nDone, in review.\n\n## Resources\n- File: `src/login.ts`\n\n## Plan\n- [x] fix\n"));
+    assert!(saved.ends_with("## Summary\nDone, in review.\n\n## Resources\n- File: `src/login.ts`\n\n## Todos\n- [x] fix\n"));
     // No temp files next to it.
     assert_eq!(std::fs::read_dir(t.env.path("briefs")).unwrap().count(), 1);
 }
@@ -455,4 +466,29 @@ fn regenerate_reports_started_and_the_hourly_cap() {
         "{}",
         stderr(&out)
     );
+}
+
+#[test]
+fn open_runs_the_editor_on_the_cwd_or_over_remote_ssh() {
+    let t = T::new();
+    t.write_brief(SID, SAMPLE);
+    // Here: `code <dir>` (not a git checkout → the cwd).
+    let out = t
+        .cmd()
+        .args(["-n", "brief", "app-9d", "--open"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), format!("code {}", t.cwd()));
+    // Another host: its `fleet brief --json` over ssh, then Remote-SSH with the host's ssh dest.
+    let out = t
+        .cmd()
+        .args(["-n", "-H", "workstation", "brief", "app-9d", "--open"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("devbox"), "{text}");
+    assert!(text.contains("brief app-9d --json"), "{text}");
+    assert!(text.contains("code --remote ssh-remote+devbox "), "{text}");
 }

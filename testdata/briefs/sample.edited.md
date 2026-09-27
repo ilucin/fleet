@@ -7,7 +7,7 @@ generatedThrough: 48213
 generatedAt: 2026-01-02T03:04:05.000Z
 editedAt: 2026-01-02T05:00:00.000Z
 todos: 3f2a9c01b7de
-dismissed: ["https://github.com/owner/repo/pull/9","https://github.com/owner/repo/issues/7","https://claude.ai/code/artifact/0123456789abcdef","https://docs.example.dev/auth"]
+dismissed: ["https://github.com/owner/repo/pull/9","git","https://github.com/owner/repo/issues/7","https://claude.ai/code/artifact/0123456789abcdef","https://docs.example.dev/auth"]
 zeta: kept as is
 alpha: {"nested":[1,2],"b":"x"}
 quoted: "123"
@@ -23,7 +23,7 @@ Fixed the redirect loop; waiting for review.
 - a hand-written line, no kind
 - PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
 
-## Plan
+## Todos
 - [x] reproduce the loop
 - [x] fix the redirect
 - [ ] open the PR

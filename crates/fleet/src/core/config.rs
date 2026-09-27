@@ -68,6 +68,21 @@ pub struct WebConfig {
     /// The `node` binary that runs the web app. `None` → a stable install
     /// (`/opt/homebrew/bin/node`, `/usr/local/bin/node`), then PATH.
     pub node: Option<String>,
+    /// "Open in editor": `"vscode"` (default) | `"cursor"` | `null` (the web UI hides it).
+    /// Kept loose so a bad value never breaks loading the config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor: Option<Value>,
+}
+
+impl WebConfig {
+    /// The editor's command-line launcher for `fleet brief --open`: `cursor` for
+    /// `web.editor: "cursor"`, else `code`.
+    pub fn editor_command(&self) -> &'static str {
+        match self.editor.as_ref().and_then(Value::as_str) {
+            Some("cursor") => "cursor",
+            _ => "code",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -28,7 +28,7 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
+`web.ui` (a path, or `"classic"`), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
@@ -46,13 +46,18 @@ server run `fleet group` over the whole fleet and serve `GET /api/groups` for th
 others proxy to it. It only reads sessions and calls `claude -p`; nothing is sent to a session.
 
 `web.briefs` (default off; opt in with `fleet config set web.briefs.enabled true`) makes the server keep a **brief** per
-idle session on its host — summary, resources it produced, plan — in
+idle session on its host — summary, resources it produced (incl. one `Git:` line: branch +
+checkout), todos — in
 `~/.local/state/fleet/briefs/<session_id>.md`, for starting a new session that continues the work.
-Resources and todo plans come from the transcript for free; the summary costs one
+Resources and todos come from the transcript for free; the summary costs one
 `claude -p --model haiku` call, gated hard (idle ≥ 60s, ≥ 2 new prompts or 2000 new characters,
 ≥ 15 min per session, one at a time, ≤ 12/hour — all tunable: `model`, `idleMs`, `minIntervalMs`,
 `maxDeltaChars`, `maxCallsPerHour`, `minNewTurns`, `minNewChars`, `maxBriefChars`). Reading and
 editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
+
+`web.editor` (`"vscode"` default, `"cursor"`, or `null` to hide it) sets the "Open in editor"
+link on briefs and session rows (`editorUrl`): a local folder for sessions on this server's host,
+Remote-SSH through `hosts.<host>.ssh` for the others (no ssh alias → no link).
 
 ## Another UI
 

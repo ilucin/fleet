@@ -174,7 +174,7 @@ enum Commands {
         input: Option<String>,
     },
 
-    /// A session's brief: what it is doing, what it produced, its plan (read, edit, regenerate)
+    /// A session's brief: what it is doing, what it produced, its todos (read, edit, regenerate, open)
     Brief {
         /// generated title, session name, sessionId prefix, or pid — or the full id of a gone
         /// session whose brief is still there
@@ -197,6 +197,10 @@ enum Commands {
         /// Ask this host's web server to regenerate it (in the background; capped per hour)
         #[arg(long, conflicts_with = "prompt")]
         regenerate: bool,
+        /// Open the session's git root (else cwd) in VS Code (`code`; `cursor` with
+        /// web.editor "cursor") — through Remote-SSH for a session on another host
+        #[arg(long, conflicts_with_all = ["json", "prompt", "edit", "set", "regenerate"])]
+        open: bool,
     },
 
     /// Spawn a new Claude session in a fresh tab/pane
@@ -490,7 +494,7 @@ fn placement(c: &Commands) -> Placement {
         Commands::Tmux { .. } | Commands::Enter { .. } | Commands::Last | Commands::New(_) => {
             Placement::Dispatch(Scope::DefaultHost)
         }
-        Commands::Brief { edit: true, .. } => Placement::Here,
+        Commands::Brief { edit: true, .. } | Commands::Brief { open: true, .. } => Placement::Here,
         Commands::List {
             all_hosts: true, ..
         }
@@ -603,8 +607,12 @@ fn run(cli: Cli) -> Result<i32> {
             set,
             expect_updated,
             regenerate,
+            open,
         } => {
-            if edit {
+            if open {
+                let t = target(cli.host.as_deref(), cli.local, Scope::SelfHost)?;
+                brief_cmd::open(&t, &session)?
+            } else if edit {
                 let t = target(cli.host.as_deref(), cli.local, Scope::SelfHost)?;
                 return brief_cmd::edit(&t, &session, json);
             } else if set {

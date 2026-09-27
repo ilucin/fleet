@@ -116,6 +116,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.port` / `web.bind` | web server listen address; with no config at all it binds `127.0.0.1` only |
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
+| `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: the scheme of the "Open in editor" link the API puts on briefs and session rows (`editorUrl`, see [Session briefs](#session-briefs)); `null` = no link (the UI hides the button) |
 | `web.ui` | static UI directory to serve instead of the bundled one, or `"classic"` for `web/public`; unset → `web/ui/dist` when built, else `web/public` |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
 | `web.models` | New session model picker: `[{ id, label }]` or bare ids (`""` = Claude's default, no `--model`); default Default, Fable 5.1, Opus 5.5, Sonnet 5, Haiku 4.5 |
@@ -266,7 +267,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | --- | --- | --- |
 | GET | `/api/health` | name, version, apiVersion, self, uptime, autoName (`lastRun`) |
 | GET | `/api/settings` | apiVersion, self, host names, quick replies |
-| GET | `/api/fleet[?local=1]` | `{ self, hosts: [{ name, ok, error?, sessions, spawnDirs }], snapshotAt }` — sessions are `list --json` objects + `host` (`title` capped at 300 chars); the merged view is a warm background-refreshed snapshot |
+| GET | `/api/fleet[?local=1]` | `{ self, hosts: [{ name, ok, error?, sessions, spawnDirs }], snapshotAt }` — sessions are `list --json` objects + `host` (`title` capped at 300 chars) + `editorUrl` (the "Open in editor" link for its cwd, built by the server that answered — see [Session briefs](#session-briefs)); the merged view is a warm background-refreshed snapshot |
 | GET | `/api/hosts/:host/sessions/:id/peek?lines=N` | plain-text screen |
 | GET | `/api/hosts/:host/sessions/:id/messages?limit=N` | conversation (no tool calls) from the transcript |
 | POST | `/api/hosts/:host/sessions/:id/send` | `{ text }` → typed + Enter |
@@ -281,7 +282,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths }` (≤ 200, as written in chat, `:line` allowed) → per path: resolved absolute path, `exists`, `isFile`, size, mtime, `kind` (markdown/text/image/pdf/other); the UI links only existing files |
 | GET | `/api/hosts/:host/sessions/:id/files/raw?path=…[&download=1]` | the file itself, streamed (also through a peer); text/markdown over 5 MB only as a download |
 | POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` → opens it with its default app **on that host** (`open` / `xdg-open`; runnable files are revealed in their folder instead) |
-| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id |
+| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` → a human edit (sets `editedAt`) → the same shape |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` → **202** `{ host, id, started, queued, generating: true }`, the model call runs in the background (poll GET); **429** `{ error, retryAfterMs }` at the hourly cap |
 
@@ -321,7 +322,7 @@ The web Board view shows sessions as columns of work streams, and nobody maintai
 ## Session briefs
 
 A brief is a small markdown doc per session: 1–2 sentences on exactly what the session is doing and
-where (repo/cwd, branch, host), every resource it produced, and a short plan with progress — enough
+where (repo/cwd, branch, host), every resource it produced, and its todos with progress — enough
 to start a **new** session from it and just continue (`continuePrompt` in the API is that first
 prompt). The user can edit it; their edits are authoritative.
 
@@ -346,19 +347,20 @@ generatedAt: 2026-01-02T03:04:05.000Z
 editedAt: 2026-01-02T03:10:00.000Z
 todos: 3f2a9c01b7de
 dismissed: ["https://github.com/owner/repo/pull/9"]
+git: Git: `fix-login` · worktree `~/Code/project-wt`
 ---
 ## Summary
 Fixing the login redirect loop in ~/Code/project on branch fix-login; the fix is in review.
 
 ## Resources
-- Branch: `fix-login`
+- Git: `fix-login` · worktree `~/Code/project-wt`
 - PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
 - File: `src/login.ts`
 - Spec: `specs/login/SPEC.md`
 - Artifact: [Login report](https://claude.ai/code/artifact/…)
 - Link: [docs.example.dev/auth](https://docs.example.dev/auth)
 
-## Plan
+## Todos
 - [x] reproduce the loop
 - [ ] fix the redirect (in progress)
 ```
@@ -370,24 +372,37 @@ Fixing the login redirect loop in ~/Code/project on branch fix-login; the fix is
   (`~/.claude/projects/<encoded cwd>/<session_id>.jsonl`) up to which the conversation has been
   summarised, always at a line boundary (a transcript smaller than it was replaced: start over);
   `generatedAt` (last model generation); `editedAt` (last human edit, absent until one);
-  `todos` (hash of the todo list last copied into Plan); `dismissed` (resource keys a human
-  deleted — never added back; at most 200). Unknown keys are preserved.
-- Body: exactly three `## ` sections, written in this order — `Summary`, `Resources`, `Plan`.
+  `todos` (hash of the todo list last copied into Todos); `dismissed` (resource keys a human
+  deleted — never added back; at most 200); `git` (the auto `Git:` line last written; its
+  presence also means the legacy `Branch:` / `Worktree:` lines were migrated). Unknown keys are
+  preserved.
+- Body: exactly three `## ` sections, written in this order — `Summary`, `Resources`, `Todos`.
   Parsers are tolerant: headings case-insensitive, sections in any order or missing, text before
-  the first heading and other `## ` sections are kept (written after Plan), `*`/`+` bullets,
-  `[X]`.
+  the first heading and other `## ` sections are kept (written after Todos), `*`/`+` bullets,
+  `[X]`. A `## Plan` section (the name before Todos) is read as `## Todos` and written back as
+  `## Todos` on the next write.
 - Resources: one bullet per item, `- <Kind>: <value>`, value a markdown link `[label](url)` or a
-  code span `` `path` ``. Kinds: `PR`, `Issue`, `Artifact`, `Spec`, `File`, `Branch`, `Worktree`,
-  `Link`. Any other bullet (no kind, free text) is a hand-written line and kept as is. An item's
-  **key** is its URL (fragment and trailing `/` dropped), else its path (`branch:<name>` /
-  `worktree:<path>` for those two kinds). Paths are relative to the session's cwd when inside it,
-  else `~/…`, else absolute.
-- Plan: `- [ ] step` / `- [x] step` lines; other lines in the section are kept.
+  code span `` `path` ``. Kinds: `PR`, `Issue`, `Artifact`, `Spec`, `File`, `Git`, `Link` (and the
+  legacy `Branch`, `Worktree`). Any other bullet (no kind, free text) is a hand-written line and
+  kept as is. An item's **key** is its URL (fragment and trailing `/` dropped), else its path
+  (`branch:<name>` / `worktree:<path>` for the legacy kinds); every `Git` line has the key `git`.
+  Paths are relative to the session's cwd when inside it, else `~/…`, else absolute.
+- The **Git line** — one per brief, where the session's checkout is: ``- Git: `<branch>` · worktree
+  `<root>` `` for a linked worktree, `` · repo `<root>` `` for the main checkout (`<root>` = the
+  checkout root, `~/…`; `detached` in place of the branch). A Git line in exactly this form is the
+  auto one and is **replaced in place** when the branch or root changes; with no Git line at all
+  one is inserted at the top of Resources unless `git` is in `dismissed` (a human deleted it). A
+  Git line in any other form (e.g. with a note appended) is a human's and left alone. Migration:
+  before the `git` frontmatter key exists, the server's old auto lines — exactly
+  `` - Branch: `<name>` `` / `` - Worktree: `<path>` `` — are dropped on the next write and the Git
+  line takes the first one's place; hand-written variants (other bullets, extra text) stay.
+- Todos: `- [ ] todo` / `- [x] todo` lines; other lines in the section are kept.
 
 **Merge rules** (every writer): never drop a line a human wrote; new auto items are appended
-unless their key is already present or in `dismissed`; a human edit (PUT) that removes a
-resource line adds its key to `dismissed`; the machine keys (`generatedThrough`, `generatedAt`,
-`todos`, `dismissed`) are the writer's, not taken from an edited body.
+unless their key is already present or in `dismissed` (the Git line: replaced in place, above); a
+human edit (PUT) that removes a resource line adds its key to `dismissed`; the machine keys
+(`generatedThrough`, `generatedAt`, `todos`, `dismissed`, `git`) are the writer's, not taken from
+an edited body.
 
 **Generation** (hybrid, `web/lib/brief-extract.mjs` + `web/lib/briefs.mjs`):
 
@@ -395,20 +410,20 @@ resource line adds its key to `dismissed`; the machine keys (`generatedThrough`,
    (Edit / Write / MultiEdit / NotebookEdit targets, shell redirects and `tee`; temp dirs skipped;
    `SPEC.md`, `FINAL.md` and files under `specs/` are `Spec`), PR/issue URLs printed by
    `gh pr|issue create`, artifact URLs returned by an Artifact publish, PR/issue/artifact/other
-   links in the assistant's text, PR/issue/artifact links in the user's prompts; branch and
-   worktree from one `git rev-parse` in the cwd. Links to this machine or the private network (IP
+   links in the assistant's text, PR/issue/artifact links in the user's prompts; the Git line
+   (branch, checkout root, linked worktree or not) from one `git rev-parse` in the cwd. Links to this machine or the private network (IP
    literals, dotless or `.local`/`.ts.net` hosts), schema hosts, templated or `…`-truncated URLs are
    dropped. Read-only tool output (a file that lists PRs) never counts.
-2. *Plan without a model* when the session keeps todos: the latest `TodoWrite` list, or the task
-   list from `TaskCreate`/`TaskUpdate`, is the Plan (rewritten only when the list changes, so a
-   hand edit stands until the next todo change).
-3. *Summary* (and the Plan when there are no todos) from `claude -p --model <model>` — flags as in
+2. *Todos without a model* when the session keeps todos: the latest `TodoWrite` list, or the task
+   list from `TaskCreate`/`TaskUpdate`, is the Todos section (rewritten only when the list
+   changes, so a hand edit stands until the next todo change).
+3. *Summary* (and the Todos when the session keeps none) from `claude -p --model <model>` — flags as in
    `core::naming` (prompt on stdin, `--strict-mcp-config`, tools disallowed, a neutral cwd) plus
-   `--no-session-persistence`, 2 min timeout. Input: the current Summary + Plan (≤ `maxBriefChars`)
+   `--no-session-persistence`, 2 min timeout. Input: the current Summary + Todos (≤ `maxBriefChars`)
    and ONLY the conversation since `generatedThrough` — user prompts and turn-ending assistant
    text, each clipped, newest kept, ≤ `maxDeltaChars` — told that hand-edited content is
    authoritative and to update, not rewrite. The answer must be a `## Summary` (≤ 1200 chars) and
-   optionally a `## Plan` of checkboxes; anything else keeps the old brief. An edit that lands
+   optionally a `## Todos` of checkboxes (`## Plan` is accepted too); anything else keeps the old brief. An edit that lands
    while the model runs wins (the answer is discarded).
 
 **Budget** — model calls are what costs, so every automatic one has to pass all of:
@@ -422,13 +437,27 @@ resource line adds its key to `dismissed`; the machine keys (`generatedThrough`,
   `maxCallsPerHour` calls in the last hour.
 
 The background pass checks this host's live sessions every 30 s (the 2 s discovery cache — no
-extra `fleet list` while a UI is polling) and forgets sessions that are gone. Resource and plan
+extra `fleet list` while a UI is polling) and forgets sessions that are gone. Resource and todo
 extraction (no model) runs whenever the transcript grew — in the background pass and on GET. A
 manual regenerate skips the idle, interval and new-content gates (with nothing new it re-reads the
 recent conversation) but waits for the one-at-a-time slot and counts against the hourly cap. Each
 call is logged with its input size (`[briefs] idle 1a2b3c4d: claude -p --model haiku, 12 msg(s) /
 3 user turn(s), 8123 chars in (4/12 this hour)`); `/api/health` reports `briefs: { enabled, model,
 callsLastHour, maxCallsPerHour, generating, lastRun }`.
+
+**Open in editor.** GET/PUT brief bodies carry `absCwd` (the session's directory on its host,
+absolute, no `~`), `gitRoot` (the checkout root — repo or linked worktree — containing it, absolute;
+null outside git), `editor` (`web.editor` of the answering server) and `editorUrl`; session rows in
+`/api/fleet` carry `editorUrl` for their cwd. The link targets `gitRoot`, else `absCwd`:
+`vscode://file/<path>` when the session is on the answering server's own host (`self`), else
+`vscode://vscode-remote/ssh-remote+<hosts.<host>.ssh><path>` (Remote-SSH with **that** server's ssh
+alias for the host); `cursor://…` alike for `web.editor: "cursor"`; `null` when `web.editor` is null,
+there is no absolute path, or the host has no usable `ssh` alias. A proxied request is answered by
+the peer (which knows only its own absolute paths) and the server that received it fills in
+`editor` / `editorUrl` from its own config — so the link is built for the machine whose server
+the browser asked, which is assumed to be the machine the browser (and the editor) runs on.
+`fleet brief <target> --open` does the same from the CLI: `code <path>` here, `code --remote
+ssh-remote+<ssh dest> <path>` for a session on another host (`cursor` with `web.editor: "cursor"`).
 
 ## Extension points
 

@@ -22,12 +22,13 @@ It is in review.
 - PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
 - File: `src/login.ts`
 * Branch: `fix-login`
+- Git: `fix-login` · worktree `~/Code/project-wt`
 + see https://github.com/owner/repo/issues/7.
 - Artifact: [Login report](https://claude.ai/code/artifact/0123456789abcdef)
 - link: https://docs.example.dev/auth/)
 - a hand-written line, no kind
 
-## Plan
+## Todos
 - [x] reproduce the loop
 * [X] write a failing test
 - [ ] fix the redirect (in progress)

@@ -10,20 +10,23 @@
 //   generatedThrough: <n>        transcript BYTE offset the summary has consumed
 //   generatedAt: <iso>           last model generation
 //   editedAt: <iso>              last human edit (omitted until there is one)
-//   todos: <hash>                the todo state last copied into ## Plan
+//   todos: <hash>                the todo state last copied into ## Todos
 //   dismissed: ["key", …]        resources the user deleted; never re-added
+//   git: <line>                  the auto `Git:` resource line last written (set: legacy auto
+//                                `Branch:` / `Worktree:` lines have been migrated)
 //   ---
-//   ## Summary / ## Resources / ## Plan   (any other `## ` section is kept, after Plan)
+//   ## Summary / ## Resources / ## Todos   (any other `## ` section is kept, after Todos;
+//                                           a legacy `## Plan` reads as Todos)
 //
 // A human edit is authoritative: parsing tolerates missing sections, extra text and sections,
 // `*` bullets and `[X]`; serialising writes the three sections in canonical order.
 
-export const SECTIONS = ['Summary', 'Resources', 'Plan'];
-export const RESOURCE_KINDS = ['PR', 'Issue', 'Artifact', 'Spec', 'File', 'Branch', 'Worktree', 'Link'];
+export const SECTIONS = ['Summary', 'Resources', 'Todos'];
+export const RESOURCE_KINDS = ['PR', 'Issue', 'Artifact', 'Spec', 'File', 'Git', 'Branch', 'Worktree', 'Link'];
 const KIND_BY_LOWER = new Map(RESOURCE_KINDS.map((k) => [k.toLowerCase(), k]));
 
 /** Frontmatter keys in the order they are written; unknown keys follow, as found. */
-const META_ORDER = ['session', 'host', 'cwd', 'updated', 'generatedThrough', 'generatedAt', 'editedAt', 'todos', 'dismissed'];
+const META_ORDER = ['session', 'host', 'cwd', 'updated', 'generatedThrough', 'generatedAt', 'editedAt', 'todos', 'dismissed', 'git'];
 export const MAX_DISMISSED = 200;
 
 const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
@@ -79,7 +82,7 @@ export function serializeFrontmatter(meta = {}) {
   return `---\n${lines.join('\n')}\n---\n`;
 }
 
-// ------------------------------------------------------------------ resources / plan lines
+// ------------------------------------------------------------------ resources / todo lines
 
 /** Strip markdown noise from a URL's surroundings: trailing punctuation, a closing paren run. */
 export function cleanUrl(url) {
@@ -90,12 +93,28 @@ export function cleanUrl(url) {
 
 /** The identity of a resource for de-duplication and `dismissed`: its URL, else its path. */
 export function resourceKey(r) {
+  if (r.kind === 'Git') return 'git'; // one per brief: replaced in place, dismissed as a whole
   if (r.url) return r.url.replace(/#.*$/, '').replace(/\/+$/, '');
   if (r.path) return `${r.kind === 'Branch' || r.kind === 'Worktree' ? `${r.kind.toLowerCase()}:` : ''}${r.path}`;
   return (r.text ?? '').trim().toLowerCase();
 }
 
-/** One Resources bullet (without the `- `) → { kind, label, url, path, text, key }. */
+/**
+ * A `Git:` value — ``\`branch\` · worktree \`~/path\``` (a linked worktree) or ``· repo \`~/path\```
+ * (the main checkout); `detached` in place of the branch. → { branch, path, linked }.
+ */
+function parseGitValue(value) {
+  const root = /(?:^|\s)(worktree|repo)\s+`([^`]+)`/i.exec(value);
+  const br = /^`([^`]+)`/.exec(value);
+  const branch = br && (!root || br.index < root.index) ? br[1].trim() || null : null;
+  return {
+    branch,
+    path: (root ? root[2] : branch ? '' : value).trim() || null,
+    linked: root ? root[1].toLowerCase() === 'worktree' : null,
+  };
+}
+
+/** One Resources bullet (without the `- `) → { kind, label, url, path, text, branch, linked, key }. */
 export function parseResourceLine(text) {
   const t = String(text).trim();
   let kind = null;
@@ -104,6 +123,11 @@ export function parseResourceLine(text) {
   if (km && KIND_BY_LOWER.has(km[1].toLowerCase())) {
     kind = KIND_BY_LOWER.get(km[1].toLowerCase());
     value = km[2].trim();
+  }
+  if (kind === 'Git') {
+    const g = parseGitValue(value);
+    const r = { kind, label: g.branch ?? g.path, url: null, path: g.path, text: t, branch: g.branch, linked: g.linked };
+    return { ...r, key: resourceKey(r) };
   }
   let url = null;
   let label = null;
@@ -122,13 +146,15 @@ export function parseResourceLine(text) {
     label = p;
   }
   if (!kind) kind = url ? classifyUrl(url).kind : null;
-  const r = { kind, label: label ?? url, url, path: p, text: t };
+  const r = { kind, label: label ?? url, url, path: p, text: t, branch: null, linked: null };
   return { ...r, key: resourceKey(r) };
 }
 
-/** → `PR: [owner/repo#12](url)`, `File: \`path\``, … (the bullet text, no `- `). */
+/** → `PR: [owner/repo#12](url)`, `File: \`path\``, `Git: \`b\` · repo \`p\``, … (the bullet text, no `- `). */
 export function formatResource(r) {
   const kind = r.kind ?? 'Link';
+  const code = (v) => `\`${String(v ?? '').replace(/`/g, '')}\``;
+  if (kind === 'Git') return `Git: ${r.branch ? code(r.branch) : 'detached'} · ${r.linked ? 'worktree' : 'repo'} ${code(r.path)}`;
   if (r.url) return `${kind}: [${(r.label ?? r.url).replace(/[[\]]/g, '')}](${r.url})`;
   return `${kind}: \`${String(r.path ?? '').replace(/`/g, '')}\``;
 }
@@ -157,12 +183,12 @@ export function classifyUrl(url) {
   return { kind: 'Link', label, url };
 }
 
-export function parsePlanLine(line) {
+export function parseTodoLine(line) {
   const m = CHECK_RE.exec(line);
   return m ? { done: m[1] !== ' ', text: m[2].trim() } : null;
 }
 
-export function formatPlan(items) {
+export function formatTodos(items) {
   return items.map((i) => `- [${i.done ? 'x' : ' '}] ${oneLine(i.text)}`).join('\n');
 }
 
@@ -170,12 +196,14 @@ export function formatPlan(items) {
 
 /**
  * Parse a brief (with or without frontmatter). →
- *   { meta, preamble, summary, resourcesText, planText, extra: [{ heading, body }],
- *     resources: [parsed lines], plan: [{ done, text }] }
+ *   { meta, preamble, summary, resourcesText, todosText, extra: [{ heading, body }],
+ *     resources: [parsed lines], todos: [{ done, text }] }
+ * `## Plan` (the section's name before it became Todos) reads as `## Todos`.
  */
 export function parseBrief(text) {
   const { meta, body } = parseFrontmatter(text);
-  const known = { summary: [], resources: [], plan: [] };
+  const known = { summary: [], resources: [], todos: [] };
+  known.plan = known.todos;
   const extra = [];
   const pre = [];
   let cur = pre;
@@ -195,22 +223,22 @@ export function parseBrief(text) {
   }
   const join = (lines) => lines.join('\n').replace(/^\s*\n/, '').trimEnd();
   const resourcesText = join(known.resources);
-  const planText = join(known.plan);
+  const todosText = join(known.todos);
   const resources = [];
   for (const line of resourcesText.split('\n')) {
     const b = BULLET_RE.exec(line);
     if (b && b[1].trim()) resources.push(parseResourceLine(b[1]));
   }
-  const plan = planText.split('\n').map(parsePlanLine).filter(Boolean);
+  const todos = todosText.split('\n').map(parseTodoLine).filter(Boolean);
   return {
     meta,
     preamble: join(pre),
     summary: join(known.summary),
     resourcesText,
-    planText,
+    todosText,
     extra: extra.map((s) => ({ heading: s.heading, body: join(s.lines) })),
     resources,
-    plan,
+    todos,
   };
 }
 
@@ -220,7 +248,7 @@ export function serializeBrief(b) {
   if (b.preamble) parts.push(`${b.preamble}\n\n`);
   parts.push(`## Summary\n${b.summary ? `${b.summary}\n` : ''}\n`);
   parts.push(`## Resources\n${b.resourcesText ? `${b.resourcesText}\n` : ''}\n`);
-  parts.push(`## Plan\n${b.planText ? `${b.planText}\n` : ''}`);
+  parts.push(`## Todos\n${b.todosText ? `${b.todosText}\n` : ''}`);
   for (const s of b.extra ?? []) parts.push(`\n## ${s.heading}\n${s.body ? `${s.body}\n` : ''}`);
   return parts.join('');
 }
@@ -261,6 +289,56 @@ export function mergeResources(resourcesText, items, dismissed = [], { max = 80 
   return { text: lines.join('\n'), added };
 }
 
+/** What the server wrote before the one `Git:` line: a `- Branch:` / `- Worktree:` code-span line. */
+const LEGACY_GIT_RE = /^- (?:Branch|Worktree): `[^`]+`$/;
+
+/**
+ * Put the auto `Git:` line (branch + repo / worktree root, `item` = { kind: 'Git', branch, path,
+ * linked }) into the Resources section, once:
+ *   - a Git line in the canonical form (what formatResource writes) is the auto one: replaced in
+ *     place when the branch or root changed;
+ *   - no Git line at all → inserted (at the top, or where the legacy lines were), unless `git`
+ *     was dismissed (a human deleted it);
+ *   - a Git line in any other form is a human's: left alone (and none is added).
+ * `migrated` false (no `git` key in the frontmatter yet): the legacy auto `- Branch:` /
+ * `- Worktree:` lines are dropped first. → { text, changed }.
+ */
+export function mergeGit(resourcesText, item, { migrated = true, dismissed = [] } = {}) {
+  const existing = String(resourcesText ?? '').trimEnd();
+  const lines = existing ? existing.split('\n') : [];
+  let changed = false;
+  let at = -1;
+  if (!migrated) {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (!LEGACY_GIT_RE.test(lines[i].trimEnd())) continue;
+      lines.splice(i, 1);
+      at = i;
+      changed = true;
+    }
+  }
+  const want = `- ${formatResource({ ...item, kind: 'Git' })}`;
+  let first = -1;
+  let auto = -1;
+  lines.forEach((line, i) => {
+    const b = BULLET_RE.exec(line);
+    if (!b) return;
+    const r = parseResourceLine(b[1]);
+    if (r.kind !== 'Git') return;
+    if (first < 0) first = i;
+    if (auto < 0 && formatResource(r) === b[1].trim()) auto = i;
+  });
+  if (auto >= 0) {
+    if (lines[auto] !== want) {
+      lines[auto] = want;
+      changed = true;
+    }
+  } else if (first < 0 && !dismissed.includes('git')) {
+    lines.splice(at >= 0 ? at : 0, 0, want);
+    changed = true;
+  }
+  return { text: lines.join('\n'), changed };
+}
+
 /** Keys that were in `before`'s Resources and are gone from `after`'s: what a human deleted. */
 export function removedResourceKeys(before, after) {
   const now = new Set(after.resources.map((r) => r.key));
@@ -275,12 +353,12 @@ export function addDismissed(dismissed = [], keys = []) {
 // ------------------------------------------------------------------ model output
 
 const MAX_SUMMARY_CHARS = 1200;
-const MAX_PLAN_ITEMS = 20;
+const MAX_TODOS = 20;
 
 /**
  * Validate what the model answered: `## Summary` (required, prose, ≤ 1200 chars) and
- * optionally `## Plan` (checkbox items only; anything else is dropped). → { summary, plan|null }
- * or null for garbage — the caller then keeps the old brief.
+ * optionally `## Todos` (checkbox items only; anything else is dropped; `## Plan` is read the
+ * same). → { summary, todos|null } or null for garbage — the caller then keeps the old brief.
  */
 export function parseModelOutput(text) {
   let t = String(text ?? '').trim();
@@ -290,9 +368,9 @@ export function parseModelOutput(text) {
   const b = parseBrief(t);
   const summary = b.summary.trim();
   if (!summary || summary.length > MAX_SUMMARY_CHARS || /^#/m.test(summary) || /^---$/m.test(summary)) return null;
-  const hasPlan = /^##\s+plan\s*$/im.test(t);
-  const plan = hasPlan ? b.plan.filter((i) => i.text && i.text.length <= 300).slice(0, MAX_PLAN_ITEMS) : null;
-  return { summary, plan: plan && plan.length ? plan : null };
+  const hasTodos = /^##\s+(?:todos|plan)\s*$/im.test(t);
+  const todos = hasTodos ? b.todos.filter((i) => i.text && i.text.length <= 300).slice(0, MAX_TODOS) : null;
+  return { summary, todos: todos && todos.length ? todos : null };
 }
 
 // ------------------------------------------------------------------ continue prompt
@@ -311,10 +389,10 @@ export function continuePrompt(brief, where = {}) {
   const out = [`Continue the work of ${origin}. Its brief:`];
   if (brief.summary) out.push(`Summary:\n${brief.summary}`);
   if (brief.resourcesText) out.push(`Resources:\n${brief.resourcesText}`);
-  if (brief.planText) out.push(`Plan:\n${brief.planText}`);
-  const open = brief.plan?.find((i) => !i.done);
+  if (brief.todosText) out.push(`Todos:\n${brief.todosText}`);
+  const open = brief.todos?.find((i) => !i.done);
   out.push(
-    `${open ? `Pick up the first open plan item ("${open.text}")` : 'Pick up where it left off'}. ` +
+    `${open ? `Pick up the first open todo ("${open.text}")` : 'Pick up where it left off'}. ` +
       'Check the current state (git status, the files and PRs above) before changing anything, and tell me briefly what you found first.',
   );
   return out.join('\n\n');

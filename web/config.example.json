@@ -11,6 +11,7 @@
     "bind": "0.0.0.0",
     "dir": null,
     "ui": null,
+    "editor": "vscode",
     "quickReplies": ["Continue.", "Yes", "No", "1", "2"],
     "models": [
       { "id": "", "label": "Default" },

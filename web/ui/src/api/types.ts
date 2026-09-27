@@ -35,6 +35,8 @@ export interface Session {
   display_title?: string | null
   /** Context-window usage from the transcript tail; null when unknown (older CLIs omit it). */
   context?: ContextUsage | null
+  /** "Open in editor" link for the cwd (like Brief.editorUrl, without the git-root lookup). Older servers omit it. */
+  editorUrl?: string | null
 }
 
 /** `context` on a session row — see docs/architecture.md → "Context usage". */
@@ -295,22 +297,33 @@ export interface GroupsResponse {
 }
 
 /** A `## Resources` bullet of a session brief. `url` or `path` is set; `kind: null` = a hand-written line. */
-export type BriefResourceKind = 'PR' | 'Issue' | 'Artifact' | 'Spec' | 'File' | 'Branch' | 'Worktree' | 'Link'
+export type BriefResourceKind = 'PR' | 'Issue' | 'Artifact' | 'Spec' | 'File' | 'Git' | 'Branch' | 'Worktree' | 'Link'
 
 export interface BriefResource {
   kind: BriefResourceKind | string | null
   label: string | null
   url: string | null
-  /** Relative to the session cwd when inside it, else `~/…`, else absolute (a branch name for `Branch`). */
+  /**
+   * Relative to the session cwd when inside it, else `~/…`, else absolute (a branch name for the
+   * legacy `Branch`; the repo / worktree root for `Git`).
+   */
   path: string | null
   /** The bullet as written. */
   text: string
+  /** `Git` only (null otherwise; older servers omit it): the branch, null when detached. */
+  branch?: string | null
+  /** `Git` only: true = a linked worktree, false = the main checkout (null: unknown / not Git). */
+  linked?: boolean | null
 }
 
-export interface BriefPlanItem {
+/** A `## Todos` checkbox line. */
+export interface BriefTodo {
   done: boolean
   text: string
 }
+
+/** @deprecated the section is `## Todos` now — use BriefTodo. */
+export type BriefPlanItem = BriefTodo
 
 /** GET/PUT /api/hosts/:host/sessions/:id/brief (`exists: false` = the empty skeleton, no file yet). */
 export interface Brief {
@@ -319,7 +332,14 @@ export interface Brief {
   exists: boolean
   /** The whole file, frontmatter included. */
   markdown: string
-  parsed: { summary: string; resources: BriefResource[]; plan: BriefPlanItem[] }
+  parsed: {
+    summary: string
+    resources: BriefResource[]
+    /** Older servers omit it — fall back to `plan`. */
+    todos?: BriefTodo[]
+    /** @deprecated alias of `todos` (same array), kept for one release. */
+    plan: BriefTodo[]
+  }
   /** ISO 8601 (frontmatter), null when never written. */
   updated: string | null
   editedAt: string | null
@@ -330,6 +350,18 @@ export interface Brief {
   enabled: boolean
   /** The first prompt for a new session that continues this one. */
   continuePrompt: string
+  /** The session's directory on its host, absolute (no `~`); null when unknown. Older servers omit it. */
+  absCwd?: string | null
+  /** The git checkout root (repo or linked worktree) containing absCwd, absolute; null outside git. */
+  gitRoot?: string | null
+  /** `web.editor` of the server that answered: which editor `editorUrl` opens; null = hide the button. */
+  editor?: 'vscode' | 'cursor' | null
+  /**
+   * `vscode://file/<path>` for a session on the answering server's host, or
+   * `vscode://vscode-remote/ssh-remote+<alias><path>` for another host (`cursor://…` alike);
+   * gitRoot preferred over absCwd. null: no editor, no path, or no ssh alias for that host.
+   */
+  editorUrl?: string | null
 }
 
 /** POST …/brief/regenerate (202). */

@@ -16,7 +16,7 @@ Fixed the redirect loop; waiting for review.
 - a hand-written line, no kind
 - PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
 
-## Plan
+## Todos
 - [x] reproduce the loop
 - [x] fix the redirect
 - [ ] open the PR

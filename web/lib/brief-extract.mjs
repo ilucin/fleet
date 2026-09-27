@@ -9,7 +9,7 @@
 //   the result of an Artifact publish                                              → Artifact
 //   assistant text: GitHub PR/issue, claude.ai artifact and other http(s) links    → PR/Issue/Artifact/Link
 //   user prompts: GitHub PR/issue and artifact links (what the work is about)      → PR/Issue/Artifact
-// Plan: the latest TodoWrite list, or the task list built from TaskCreate / TaskUpdate calls.
+// Todos: the latest TodoWrite list, or the task list built from TaskCreate / TaskUpdate calls.
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -169,8 +169,8 @@ export function ingestLine(state, line, home = os.homedir()) {
   }
 }
 
-/** The current plan from todos, or null when the session never used a todo tool. */
-export function planFromState(state) {
+/** The session's current todo list, or null when it never used a todo tool. */
+export function todosFromState(state) {
   const list = state.todos ?? (state.tasks.size ? [...state.tasks.values()] : null);
   if (!list || !list.length) return null;
   return list.map((t) => ({
@@ -211,7 +211,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
     }
   }
 
-  /** → { file, size, offset, resources, plan } or null without a transcript. */
+  /** → { file, size, offset, resources, todos } or null without a transcript. */
   async function refresh(session) {
     const id = session?.session_id;
     if (!id) return null;
@@ -252,7 +252,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
       st.size = stat.size;
       st.mtimeMs = stat.mtimeMs;
     }
-    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), plan: planFromState(st) };
+    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), todos: todosFromState(st) };
   }
 
   return {

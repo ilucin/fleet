@@ -1,12 +1,12 @@
 // Session briefs: a small markdown doc per session — what it is doing and where, what it
-// produced, a short plan — so a new session can be started from it and just continue. Format:
+// produced, its todos — so a new session can be started from it and just continue. Format:
 // lib/brief-format.mjs; contract and budget: docs/architecture.md → "Session briefs".
 //
 // The web server owns generation: it is the always-on process on every host, it runs inside
 // tmux (where `claude -p` has a logged-in keychain) and it already reads transcripts. Hybrid:
-//   - Resources and (when the session keeps todos) the Plan come from the transcript, no model
+//   - Resources and (when the session keeps todos) the Todos come from the transcript, no model
 //     (lib/brief-extract.mjs), merged into the file without dropping a line a human wrote;
-//   - the Summary (and the Plan otherwise) comes from `claude -p --model haiku`, fed the old
+//   - the Summary (and the Todos otherwise) come from `claude -p --model haiku`, fed the old
 //     brief plus ONLY the conversation since `generatedThrough`, heavily truncated.
 // Model calls are the expensive part, so they are gated hard: an idle session (≥ idleMs), new
 // content (≥ minNewTurns user turns or ≥ minNewChars), ≥ minIntervalMs since that session's last
@@ -21,7 +21,9 @@ import {
   addDismissed,
   continuePrompt,
   emptyBrief,
-  formatPlan,
+  formatResource,
+  formatTodos,
+  mergeGit,
   mergeResources,
   parseBrief,
   parseModelOutput,
@@ -101,17 +103,24 @@ export function createClaudeAsk({ bin = 'claude', run, timeoutMs = 120 * 1000, c
   };
 }
 
-/** Branch and worktree of a directory, or null outside git. One `git` call, 2 s cap. */
+/**
+ * Branch and checkout root of a directory, or null outside git. One `git` call, 2 s cap. →
+ * { branch (null when detached), toplevel (absolute), linked (a linked worktree, not the main
+ * checkout), worktree (toplevel when linked, else null) }.
+ */
 export async function gitInfo(cwd, { run }) {
   try {
-    const { stdout } = await run('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD', '--show-toplevel', '--git-common-dir'], { timeout: 2000 });
-    const [branch, top, common] = stdout.trim().split('\n').map((s) => s.trim());
+    const { stdout } = await run('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD', '--show-toplevel', '--git-dir', '--git-common-dir'], { timeout: 2000 });
+    const [branch, top, gitDir, common] = stdout.trim().split('\n').map((s) => s.trim());
     if (!top) return null;
-    const commonAbs = path.resolve(top, common || '.git');
+    // Relative paths are relative to the directory git ran in.
+    const abs = (p) => path.resolve(cwd, p || '.git');
+    const linked = Boolean(gitDir && common) && abs(gitDir) !== abs(common);
     return {
       branch: branch && branch !== 'HEAD' ? branch : null,
       toplevel: top,
-      worktree: path.dirname(commonAbs) !== top && path.basename(commonAbs) === '.git' ? top : null,
+      linked,
+      worktree: linked ? top : null,
     };
   } catch {
     return null;
@@ -126,9 +135,9 @@ function capText(s, max) {
 }
 
 /** The whole prompt handed to `claude -p`. Pure. */
-export function buildPrompt({ brief, delta, host, cwd, branch, planFromTodos, maxBriefChars = 3000, recap = false }) {
+export function buildPrompt({ brief, delta, host, cwd, branch, todosFromSession, maxBriefChars = 3000, recap = false }) {
   const where = [host ? `host ${host}` : null, cwd ? `directory ${cwd}` : null, branch ? `git branch ${branch}` : null].filter(Boolean).join(', ');
-  const current = [`## Summary\n${brief.summary || '(none yet)'}`, planFromTodos ? null : `## Plan\n${brief.planText || '(none yet)'}`]
+  const current = [`## Summary\n${brief.summary || '(none yet)'}`, todosFromSession ? null : `## Todos\n${brief.todosText || '(none yet)'}`]
     .filter(Boolean)
     .join('\n\n');
   const edited = brief.meta?.editedAt ? ' The user edited it by hand: what they wrote is authoritative — keep it, change it only where the conversation clearly moved on.' : '';
@@ -139,9 +148,9 @@ export function buildPrompt({ brief, delta, host, cwd, branch, planFromTodos, ma
     `${recap ? 'The recent conversation' : 'What happened since the brief was last updated'} (user prompts and the assistant's replies, truncated):\n<conversation>\n${delta.text || '(nothing)'}\n</conversation>`,
     'Update the brief: keep what is still true, fix what changed, add what is new. Do not rewrite it from scratch.',
     'Answer with ONLY the following markdown, nothing before or after it:',
-    planFromTodos
+    todosFromSession
       ? '## Summary\n<at most 2 sentences, under 60 words: what exactly the session is doing and where (repo or directory, branch, host), and where it stands now>'
-      : '## Summary\n<at most 2 sentences, under 60 words: what exactly the session is doing and where (repo or directory, branch, host), and where it stands now>\n\n## Plan\n- [x] <done step>\n- [ ] <open step>\n(3–8 short steps in order; keep existing steps and their wording while accurate, tick finished ones, add what comes next)',
+      : '## Summary\n<at most 2 sentences, under 60 words: what exactly the session is doing and where (repo or directory, branch, host), and where it stands now>\n\n## Todos\n- [x] <done todo>\n- [ ] <open todo>\n(3–8 short todos in order; keep existing todos and their wording while accurate, tick finished ones, add what comes next)',
   ];
   return out.join('\n\n');
 }
@@ -234,7 +243,7 @@ export function createBriefs({
     return value;
   }
 
-  /** Fold extracted resources / todo plan into `brief`. → true when its content changed. */
+  /** Fold extracted resources / todos into `brief`. → true when its content changed. */
   function applyExtraction(brief, ext, session, gi) {
     let changed = false;
     const cwd = session?.cwd ?? null;
@@ -246,17 +255,25 @@ export function createBriefs({
       } else items.push({ kind: r.kind, label: r.label, url: r.url });
     }
     items.reverse(); // oldest first: the section reads in the order things happened
-    if (gi?.branch) items.unshift({ kind: 'Branch', path: gi.branch });
-    if (gi?.worktree) items.unshift({ kind: 'Worktree', path: displayPath(gi.worktree, null, home) });
     const merged = mergeResources(brief.resourcesText, items, brief.meta.dismissed ?? []);
     if (merged.added) {
       brief.resourcesText = merged.text;
       changed = true;
     }
-    if (ext?.plan) {
-      const h = shortHash(ext.plan);
+    if (gi?.toplevel) {
+      // One `Git:` line (branch + checkout), replaced in place when either changes.
+      const item = { kind: 'Git', branch: gi.branch, path: displayPath(gi.toplevel, null, home), linked: Boolean(gi.linked ?? gi.worktree) };
+      const g = mergeGit(brief.resourcesText, item, { migrated: brief.meta.git != null, dismissed: brief.meta.dismissed ?? [] });
+      if (g.changed) {
+        brief.resourcesText = g.text;
+        brief.meta.git = formatResource(item);
+        changed = true;
+      }
+    }
+    if (ext?.todos) {
+      const h = shortHash(ext.todos);
       if (h !== brief.meta.todos) {
-        brief.planText = formatPlan(ext.plan);
+        brief.todosText = formatTodos(ext.todos);
         brief.meta.todos = h;
         changed = true;
       }
@@ -289,7 +306,7 @@ export function createBriefs({
       host: self,
       cwd: session.cwd ?? null,
       branch: gi?.branch ?? null,
-      planFromTodos: Boolean(ext.plan),
+      todosFromSession: Boolean(ext.todos),
       maxBriefChars: cfg.maxBriefChars,
       recap,
     });
@@ -322,7 +339,7 @@ export function createBriefs({
     }
     applyExtraction(fresh, ext, session, gi);
     fresh.summary = parsed.summary;
-    if (!ext.plan && parsed.plan) fresh.planText = formatPlan(parsed.plan);
+    if (!ext.todos && parsed.todos) fresh.todosText = formatTodos(parsed.todos);
     fresh.meta.generatedThrough = delta.end;
     fresh.meta.generatedAt = iso(startedAt);
     await save(id, fresh);
@@ -410,8 +427,17 @@ export function createBriefs({
     timer?.unref?.();
   }
 
-  /** What the API serves for one brief. */
-  function view(id, brief, { exists: had, session = null } = {}) {
+  /** The session's directory on this host, absolute (`~` expanded), or null. */
+  function absCwdOf(brief, session) {
+    const c = session?.cwd ?? brief.meta.cwd ?? null;
+    if (typeof c !== 'string' || !c) return null;
+    const abs = c === '~' ? home : c.startsWith('~/') ? path.join(home, c.slice(2)) : c;
+    return path.isAbsolute(abs) ? path.normalize(abs) : null;
+  }
+
+  /** What the API serves for one brief. `editorUrl` is the API layer's (lib/editor.mjs). */
+  function view(id, brief, { exists: had, session = null, absCwd = null, gi = null } = {}) {
+    const resources = brief.resources.map((r) => ({ kind: r.kind, label: r.label, url: r.url, path: r.path, text: r.text, branch: r.branch ?? null, linked: r.linked ?? null }));
     return {
       host: self,
       id,
@@ -419,9 +445,12 @@ export function createBriefs({
       markdown: serializeBrief(brief),
       parsed: {
         summary: brief.summary,
-        resources: brief.resources.map((r) => ({ kind: r.kind, label: r.label, url: r.url, path: r.path, text: r.text })),
-        plan: brief.plan,
+        resources,
+        todos: brief.todos,
+        plan: brief.todos, // deprecated alias of `todos` (the section was `## Plan`); removed in the next API version
       },
+      absCwd,
+      gitRoot: gi?.toplevel ?? null,
       updated: brief.meta.updated ?? null,
       editedAt: brief.meta.editedAt ?? null,
       generatedAt: brief.meta.generatedAt ?? null,
@@ -449,19 +478,18 @@ export function createBriefs({
     /** GET: the stored brief (with fresh no-model extraction when the session is live), or an empty skeleton. */
     async get(id, session = null) {
       let { brief, exists: had } = await load(id);
+      const absCwd = absCwdOf(brief, session);
+      const gi = absCwd && exists(absCwd) ? await gitFor(absCwd) : null;
       if (session) {
-        // Cheap and model-free: bring Resources / Plan up to date for whoever is looking.
+        // Cheap and model-free: bring Resources / Todos up to date for whoever is looking.
         const ext = await extractor.refresh(session).catch(() => null);
-        if (ext) {
-          const gi = await gitFor(session.cwd);
-          if (applyExtraction(brief, ext, session, gi)) {
-            await save(id, brief);
-            had = true;
-            ({ brief } = await load(id));
-          }
+        if (ext && applyExtraction(brief, ext, session, gi)) {
+          await save(id, brief);
+          had = true;
+          ({ brief } = await load(id));
         }
       }
-      return view(id, brief, { exists: had, session });
+      return view(id, brief, { exists: had, session, absCwd, gi });
     },
 
     /** PUT: a human edit. Deleted resource lines are remembered as dismissed. */
@@ -479,7 +507,9 @@ export function createBriefs({
       meta.host = meta.host ?? self;
       await save(id, { ...incoming, meta });
       const { brief } = await load(id);
-      return view(id, brief, { exists: true, session });
+      const absCwd = absCwdOf(brief, session);
+      const gi = absCwd && exists(absCwd) ? await gitFor(absCwd) : null;
+      return view(id, brief, { exists: true, session, absCwd, gi });
     },
 
     /**

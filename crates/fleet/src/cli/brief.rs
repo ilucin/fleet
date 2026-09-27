@@ -15,7 +15,7 @@ use crate::core::brief::{self, Brief, Where};
 use crate::core::config;
 use crate::core::discovery::{self, Session};
 use crate::core::hosts::{self, Remote, Target, Tty};
-use crate::core::tools::shq_min;
+use crate::core::tools::{expand_tilde, shq_min};
 use crate::error::{Error, Result};
 
 /// Exit code for "the brief changed while you were editing it" (nothing saved).
@@ -72,18 +72,38 @@ pub fn resolve(target: &str) -> Result<Source> {
     }
 }
 
-fn place<'a>(src: &'a Source, label: &'a str, me: &'a str) -> Where<'a> {
-    Where {
-        host_label: label,
-        self_name: me,
-        cwd: src.cwd(),
-    }
+/// The git checkout root (repo or linked worktree) containing `dir`, or `None` outside git.
+fn git_root(dir: &str) -> Option<String> {
+    let mut c = std::process::Command::new("git");
+    c.args(["-C", dir, "rev-parse", "--show-toplevel"]);
+    let got = hosts::capture(c, Duration::from_secs(2)).ok()?;
+    let top = got.stdout.trim();
+    (got.code == Some(0) && top.starts_with('/')).then(|| top.to_string())
+}
+
+/// The session's directory on this machine (absolute, `~` expanded) and its git root.
+fn dirs_of(src: &Source, b: &Brief) -> (Option<String>, Option<String>) {
+    let cwd = src.cwd().map(String::from).or_else(|| b.meta_str("cwd"));
+    let abs = cwd.map(|c| expand_tilde(&c)).filter(|c| c.starts_with('/'));
+    let root = abs
+        .as_deref()
+        .filter(|d| std::path::Path::new(d).is_dir())
+        .and_then(git_root);
+    (abs, root)
 }
 
 fn view(src: &Source, b: &Brief, exists: bool) -> Value {
     let label = host_label();
     let me = config::get().self_name();
-    brief::view(&src.id, b, exists, &place(src, &label, &me), &src.path())
+    let (abs, root) = dirs_of(src, b);
+    let w = Where {
+        host_label: &label,
+        self_name: &me,
+        cwd: src.cwd(),
+        abs_cwd: abs.as_deref(),
+        git_root: root.as_deref(),
+    };
+    brief::view(&src.id, b, exists, &w, &src.path())
 }
 
 /// The continue prompt for `src`, as the server builds it: host from the brief, else this
@@ -342,6 +362,92 @@ fn edit_remote(r: &Remote, target: &str, json: bool) -> Result<i32> {
     let _ = std::fs::remove_file(&tmp);
     print!("{}", put.stdout);
     Ok(0)
+}
+
+// ------------------------------------------------------------------ open in the editor
+
+/// The editor command that opens `path`: `code <path>` here, `code --remote ssh-remote+<dest>
+/// <path>` for a directory on another host (`cursor` with `web.editor: "cursor"`).
+pub fn open_command(bin: &str, remote_dest: Option<&str>, path: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(bin);
+    if let Some(dest) = remote_dest {
+        c.args(["--remote", &format!("ssh-remote+{dest}")]);
+    }
+    c.arg(path);
+    c
+}
+
+/// `fleet brief <session> --open`: the session's git root (else its cwd) in VS Code / Cursor —
+/// locally, or through Remote-SSH for a session on another host (its paths come from `fleet
+/// brief --json` there).
+pub fn open(t: &Target, target: &str) -> Result<()> {
+    let (path, dest, label) = match t {
+        Target::Local { .. } => {
+            let src = resolve(target)?;
+            let (b, _) = brief::load(&src.dir, &src.id)?;
+            let (abs, root) = dirs_of(&src, &b);
+            let path = root.or(abs).ok_or_else(|| {
+                Error::Other(format!(
+                    "{}: no directory known for this session",
+                    src.label()
+                ))
+            })?;
+            (path, None, src.label())
+        }
+        Target::Remote(r) => {
+            let fetch = vec!["brief".to_string(), target.to_string(), "--json".into()];
+            let got = if hosts::dry_run() {
+                None
+            } else {
+                Some(hosts::capture_remote(r, &fetch, hosts::remote_timeout())?)
+            };
+            let path = match got {
+                None => {
+                    let c = hosts::ssh_command(
+                        &r.dest,
+                        &hosts::remote_fleet_command(r, &fetch),
+                        Tty::Never,
+                    );
+                    println!("{}", hosts::display_command(&c));
+                    "<gitRoot or absCwd from there>".to_string()
+                }
+                Some(got) if !got.ok() => {
+                    return Err(Error::Other(format!("{}: {}", r.name, got.why(r))));
+                }
+                Some(got) => {
+                    let v: Value = serde_json::from_str(&got.stdout).unwrap_or(Value::Null);
+                    v["gitRoot"]
+                        .as_str()
+                        .or_else(|| v["absCwd"].as_str())
+                        .filter(|p| p.starts_with('/'))
+                        .map(String::from)
+                        .ok_or_else(|| {
+                            Error::Other(format!(
+                                "{}: no absolute directory in `fleet brief --json` — is fleet up to date there? (fleet install --host {})",
+                                r.name, r.name
+                            ))
+                        })?
+                }
+            };
+            (path, Some(r.dest.clone()), target.to_string())
+        }
+    };
+    let bin = config::get().web.editor_command();
+    let mut c = open_command(bin, dest.as_deref(), &path);
+    if hosts::dry_run() {
+        println!("{}", hosts::display_command(&c));
+        return Ok(());
+    }
+    let status = c.status().map_err(|e| {
+        Error::Other(format!(
+            "cannot run `{bin}` ({e}) — put the editor's command on PATH (VS Code: \"Shell Command: Install 'code' command in PATH\")"
+        ))
+    })?;
+    if !status.success() {
+        return Err(Error::Other(format!("`{bin}` failed ({status})")));
+    }
+    println!("opened {} in {bin}: {path}", label.bold());
+    Ok(())
 }
 
 // ------------------------------------------------------------------ regenerate

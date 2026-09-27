@@ -20,10 +20,10 @@ export function parsedShape(b) {
     preamble: b.preamble,
     summary: b.summary,
     resourcesText: b.resourcesText,
-    planText: b.planText,
+    todosText: b.todosText,
     extra: b.extra,
     resources: b.resources,
-    plan: b.plan,
+    todos: b.todos,
   };
 }
 
