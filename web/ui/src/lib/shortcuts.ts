@@ -22,6 +22,7 @@ export type ShortcutAction =
   | 'refresh'
   | 'view'
   | 'rename'
+  | 'notes'
 
 export interface KeyLike {
   key: string
@@ -55,6 +56,7 @@ const G_CHORDS: Record<string, ShortcutAction> = {
   t: 'term',
   g: 'first',
   r: 'refresh',
+  n: 'notes',
 }
 
 const PLAIN: Record<string, ShortcutAction> = {
@@ -168,6 +170,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
     items: [
       { keys: [['['], ['mod', 'B']], label: 'Toggle the sidebar' },
       { keys: [['b']], label: 'Switch List / Board (sessions grouped by work)' },
+      { keys: [['g', 'n']], label: 'Notes explorer (Esc back to the sessions)' },
       { keys: [['i']], label: 'Toggle the details panel (brief: summary, todos, resources)' },
       { keys: [['g', 'r']], label: 'Refresh now' },
       { keys: [['?']], label: 'This help' },

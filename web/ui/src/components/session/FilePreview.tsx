@@ -245,7 +245,7 @@ function Info({ text, host, downloadUrl, name, onOpen }: { text: string; host: s
 }
 
 /** Monospace text with line numbers; `line` is highlighted and scrolled into view. */
-function CodeLines({ text, line }: { text: string; line?: number }) {
+export function CodeLines({ text, line }: { text: string; line?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const lines = useMemo(() => text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n'), [text])
   const shown = lines.length > MAX_LINES ? lines.slice(0, MAX_LINES) : lines

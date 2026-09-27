@@ -61,6 +61,8 @@ export interface Host {
   error?: string
   fetchedAt?: number
   spawnDirs?: SpawnDir[]
+  /** Set when that host's server has a notes explorer (`web.notes.root`). */
+  notes?: { name: string | null }
   sessions: Session[]
 }
 
@@ -93,6 +95,8 @@ export interface Settings {
   uploads?: { maxMB: number | null }
   /** The New session model picker (older servers: absent → lib/models.ts defaults). */
   models?: ModelOption[]
+  /** This server's notes explorer (older servers: absent). */
+  notes?: { enabled: boolean; name?: string | null }
 }
 
 /** POST /api/hosts/:host/uploads — the stored copy on that host. */
@@ -371,4 +375,80 @@ export interface BriefRegenerateResponse {
   started: boolean
   queued: boolean
   generating: true
+}
+
+// --- Notes explorer (GET /api/hosts/:host/notes/*) ------------------------------------------
+
+export type NoteKind = 'markdown' | 'text' | 'image'
+
+export interface NoteEntry {
+  /** Root-relative, `/`-separated. */
+  path: string
+  kind: NoteKind
+  size: number
+  mtime: number
+  /** Markdown: frontmatter `title`, else the first `# heading`, else the file name. */
+  title?: string
+  /** Had age-encrypted blocks (withheld by the server). */
+  encrypted?: boolean
+}
+
+export interface NotesTree {
+  host: string
+  name: string
+  /** Display path (`~/…`). */
+  root: string
+  rootAbs: string
+  searchEngine: 'builtin' | 'command'
+  files: NoteEntry[]
+  truncated: boolean
+  scannedAt: number
+  editorUrl: string | null
+}
+
+export interface NoteMatch {
+  /** 1-based; null when the search command gave no line numbers. */
+  line: number | null
+  text: string
+  /** [start, end) of each match in `text`. */
+  ranges: [number, number][]
+}
+
+export interface NoteHit {
+  path: string
+  kind: NoteKind
+  title: string
+  mtime: number
+  score: number
+  matches: NoteMatch[]
+  more: number
+}
+
+export interface NotesSearch {
+  host: string
+  q: string
+  engine: 'builtin' | 'command'
+  /** The search command failed and the built-in search answered instead. */
+  fallback?: string
+  results: NoteHit[]
+  total: number
+  ms: number
+}
+
+export interface NoteFile {
+  host: string
+  path: string
+  abs: string
+  kind: NoteKind
+  size: number
+  mtime: number
+  title: string
+  encrypted: boolean
+  /** Frontmatter, in file order. */
+  meta: [string, string | string[]][]
+  body: string
+  /** The line `body` starts on. */
+  bodyLine: number
+  text: string
+  editorUrl: string | null
 }

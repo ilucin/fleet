@@ -5,6 +5,7 @@ import type { QuickReply, SessionKey } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { useAttach } from '@/hooks/useAttach'
 import { MAX_SEND_CHARS } from '@/lib/chat'
+import { takeDraft } from '@/lib/drafts'
 import { swipeIntent } from '@/lib/gestures'
 import { cn } from '@/lib/utils'
 
@@ -42,12 +43,14 @@ export interface ComposerProps {
   host: string
   /** Receives `attach(files)`, for drop zones around the composer (the session pane). */
   attachRef?: React.Ref<(files: File[]) => void>
+  /** `host/id`: a draft parked with lib/drafts.ts#setDraft starts the textarea. */
+  draftKey?: string
 }
 
 const MAX_TEXTAREA_PX = 21 * 5 + 22 // ~5 rows + padding
 
-export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef, host, attachRef }: ComposerProps) {
-  const [text, setText] = useState('')
+export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef, host, attachRef, draftKey }: ComposerProps) {
+  const [text, setText] = useState(() => takeDraft(draftKey))
   const ta = useRef<HTMLTextAreaElement>(null)
   useImperativeHandle(inputRef, () => ta.current as HTMLTextAreaElement, [])
   // Dropped / pasted / picked files: uploaded to the session's host, paths typed at the caret.

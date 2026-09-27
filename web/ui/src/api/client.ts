@@ -11,6 +11,9 @@ import type {
   Health,
   KillResponse,
   MessagesResponse,
+  NoteFile,
+  NotesSearch,
+  NotesTree,
   OkResponse,
   PeekResponse,
   RenameResponse,
@@ -140,6 +143,11 @@ export const api = {
   regenerateBrief: (host: string, id: string, o: Opts = {}) =>
     request<BriefRegenerateResponse>(sessionPath(host, id, 'brief/regenerate'), { ...o, method: 'POST', body: {} }),
 
+  notesTree: (host: string, o: Opts = {}) => request<NotesTree>(`${hostPath(host)}/notes/tree`, o),
+  notesSearch: (host: string, q: string, limit = 50, o: Opts = {}) =>
+    request<NotesSearch>(`${hostPath(host)}/notes/search?q=${enc(q)}&limit=${limit}`, o),
+  noteFile: (host: string, path: string, o: Opts = {}) => request<NoteFile>(`${hostPath(host)}/notes/file?path=${enc(path)}`, o),
+
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),
 }
@@ -147,6 +155,11 @@ export const api = {
 /** GET …/files/raw — for <img>, <iframe>, fetch and download links. */
 export function fileRawUrl(host: string, id: string, path: string, { download = false } = {}): string {
   return `${sessionPath(host, id, 'files/raw')}?path=${enc(path)}${download ? '&download=1' : ''}`
+}
+
+/** GET …/notes/raw — an image inside the notes root. */
+export function noteRawUrl(host: string, path: string): string {
+  return `${hostPath(host)}/notes/raw?path=${enc(path)}`
 }
 
 /** A short, human message for a failed session request (peek/messages/send…). */

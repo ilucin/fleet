@@ -4,6 +4,7 @@
 // links. Unknown constructs fall back to plain text. Pure, unit-tested in markdown.test.ts.
 // With `{ files: true }` (chat + the file preview) a relative `[t](docs/a.md)` becomes a `file`
 // node and `![alt](img.png)` an `img` node — never an href: the renderer decides what to do.
+// `{ notes: true }` (the notes explorer) adds `[[wiki links]]`, h4–h6 and drops `<!-- -->` lines.
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -14,10 +15,14 @@ export type Inline =
   /** `[t](rel/path)` — a local file reference; `raw` is the source text (the fallback). */
   | { t: 'file'; href: string; raw: string; children: Inline[] }
   | { t: 'img'; src: string; alt: string; raw: string }
+  /** `[[target]]` / `[[target|label]]` (notes only); `target` may carry `#heading`. */
+  | { t: 'wiki'; target: string; label: string; raw: string }
 
 export interface ParseOptions {
   /** Emit `file` / `img` nodes for local (scheme-less) link targets. */
   files?: boolean
+  /** Notes: `[[wiki]]` nodes, h4–h6 headings (drawn as h3), HTML comment lines dropped. Implies `files`. */
+  notes?: boolean
 }
 
 export interface ListItem {
@@ -36,10 +41,12 @@ export type Block =
 
 const URL_RE = /https?:\/\/[^\s<>"'`…]+/g
 const TRAILING_PUNCT = /[.,;:!?)\]}'"]+$/
-// One alternation, no nested quantifiers: code | **b** | __b__ | [t](u) | *i* | _i_
-const INLINE_RE = /`([^`\n]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\[([^\]\n]*)\]\(([^)\s]*)\)|\*([^*\n]+)\*|_([^_\n]+)_/g
+// One alternation, no nested quantifiers: code | **b** | __b__ | [t](u) | *i* | _i_ | [[wiki]]
+const INLINE_RE = /`([^`\n]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\[([^\]\n]*)\]\(([^)\s]*)\)|\*([^*\n]+)\*|_([^_\n]+)_|\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g
 const ITEM_RE = /^(\s*)(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/
 const HEAD_RE = /^(#{1,3})\s+(.*)$/
+const NOTES_HEAD_RE = /^(#{1,6})\s+(.*)$/
+const COMMENT_RE = /^\s*<!--.*-->\s*$/
 const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/
 const FENCE_RE = /^\s*```(.*)$/
 const QUOTE_RE = /^\s*>/
@@ -85,9 +92,11 @@ function parseInlineWith(str: string, depth: number, opts: ParseOptions): Inline
   if (depth > 3) return linkify(s)
   const out: Inline[] = []
   let last = 0
+  const files = opts.files || opts.notes
   for (const m of s.matchAll(INLINE_RE)) {
     const index = m.index ?? 0
     if (index < last) continue
+    if (m[8] !== undefined && !opts.notes) continue
     // `_snake_case_` inside a word is not emphasis
     if (m[7] !== undefined && index > 0 && /\w/.test(s[index - 1])) continue
     let node: Inline
@@ -97,12 +106,16 @@ function parseInlineWith(str: string, depth: number, opts: ParseOptions): Inline
     else if (m[5] !== undefined) {
       const href = safeHref(m[5])
       if (href) node = { t: 'link', href, children: parseInline(m[4] || href, depth + 1, opts) }
-      else if (opts.files && isLocalHref(m[5])) {
+      else if (files && isLocalHref(m[5])) {
         if (index > last && s[index - 1] === '!') {
           start = index - 1
           node = { t: 'img', src: m[5], alt: m[4], raw: `!${m[0]}` }
         } else node = { t: 'file', href: m[5], raw: m[0], children: parseInline(m[4] || m[5], depth + 1, opts) }
       } else continue // e.g. javascript: — leave the whole construct as text
+    } else if (m[8] !== undefined) {
+      const target = m[8].trim()
+      if (!target) continue
+      node = { t: 'wiki', target, label: (m[9] ?? '').trim() || target.replace(/#.*$/, '') || target, raw: m[0] }
     } else node = { t: 'em', children: parseInline(m[6] ?? m[7], depth + 1, opts) }
     if (start > last) out.push(...linkify(s.slice(last, start)))
     out.push(node)
@@ -112,8 +125,8 @@ function parseInlineWith(str: string, depth: number, opts: ParseOptions): Inline
   return out
 }
 
-const isBlockStart = (line: string) =>
-  FENCE_RE.test(line) || HEAD_RE.test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || ITEM_RE.test(line)
+const isBlockStart = (line: string, notes = false) =>
+  FENCE_RE.test(line) || (notes ? NOTES_HEAD_RE : HEAD_RE).test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || ITEM_RE.test(line)
 
 function isTableSep(line: string | undefined): boolean {
   const s = String(line || '')
@@ -137,7 +150,7 @@ export function parseMarkdown(src: string | null | undefined, opts: ParseOptions
   let i = 0
   while (i < lines.length) {
     const line = lines[i]
-    if (!line.trim()) {
+    if (!line.trim() || (opts.notes && COMMENT_RE.test(line))) {
       i += 1
       continue
     }
@@ -155,9 +168,9 @@ export function parseMarkdown(src: string | null | undefined, opts: ParseOptions
       blocks.push({ t: 'code', lang: fence[1].trim(), text: buf.join('\n') })
       continue
     }
-    const head = HEAD_RE.exec(line)
+    const head = (opts.notes ? NOTES_HEAD_RE : HEAD_RE).exec(line)
     if (head) {
-      blocks.push({ t: 'h', level: head[1].length as 1 | 2 | 3, content: parseInline(head[2].trim()) })
+      blocks.push({ t: 'h', level: Math.min(head[1].length, 3) as 1 | 2 | 3, content: parseInline(head[2].trim()) })
       i += 1
       continue
     }
@@ -211,7 +224,7 @@ export function parseMarkdown(src: string | null | undefined, opts: ParseOptions
         i += 1
         break
       }
-      if (buf.length && (isBlockStart(l) || isTableStart(lines, i))) break
+      if (buf.length && (isBlockStart(l, opts.notes) || isTableStart(lines, i))) break
       buf.push(l)
       i += 1
     }

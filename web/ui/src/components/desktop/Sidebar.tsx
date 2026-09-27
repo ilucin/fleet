@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
-import { CommandIcon, KeyboardIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
+import { CommandIcon, KeyboardIcon, NotebookTextIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import { HostDot } from '@/components/HostBadge'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ViewToggle } from '@/components/ViewToggle'
+import { useNotesHosts } from '@/hooks/useNotes'
 import { ALL_HOSTS, type SessionListState } from '@/hooks/useSessionList'
 import type { ViewMode } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
@@ -218,6 +219,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           <KeyboardIcon /> Shortcuts
           <Kbd className="ml-1">?</Kbd>
         </Button>
+        <NotesLink size="icon-sm" />
         <Button asChild variant="ghost" size="icon-sm" className="text-dimmer hover:text-foreground">
           <a href="#/settings" aria-label="Settings" title="Settings">
             <Settings2Icon />
@@ -266,11 +268,25 @@ export function SidebarRail({
       <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={onHelp} className="mt-auto">
         <KeyboardIcon />
       </Button>
+      <NotesLink />
       <Button asChild variant="ghost" size="icon">
         <a href="#/settings" aria-label="Settings" title="Settings">
           <Settings2Icon />
         </a>
       </Button>
     </div>
+  )
+}
+
+/** Link to the notes explorer; nothing when no host has notes. */
+export function NotesLink({ className, size = 'icon' }: { className?: string; size?: 'icon' | 'icon-sm' }) {
+  const hosts = useNotesHosts()
+  if (!hosts.length) return null
+  return (
+    <Button asChild variant="ghost" size={size} className={cn('text-dimmer hover:text-foreground', className)}>
+      <a href="#/notes" aria-label="Notes" title="Notes (g n)">
+        <NotebookTextIcon />
+      </a>
+    </Button>
   )
 }

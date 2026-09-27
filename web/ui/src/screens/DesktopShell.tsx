@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import {
   CodeXmlIcon,
   CopyIcon,
+  FileTextIcon,
   FilterIcon,
   KanbanIcon,
   KeyboardIcon,
@@ -9,6 +10,7 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
+  NotebookTextIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PencilIcon,
@@ -31,6 +33,7 @@ import { StatusDot } from '@/components/StatusDot'
 import { Kbd } from '@/components/ui/kbd'
 import { useFleet } from '@/hooks/useFleet'
 import { useGroups, useViewMode } from '@/hooks/useGroups'
+import { useNotesHosts, useNotesTree } from '@/hooks/useNotes'
 import { WIDE_QUERY } from '@/hooks/useMediaQuery'
 import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
@@ -40,6 +43,7 @@ import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitle
 import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
+import { notesHref, parseNotesLocation } from '@/lib/notes'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
 import {
   clampFlyoutWidth,
@@ -55,6 +59,7 @@ import {
 import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutAction } from '@/lib/shortcuts'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
+import { NotesScreen } from '@/screens/NotesScreen'
 import { SessionScreen, type PaneApi } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 
@@ -75,6 +80,10 @@ export function DesktopShell() {
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
   const [settingsOpen] = useRoute('/settings')
+  // `#/notes…`: the notes explorer takes the whole window (no sidebar / board).
+  const notesLoc = parseNotesLocation(location)
+  const notesOpen = notesLoc !== null
+  const notesHosts = useNotesHosts()
   const selected = match ? { host: params.host, id: params.id } : null
   const selectedKey = selected ? `${selected.host}/${selected.id}` : null
   const selectedSession = selected ? findSession(fleet, selected.host, selected.id) : null
@@ -126,6 +135,7 @@ export function DesktopShell() {
   const [focusOnOpen, setFocusOnOpen] = useState<string | null>(null)
   const paneRef = useRef<PaneApi | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const notesSearchRef = useRef<HTMLInputElement>(null)
 
   const openSession = useCallback(
     (s: Session, focus: boolean) => {
@@ -156,6 +166,11 @@ export function DesktopShell() {
   }, [focusReq])
 
   const focusSearch = () => {
+    if (notesOpen) {
+      notesSearchRef.current?.focus()
+      notesSearchRef.current?.select()
+      return
+    }
     if (!sidebarOpen && !board) setSidebarRaw('1')
     setFocusReq((r) => ({ to: 'search', n: (r?.n ?? 0) + 1 }))
   }
@@ -182,6 +197,8 @@ export function DesktopShell() {
 
   const run = (action: ShortcutAction, target: HTMLElement | null): boolean => {
     const cur = cursorKey ? byKey.get(cursorKey) : null
+    // The session list isn't on screen in the notes explorer: its keys do nothing there.
+    if (notesOpen && !['search', 'new', 'back', 'blur', 'palette', 'help', 'refresh', 'notes'].includes(action)) return false
     switch (action) {
       case 'next':
         moveCursor(1)
@@ -215,7 +232,7 @@ export function DesktopShell() {
         setNewOpen(true)
         return true
       case 'back':
-        if (selectedKey || settingsOpen) {
+        if (selectedKey || settingsOpen || notesOpen) {
           navigate('/')
           return true
         }
@@ -246,6 +263,9 @@ export function DesktopShell() {
         return true
       case 'refresh':
         refresh()
+        return true
+      case 'notes':
+        navigate(notesOpen ? '/' : notesHref())
         return true
       case 'rename':
         // The open session's header, else the row / card under the cursor.
@@ -333,6 +353,26 @@ export function DesktopShell() {
   const attachCmd = sessionAttachCommand(selectedSession)
   const editorUrl = selectedSession?.editorUrl ?? null
   const editorText = editorLabel(null, editorUrl)
+  // ⌘K jumps to notes too: the first notes host's tree, fetched while the palette is open.
+  const paletteNotesHost = notesLoc?.host ?? notesHosts[0]?.name ?? null
+  const paletteNotes = useNotesTree(paletteOpen ? paletteNotesHost : null).tree
+  const noteItems: PaletteAction[] = useMemo(
+    () =>
+      paletteNotes && paletteNotesHost
+        ? paletteNotes.files
+            .filter((f) => f.kind === 'markdown')
+            .sort((a, b) => b.mtime - a.mtime)
+            .slice(0, 300)
+            .map((f) => ({
+              id: `note-${paletteNotesHost}/${f.path}`,
+              label: f.title ?? f.path,
+              icon: <FileTextIcon />,
+              keywords: ['note', f.path],
+              run: () => navigate(notesHref(paletteNotesHost, f.path)),
+            }))
+        : [],
+    [paletteNotes, paletteNotesHost, navigate],
+  )
   const actions: { heading: string; items: PaletteAction[] }[] = [
     {
       heading: 'Actions',
@@ -370,6 +410,9 @@ export function DesktopShell() {
         ...(editorUrl && editorText
           ? [{ id: 'editor', label: editorText, icon: <CodeXmlIcon />, keywords: ['editor', 'vscode', 'cursor', 'code'], run: () => window.location.assign(editorUrl) }]
           : []),
+        ...(notesHosts.length
+          ? [{ id: 'notes', label: 'Notes…', icon: <NotebookTextIcon />, shortcut: 'G N', keywords: ['notes', 'markdown', 'knowledge', 'wiki', 'search'], run: () => navigate(notesHref()) }]
+          : []),
         {
           id: 'settings',
           label: 'Settings…',
@@ -381,6 +424,7 @@ export function DesktopShell() {
         { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: '?', run: () => setHelpOpen(true) },
       ],
     },
+    { heading: paletteNotes ? `Notes · ${paletteNotes.name} (${paletteNotesHost})` : 'Notes', items: noteItems },
     {
       heading: 'Filter',
       items: STATUS_FILTERS.map((f) => ({
@@ -402,7 +446,7 @@ export function DesktopShell() {
   ]
 
   // Anything but `/`, `/settings` and `/s/:host/:id` → the list (same as mobile).
-  if (!match && !settingsOpen && location !== '/') return <Redirect to="/" replace />
+  if (!match && !settingsOpen && !notesOpen && location !== '/') return <Redirect to="/" replace />
 
   const onSearchNav = (a: 'next' | 'prev' | 'open') => {
     if (a === 'open') {
@@ -430,7 +474,11 @@ export function DesktopShell() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      {board ? (
+      {notesOpen ? (
+        <main className="flex min-w-0 flex-1">
+          <NotesScreen layout="pane" searchRef={notesSearchRef} />
+        </main>
+      ) : board ? (
         <div ref={boardAreaRef} className="relative flex min-w-0 flex-1">
           <section aria-label="Session board" className="flex min-w-0 flex-1">
             <Board
@@ -551,7 +599,7 @@ export function DesktopShell() {
         />
       )}
 
-      {board ? null : (
+      {board || notesOpen ? null : (
         <main className="flex min-w-0 flex-1">
           {pane ?? (
             <EmptyPane

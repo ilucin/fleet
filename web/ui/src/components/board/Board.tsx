@@ -5,6 +5,7 @@ import type { Session } from '@/api/types'
 import { BoardCard } from '@/components/board/BoardCard'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
+import { NotesLink } from '@/components/desktop/Sidebar'
 import { HostDot } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -162,6 +163,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
         <div className="ml-auto flex min-w-0 items-center gap-2">
           <GroupsStatus state={groups} now={now} />
           <span className={cn('hidden truncate text-[0.6875rem] tabular-nums xl:inline', note.error ? 'text-destructive' : 'text-dimmer')}>{note.text}</span>
+          <NotesLink className="shrink-0 text-muted-foreground" />
           <Button asChild variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
             <a href="#/settings" aria-label="Settings" title="Settings">
               <Settings2Icon />

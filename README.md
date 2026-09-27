@@ -108,7 +108,7 @@ fleet tmux stale                        # idle shells nothing is using
 
 There is **no authentication** in the web app. It is meant to be reachable only over your
 tailnet: bind it to the Tailscale interface (or firewall it) and never expose it publicly. Anyone
-who can reach the port can type into your Claude sessions. See
+who can reach the port can type into your Claude sessions (and read the notes under `web.notes.root`, when set). See
 [docs/setup.md#security](docs/setup.md#security).
 
 ## License

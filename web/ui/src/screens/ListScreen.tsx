@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type TouchEvent } from 'react'
-import { PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
+import { NotebookTextIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { GroupedList } from '@/components/board/GroupedList'
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ViewToggle } from '@/components/ViewToggle'
 import { useGroups, useViewMode } from '@/hooks/useGroups'
+import { useNotesHosts } from '@/hooks/useNotes'
 import { useNow } from '@/hooks/useNow'
 import { ALL_HOSTS, useSessionList } from '@/hooks/useSessionList'
 import { boardColumns, effectiveGroups } from '@/lib/groups'
@@ -35,6 +36,7 @@ export function ListScreen() {
   const [newOpen, setNewOpen] = useState(false)
   const [, navigate] = useLocation()
   const [mode, setMode] = useViewMode()
+  const notesHosts = useNotesHosts()
   const board = mode === 'board'
   const groups = useGroups(board)
   const columns = useMemo(
@@ -94,6 +96,13 @@ export function ListScreen() {
           >
             {note.text}
           </span>
+          {notesHosts.length ? (
+            <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
+              <a href="#/notes" aria-label="Notes" title="Notes">
+                <NotebookTextIcon />
+              </a>
+            </Button>
+          ) : null}
           <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
             <a href="#/settings" aria-label="Settings" title="Settings">
               <Settings2Icon />
