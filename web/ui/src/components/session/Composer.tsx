@@ -152,7 +152,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
               title={`Press ${k.label}`}
               className={cn(
                 chipClass,
-                'flex items-center px-3 font-mono text-[13px] text-status-waiting/90 [&_svg]:size-4',
+                'flex items-center px-3 font-mono text-[0.8125rem] text-status-waiting/90 [&_svg]:size-4',
               )}
               disabled={locked || sending}
               onClick={() => onKey(k.key)}
@@ -210,7 +210,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
             autoComplete="off"
             spellCheck={false}
             className={cn(
-              'min-h-11 min-w-0 flex-1 resize-none rounded-[22px] border border-input bg-card px-4 py-[11px] text-base leading-[21px]',
+              'min-h-11 min-w-0 flex-1 resize-none rounded-[22px] border border-input bg-card px-4 py-[0.6875rem] text-base leading-[1.3125rem]',
               'transition-colors outline-none placeholder:text-dimmer focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40',
               'disabled:cursor-not-allowed',
               tooLong && 'border-destructive',

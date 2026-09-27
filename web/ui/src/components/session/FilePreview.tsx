@@ -184,7 +184,7 @@ export function FilePreview({ host, id, file, onClose, desktop = false }: FilePr
                 <FileIcon className="ml-1 size-4 shrink-0 text-dimmer" />
               )}
               <div className="min-w-0 flex-1 pl-1">
-                <DialogTitle className="truncate text-[15px] leading-tight font-semibold">{name}</DialogTitle>
+                <DialogTitle className="truncate text-[0.9375rem] leading-tight font-semibold">{name}</DialogTitle>
                 <DialogDescription className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                   <span className="truncate font-mono" title={cur?.path}>
                     {cur?.rel ?? cur?.path}
@@ -255,7 +255,7 @@ function CodeLines({ text, line }: { text: string; line?: number }) {
   }, [line, text])
   const width = String(shown.length).length
   return (
-    <div ref={ref} className="min-w-max py-2 font-mono text-[12.5px] leading-5">
+    <div ref={ref} className="min-w-max py-2 font-mono text-[0.78125rem] leading-5">
       {shown.map((l, i) => (
         <div key={i} data-line={i + 1} className={cn('flex', i + 1 === line && 'bg-status-waiting/15')}>
           <span

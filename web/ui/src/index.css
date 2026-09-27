@@ -173,6 +173,14 @@
   }
 }
 
+/* The Small text size (lib/prefs.ts) puts 1rem fields under 16px: keep them at 16px on touch
+   screens, or iOS Safari zooms on focus. Unlayered, so it wins over the text-base utility. */
+@media (pointer: coarse) {
+  html[data-text-size="13"] :is(input, textarea).text-base {
+    font-size: 16px;
+  }
+}
+
 /* Typing indicator: three dots pulsing in turn. */
 @keyframes fleet-dot {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }

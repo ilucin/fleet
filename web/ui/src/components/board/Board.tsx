@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
-import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
 import { BoardCard } from '@/components/board/BoardCard'
@@ -133,7 +133,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
           {STATUS_FILTERS.map((f) => (
             <ToggleGroupItem key={f.id} value={f.id} className={chip}>
               {f.label}
-              <span className="text-[11px] text-dimmer tabular-nums group-data-[state=on]/toggle:text-accent-foreground/70">
+              <span className="text-[0.6875rem] text-dimmer tabular-nums group-data-[state=on]/toggle:text-accent-foreground/70">
                 {fleet ? lv.counts[f.id] : ''}
               </span>
             </ToggleGroupItem>
@@ -149,7 +149,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
               <ToggleGroupItem key={h.name} value={h.name} className={chip}>
                 <HostDot host={h.name} />
                 <span className={cn(h.ok === false && 'text-destructive')}>{h.name}</span>
-                <span className="text-[11px] text-dimmer tabular-nums">{h.ok === false ? '!' : (hostCounts.get(h.name) ?? 0)}</span>
+                <span className="text-[0.6875rem] text-dimmer tabular-nums">{h.ok === false ? '!' : (hostCounts.get(h.name) ?? 0)}</span>
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -157,7 +157,12 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
 
         <div className="ml-auto flex min-w-0 items-center gap-2">
           <GroupsStatus state={groups} now={now} />
-          <span className={cn('hidden truncate text-[11px] tabular-nums xl:inline', note.error ? 'text-destructive' : 'text-dimmer')}>{note.text}</span>
+          <span className={cn('hidden truncate text-[0.6875rem] tabular-nums xl:inline', note.error ? 'text-destructive' : 'text-dimmer')}>{note.text}</span>
+          <Button asChild variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
+            <a href="#/settings" aria-label="Settings" title="Settings">
+              <Settings2Icon />
+            </a>
+          </Button>
           <Button size="icon" aria-label="New session" title="New session (c)" onClick={onNew} className="shrink-0 rounded-full">
             <PlusIcon />
           </Button>
@@ -205,9 +210,9 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
                 <div className="flex min-w-0 items-center gap-2">
                   <h2 className={cn('min-w-0 flex-1 truncate text-sm font-semibold', c.ungrouped && 'text-muted-foreground')}>{c.label}</h2>
                   <StatusSummaryDots summary={c.summary} />
-                  <span className="rounded-md bg-muted px-1.5 text-[11px] text-muted-foreground tabular-nums">{c.sessions.length}</span>
+                  <span className="rounded-md bg-muted px-1.5 text-[0.6875rem] text-muted-foreground tabular-nums">{c.sessions.length}</span>
                 </div>
-                {c.description ? <p className="mt-0.5 line-clamp-2 text-[11px] text-dimmer">{c.description}</p> : null}
+                {c.description ? <p className="mt-0.5 line-clamp-2 text-[0.6875rem] text-dimmer">{c.description}</p> : null}
               </header>
               <div className="flex min-h-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2">
                 {c.sessions.map((s) => {

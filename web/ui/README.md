@@ -55,6 +55,10 @@ src/
   lib/layout.ts       sidebar width bounds + clampSidebarWidth()
   lib/gestures.ts     touch gestures: swipeIntent() (composer chips), pullIntent() (list filter drawer),
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
+  lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
+                      font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
+  lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
+                      (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
   lib/storage.ts      localStorage that never throws
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
@@ -74,24 +78,26 @@ src/
                       per-session stat cache, debounced batched POST …/files/stat
   hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
-  hooks/useSettings.ts, useTheme.ts, useNow.ts, usePersistentState.ts
-  providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider
+  hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
+  providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
+                      PrefsProvider (text size → <html> font-size, terminal text, progress notes)
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
-  components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, SessionMenu (drawer) /
-                      SessionMenuBody (also the desktop details panel), BriefPanel / BriefDrawer, LatestButton
+  components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, DetailsPanel (the desktop
+                      details column) / DetailsDrawer (mobile ⋯), BriefSection (its top), LatestButton
   components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
+                      SettingsScreen (`#/settings`; `layout="pane"` on desktop),
                       DesktopShell (≥ lg master–detail + the keyboard handler)
   App.tsx             providers + wouter hash router; picks DesktopShell or the mobile screens
 ```
 
 ## Conventions
 
-- **Routing**: wouter with hash location, same URLs as the classic UI (`#/`, `#/s/<host>/<id>`),
+- **Routing**: wouter with hash location, same URLs as the classic UI (`#/`, `#/s/<host>/<id>`; plus `#/settings`),
   so no server SPA fallback is needed and old bookmarks/PWA installs keep working.
 - **Data**: one `FleetProvider` polls `/api/fleet` for the whole app; screens read it with
   `useFleet()` (`fleet`, `fleetAt`, `error`, `refreshing`, `refresh()`, `applyFleet()`).
@@ -101,7 +107,11 @@ src/
   plus `dimmer`, `status-{waiting,busy,idle,unknown,error}` and `host-{0..3}`. Use them as Tailwind
   classes (`text-status-busy`, `bg-host-2/10`); keep class names literal (maps in `lib/styles.ts`).
   Dark is the default; light only when the OS prefers it or `fleet.theme` = `light`.
-- **Mobile**: ≥ 44px tap targets, inputs ≥ 16px (no iOS zoom), `pt-safe`/`pb-safe`/`px-safe` on an
+- **Text size**: the Settings text size scales the root font-size, so size things in rem (Tailwind's
+  scale, or `text-[0.8125rem]`, not `text-[13px]`); px only for hairlines and fixed chrome. Check
+  390px at both Small and Large.
+- **Mobile**: ≥ 44px tap targets, inputs ≥ 16px (no iOS zoom; index.css keeps `text-base` fields at
+  16px on touch screens at the Small size), `pt-safe`/`pb-safe`/`px-safe` on an
   outer wrapper (they set padding, so put spacing on an inner element), `min-h-app`/`h-app` for
   full-height screens.
 - **Desktop vs mobile**: `App` renders `DesktopShell` at ≥ 1024px (`useIsDesktop()`), else the
@@ -199,11 +209,28 @@ src/
   line numbers (the line highlighted and scrolled to; first 20k lines), image, PDF (iframe),
   else / over 5 MB an info panel with Download and Open. Markdown safety is unchanged: file
   nodes exist only with `parseMarkdown(text, { files: true })` and render as buttons.
-- **⋯ menu** (drawer): Chat/Terminal, progress notes (`fleet.chatHideNotes`), scrollback
-  (`fleet.termLines`), text size (`fleet.chatFont` / `fleet.termFont`), theme (`fleet.theme`),
-  Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
+- **⋯ → Details** (drawer, the same content as the desktop details column): name, host · cwd,
+  context, **Open in VS Code / Cursor** (`editorUrl`, a plain `vscode://` / `cursor://` link; hidden
+  on touch screens), the **brief** (below), Chat/Terminal, scrollback (`fleet.termLines`), a link
+  to Settings, Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
   session details (tmux, backend, pid, id), Close session (two taps within 5s → `api.kill`, back
   to the list, row dropped optimistically).
+- **Brief** (top of Details; web/ARCHITECTURE.md → Session briefs): "updated 3m ago · edited",
+  Regenerate, Edit (the body markdown in a textarea; ⌘/Ctrl+Enter saves, Esc cancels — in the
+  drawer Esc cancels the edit, not the drawer); Summary; **Todos** with clickable checkboxes and
+  `3/7` (checked items are muted, not struck through; toggling rewrites that line of `## Todos`,
+  or of a legacy `## Plan`, and PUTs the body); Resources grouped Git (one row: branch · worktree
+  / repo + path; legacy Branch / Worktree rows too), Pull requests, Issues, Artifacts, Specs,
+  Links, Files (collapsed by default with a count; `fleet.briefFilesOpen`), Notes — files open the
+  preview, URLs a new tab; **Continue in new session** (the New session form prefilled with the
+  host, the session's cwd and `continuePrompt`, caret at the end). GET while Details is open,
+  every 30s, every 2.5s while generating.
+- **Settings** (`#/settings`: the gear in the list header on mobile, the sidebar footer / rail and
+  the board header on desktop, ⌘K → Settings…, Details → Settings): Text size (Small / Default /
+  Large = chat at 13 / 15 / 17px, `fleet.chatFont`) scales the **whole** UI via the `<html>`
+  font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
+  it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`). Per
+  viewer (localStorage), for every session.
 - **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;
   `index.html` sets theme-color (kept in sync with the theme), apple-mobile-web-app meta,
   `viewport-fit=cover` and `interactive-widget=resizes-content`. No service worker (the app is
@@ -229,18 +256,10 @@ session in the pane), so a link opens the same session on either layout.
   card (or j/k + Enter / o, walking the columns left to right) opens the session in the normal
   pane to the right of the board (`#/s/<host>/<id>`, same route as the list), with the board
   still visible and scrollable beside it; Esc closes the pane. `[` does nothing on the board.
-- **Details panel** (right, `i` or the header button; `fleet.inspector`, open by default from
-  1440px): name, host · cwd, context meter + model, view settings (chat/terminal, notes,
-  scrollback, text size, theme), auto-name, tmux/backend/pid/id, Close session (click twice) —
-  the mobile ⋯ menu's content (`SessionMenuBody`).
-- **Brief panel** (right, `p` or the header button; `fleet.briefPanel`, closed by default): the
-  session brief (see web/ARCHITECTURE.md → Session briefs) — summary, plan with clickable
-  checkboxes and `3/7`, resources grouped by kind (files open the file preview, URLs a new tab),
-  Regenerate, Edit (the body markdown in a textarea; ⌘/Ctrl+Enter saves, Esc cancels) and
-  **Continue in new session** (the New session form prefilled with the host, the session's cwd
-  and the brief's `continuePrompt`, caret at the end). It takes the details panel's place while
-  open; `i` switches back. GET on open, every 30s while open, every 2.5s while generating.
-  Mobile: the same content as a bottom sheet from the ⋯ menu (**Brief**).
+- **Details panel** (right, `i`, the header button or ⌘K; ✕ top-right closes it; `fleet.inspector`,
+  open by default from 1440px): the mobile ⋯ drawer's content (`DetailsPanel`) — the brief first
+  (summary, todos, resources, continue), then chat/terminal, scrollback, auto-name,
+  tmux/backend/pid/id, Close session (click twice).
 - **New session**: the mobile form in a dialog. Toasts sit bottom-right, above the composer.
 - **Polling** is unchanged: one `/api/fleet` loop (FleetProvider, 5s) feeds the sidebar and the
   pane's status; the pane runs exactly one messages (3s) or peek (2s) loop. The tab title is
@@ -262,11 +281,10 @@ open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through
 | `c`, `n` | new session |
 | `g c`, `g t` | chat / terminal view |
 | `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
-| `Esc` | leave the field; otherwise close the pane (`#/`) |
+| `Esc` | leave the field; otherwise close the pane or Settings (`#/`) |
 | `[`, ⌘/Ctrl+`B` | toggle the sidebar |
 | `b` | switch List / Board |
-| `i` | toggle the details panel |
-| `p` | toggle the brief panel |
+| `i` | toggle the details panel (brief + session details) |
 | `g r` | refresh now |
-| ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions, filters, theme |
+| ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions (Settings…, Open in VS Code), filters, theme |
 | `?` | shortcuts help |

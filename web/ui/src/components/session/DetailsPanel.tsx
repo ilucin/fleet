@@ -1,30 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  AArrowDownIcon,
-  AArrowUpIcon,
+  CodeXmlIcon,
   CopyIcon,
   Loader2Icon,
   MessageSquareTextIcon,
-  MonitorIcon,
-  MoonIcon,
-  NotebookTextIcon,
   PencilIcon,
   PowerIcon,
+  Settings2Icon,
   SparklesIcon,
   SquareTerminalIcon,
-  SunIcon,
+  XIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, sessionErrorMessage } from '@/api/client'
 import type { AutoNameRun, Session } from '@/api/types'
+import { BriefSection, type BriefSectionProps } from '@/components/session/BriefSection'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
-import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useSessionTitle } from '@/hooks/useTitles'
-import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
 import { autoNameSummary, autoNameToast } from '@/lib/autoname'
+import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import type { DetailMode } from '@/lib/chat'
 import { ctxLevel, ctxSummary, relTime, shortCwd } from '@/lib/format'
@@ -35,7 +32,7 @@ import { cn } from '@/lib/utils'
 // through the proxy, so for peers this is only what "Run now" returned).
 const lastRuns = new Map<string, AutoNameRun>()
 
-export interface SessionMenuProps {
+export interface DetailsPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   host: string
@@ -44,23 +41,22 @@ export interface SessionMenuProps {
   isSelfHost: boolean
   mode: DetailMode
   onMode: (m: DetailMode) => void
-  hideNotes: boolean
-  onHideNotes: (v: boolean) => void
-  fontSize: number
-  fontSizes: readonly number[]
-  onFont: (dir: 1 | -1) => void
   termLines: number
   onTermLines: (n: number) => void
   /** Called after a successful close (navigate away). */
   onClosed: () => void
   /** Open the inline title editor in the header (absent: no session to rename). */
   onRename?: () => void
-  /** Mobile: open the brief sheet (absent: the desktop has its own brief column). */
-  onBrief?: () => void
+  /** The brief at the top of the panel. */
+  brief: Omit<BriefSectionProps, 'desktop' | 'cancelEditRef'>
+  /** "Open in VS Code / Cursor" for the session's checkout (Brief.editorUrl, else the fleet row's). */
+  editor?: { url: string | null | undefined; kind?: string | null }
+  /** Desktop panel: the ✕ in the top-right corner. */
+  onClose?: () => void
 }
 
 const segItem =
-  'h-9 flex-1 gap-1.5 rounded-md px-3 text-[13px] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-accent'
+  'h-9 flex-1 gap-1.5 rounded-md px-3 text-[0.8125rem] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-accent'
 
 function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
@@ -77,32 +73,40 @@ function Row({ label, hint, children }: { label: string; hint?: ReactNode; child
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="py-1">
-      <h3 className="pt-2 pb-1 text-[11px] font-semibold tracking-wider text-dimmer uppercase">{title}</h3>
+      <h3 className="pt-2 pb-1 text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">{title}</h3>
       <div className="divide-y divide-border/60">{children}</div>
     </section>
   )
 }
 
-/** ⋯ on mobile: the session menu as a bottom drawer. */
-export function SessionMenu(p: SessionMenuProps) {
+/** ⋯ on mobile: the Details panel as a bottom drawer. Esc while editing the brief cancels the edit, not the drawer. */
+export function DetailsDrawer(p: DetailsPanelProps) {
+  const cancelEdit = useRef<(() => void) | null>(null)
   // Closing the drawer unmounts the body, which disarms "Close session".
   return (
     <Drawer open={p.open} onOpenChange={p.onOpenChange}>
-      <DrawerContent className="px-safe">
-        <SessionMenuBody {...p} variant="drawer" />
+      <DrawerContent
+        className="px-safe"
+        onEscapeKeyDown={(e) => {
+          if (!cancelEdit.current) return
+          e.preventDefault()
+          cancelEdit.current()
+        }}
+      >
+        <DetailsPanel {...p} variant="drawer" cancelEditRef={cancelEdit} />
       </DrawerContent>
     </Drawer>
   )
 }
 
 /**
- * The menu's content: header (name, host · cwd, context), View, Session (auto-name,
- * details, close). `drawer` = inside the mobile drawer; `panel` = the desktop details
- * column (always open, click-to-confirm wording, no drawer chrome).
+ * Details: header (name, host · cwd, context, open in editor), the Brief (summary, todos,
+ * resources, continue), View (chat / terminal, scrollback, → Settings), Session (rename,
+ * attach, auto-name, ids, close). `drawer` = inside the mobile drawer; `panel` = the desktop
+ * details column (click-to-confirm wording, ✕ to close, no drawer chrome).
  */
-export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'panel' }) {
+export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel'; cancelEditRef?: React.RefObject<(() => void) | null> }) {
   const panel = p.variant === 'panel'
-  const { theme, setTheme } = useTheme()
   const [lastRun, setLastRun] = useState<AutoNameRun | null>(() => lastRuns.get(p.host) ?? null)
   const [autoName, setAutoName] = useState<{ enabled: boolean; intervalMinutes: number } | null>(null)
   const [naming, setNaming] = useState(false)
@@ -186,6 +190,8 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
         : 'scheduled runs off'
       : `on ${p.host}`
 
+  const editorText = editorLabel(p.editor?.kind, p.editor?.url)
+
   const Header = panel ? 'div' : DrawerHeader
   const Title = panel ? 'h2' : DrawerTitle
   const Description = panel ? 'p' : DrawerDescription
@@ -198,26 +204,37 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
               : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]'
           }
         >
-          <Header className={panel ? 'flex flex-col gap-0.5 pt-3 pb-1 text-left' : 'px-0 pt-3 pb-1 text-left'}>
-            <Title className="truncate text-left text-base font-semibold">{s ? title : p.id.slice(0, 8)}</Title>
-            <Description className={cn('truncate text-left font-mono text-xs', panel && 'text-muted-foreground')} title={panel ? (s?.cwd ?? undefined) : undefined}>
-              {[p.host, s?.cwd ? shortCwd(s.cwd, 60) : null].filter(Boolean).join(' · ')}
-            </Description>
-            {s?.context ? (
-              <p className={cn('truncate text-left text-xs tabular-nums', CTX_TEXT[ctxLevel(s.context.pct)])}>
-                Context {ctxSummary(s.context)}
-                {s.context.model ? <span className="text-dimmer"> · {s.context.model}</span> : null}
-              </p>
+          <Header className={panel ? 'flex flex-row items-start gap-1 pt-3 pb-1 text-left' : 'flex flex-row items-start gap-1 px-0 pt-3 pb-1 text-left'}>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <Title className="truncate text-left text-base font-semibold">{s ? title : p.id.slice(0, 8)}</Title>
+              <Description className={cn('truncate text-left font-mono text-xs', panel && 'text-muted-foreground')} title={panel ? (s?.cwd ?? undefined) : undefined}>
+                {[p.host, s?.cwd ? shortCwd(s.cwd, 60) : null].filter(Boolean).join(' · ')}
+              </Description>
+              {s?.context ? (
+                <p className={cn('truncate text-left text-xs tabular-nums', CTX_TEXT[ctxLevel(s.context.pct)])}>
+                  Context {ctxSummary(s.context)}
+                  {s.context.model ? <span className="text-dimmer"> · {s.context.model}</span> : null}
+                </p>
+              ) : null}
+            </div>
+            {panel && p.onClose ? (
+              <Button variant="ghost" size="icon" aria-label="Close details" title="Close (i)" onClick={p.onClose} className="-mr-2 size-10 shrink-0 rounded-xl">
+                <XIcon className="size-[1.125rem]" />
+              </Button>
             ) : null}
           </Header>
 
-          {p.onBrief ? (
-            <Button variant="outline" className="mt-2 mb-1 h-11 w-full justify-start rounded-xl px-3 text-sm" onClick={p.onBrief}>
-              <NotebookTextIcon />
-              Brief
-              <span className="truncate font-normal text-dimmer">summary, plan, resources</span>
+          {/* A desktop editor link makes no sense on a phone: hidden on touch-first screens. */}
+          {editorText && p.editor?.url ? (
+            <Button asChild variant="outline" className="mt-2 mb-1 h-9 w-full justify-start rounded-lg px-3 text-sm pointer-coarse:hidden">
+              <a href={p.editor.url} title={p.editor.url}>
+                <CodeXmlIcon />
+                {editorText}
+              </a>
             </Button>
           ) : null}
+
+          <BriefSection {...p.brief} desktop={panel} cancelEditRef={p.cancelEditRef} />
 
           <Section title="View">
             <div className="py-2">
@@ -237,11 +254,7 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
                 </ToggleGroupItem>
               </ToggleGroup>
             </div>
-            {p.mode === 'chat' ? (
-              <Row label="Progress notes" hint="Narration between tool calls">
-                <Switch checked={!p.hideNotes} onCheckedChange={(v) => p.onHideNotes(!v)} aria-label="Show progress notes" />
-              </Row>
-            ) : (
+            {p.mode === 'term' ? (
               <Row label="Scrollback" hint="Lines captured from the pane">
                 <ToggleGroup
                   type="single"
@@ -257,47 +270,14 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
                   ))}
                 </ToggleGroup>
               </Row>
-            )}
-            <Row label="Text size" hint={p.mode === 'chat' ? 'Conversation' : 'Terminal'}>
-              <Button
-                variant="outline"
-                size="icon-lg"
-                aria-label="Smaller text"
-                disabled={p.fontSize === p.fontSizes[0]}
-                onClick={() => p.onFont(-1)}
-              >
-                <AArrowDownIcon />
+            ) : null}
+            <Row label="Settings" hint="Text size, theme, progress notes">
+              <Button asChild variant="outline" className="h-9 px-3">
+                <a href="#/settings">
+                  <Settings2Icon />
+                  Open
+                </a>
               </Button>
-              <span className="w-10 text-center text-xs text-muted-foreground tabular-nums">{p.fontSize}px</span>
-              <Button
-                variant="outline"
-                size="icon-lg"
-                aria-label="Larger text"
-                disabled={p.fontSize === p.fontSizes[p.fontSizes.length - 1]}
-                onClick={() => p.onFont(1)}
-              >
-                <AArrowUpIcon />
-              </Button>
-            </Row>
-            <Row label="Theme">
-              <ToggleGroup
-                type="single"
-                value={theme}
-                onValueChange={(v) => v && setTheme(v as ThemeChoice)}
-                spacing={0}
-                aria-label="Theme"
-                className="rounded-lg bg-muted p-1"
-              >
-                <ToggleGroupItem value="system" aria-label="System theme" className={cn(segItem, 'h-8 flex-none px-2.5')}>
-                  <MonitorIcon />
-                </ToggleGroupItem>
-                <ToggleGroupItem value="dark" aria-label="Dark theme" className={cn(segItem, 'h-8 flex-none px-2.5')}>
-                  <MoonIcon />
-                </ToggleGroupItem>
-                <ToggleGroupItem value="light" aria-label="Light theme" className={cn(segItem, 'h-8 flex-none px-2.5')}>
-                  <SunIcon />
-                </ToggleGroupItem>
-              </ToggleGroup>
             </Row>
           </Section>
 

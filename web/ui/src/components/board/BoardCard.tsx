@@ -54,10 +54,10 @@ export function BoardCard({ session: s, now, selected, cursor, onOpen }: BoardCa
       <div className="flex min-w-0 items-center gap-2">
         <StatusDot status={s.status} className="size-2" />
         <EditableTitle session={s} scope="card" className="text-sm font-semibold" />
-        <HostBadge host={s.host} className="h-4.5 px-1 text-[10px]" />
+        <HostBadge host={s.host} className="h-4.5 px-1 text-[0.625rem]" />
       </div>
       {subtitle ? <p className="mt-1 line-clamp-2 text-xs break-words text-muted-foreground">{subtitle}</p> : null}
-      <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[11px] text-dimmer">
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[0.6875rem] text-dimmer">
         <span className={cn('min-w-0 truncate', STATUS_TEXT[meta.key])}>{statusLabel(s)}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           <ContextMeter context={s.context} />

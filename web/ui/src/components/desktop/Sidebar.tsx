@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
-import { CommandIcon, KeyboardIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { CommandIcon, KeyboardIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import { HostDot } from '@/components/HostBadge'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
@@ -92,7 +92,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
             </div>
           ) : null}
           <span
-            className={cn('ml-auto truncate text-right text-[11px] tabular-nums', note.error ? 'text-destructive' : 'text-dimmer')}
+            className={cn('ml-auto truncate text-right text-[0.6875rem] tabular-nums', note.error ? 'text-destructive' : 'text-dimmer')}
             aria-live="polite"
           >
             {note.text}
@@ -149,7 +149,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           {STATUS_FILTERS.map((f) => (
             <ToggleGroupItem key={f.id} value={f.id} className={chip}>
               {f.label}
-              <span className="text-[11px] text-dimmer tabular-nums group-data-[state=on]/toggle:text-accent-foreground/70">
+              <span className="text-[0.6875rem] text-dimmer tabular-nums group-data-[state=on]/toggle:text-accent-foreground/70">
                 {fleet ? view.counts[f.id] : ''}
               </span>
             </ToggleGroupItem>
@@ -171,7 +171,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
               <ToggleGroupItem key={h.name} value={h.name} className={chip}>
                 <HostDot host={h.name} />
                 <span className={cn(h.ok === false && 'text-destructive')}>{h.name}</span>
-                <span className="text-[11px] text-dimmer tabular-nums">{h.ok === false ? '!' : (hostCounts.get(h.name) ?? 0)}</span>
+                <span className="text-[0.6875rem] text-dimmer tabular-nums">{h.ok === false ? '!' : (hostCounts.get(h.name) ?? 0)}</span>
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -218,6 +218,11 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           <KeyboardIcon /> Shortcuts
           <Kbd className="ml-1">?</Kbd>
         </Button>
+        <Button asChild variant="ghost" size="icon-sm" className="text-dimmer hover:text-foreground">
+          <a href="#/settings" aria-label="Settings" title="Settings">
+            <Settings2Icon />
+          </a>
+        </Button>
       </div>
     </div>
   )
@@ -260,6 +265,11 @@ export function SidebarRail({
       ) : null}
       <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={onHelp} className="mt-auto">
         <KeyboardIcon />
+      </Button>
+      <Button asChild variant="ghost" size="icon">
+        <a href="#/settings" aria-label="Settings" title="Settings">
+          <Settings2Icon />
+        </a>
       </Button>
     </div>
   )

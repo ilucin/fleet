@@ -60,10 +60,10 @@ export function CommandPalette({ open, onOpenChange, sessions, selectedKey, onOp
                       <StatusDot status={s.status} className="size-2" />
                       <span className="min-w-0 flex-1 truncate">
                         <span className="font-medium">{sessionTitle(s)}</span>
-                        {s.cwd ? <span className="ml-2 font-mono text-[11px] text-dimmer">{shortCwd(s.cwd, 40)}</span> : null}
+                        {s.cwd ? <span className="ml-2 font-mono text-[0.6875rem] text-dimmer">{shortCwd(s.cwd, 40)}</span> : null}
                       </span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">{statusLabel(s)}</span>
-                      <HostBadge host={s.host} className="h-4 px-1 text-[10px]" />
+                      <span className="shrink-0 text-[0.6875rem] text-muted-foreground">{statusLabel(s)}</span>
+                      <HostBadge host={s.host} className="h-4 px-1 text-[0.625rem]" />
                       {key === selectedKey ? <CommandShortcut>open</CommandShortcut> : null}
                     </CommandItem>
                   )

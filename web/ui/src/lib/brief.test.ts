@@ -2,27 +2,27 @@ import { describe, expect, test } from 'vitest'
 
 import type { BriefResource } from '@/api/types'
 
-import { briefBody, briefTime, continueDraft, groupResources, planProgress, retryMinutes, setPlanItem } from './brief'
+import { briefBody, briefTime, briefTodos, continueDraft, editorLabel, gitLine, groupResources, retryMinutes, setTodoItem, todoProgress } from './brief'
 
 const md = `---
 session: 0000-aaaa
 updated: 2026-01-02T03:04:05.000Z
 ---
 ## Summary
-Fixing the login loop; see - [ ] not a plan item here.
+Fixing the login loop; see - [ ] not a todo here.
 
 ## Resources
 - Branch: \`fix-login\`
 - [ ] odd resource line
 
-## Plan
+## Todos
 - [x] reproduce the loop
 * [ ] fix the redirect (in progress)
 text between
 - [X] write a test
 
 ## Notes
-- [ ] not in the plan either
+- [ ] not in the todos either
 `
 
 describe('briefBody', () => {
@@ -33,38 +33,53 @@ describe('briefBody', () => {
   })
 })
 
-describe('setPlanItem', () => {
-  test('toggles the nth checkbox of ## Plan only', () => {
-    const out = setPlanItem(md, 1, true)!
+describe('setTodoItem', () => {
+  test('toggles the nth checkbox of ## Todos only', () => {
+    const out = setTodoItem(md, 1, true)!
     expect(out).toContain('* [x] fix the redirect (in progress)')
-    // Everything else is untouched: other sections' checkboxes, other plan items, free text.
+    // Everything else is untouched: other sections' checkboxes, other todos, free text.
     expect(out).toContain('- [ ] odd resource line')
-    expect(out).toContain('- [ ] not in the plan either')
+    expect(out).toContain('- [ ] not in the todos either')
     expect(out).toContain('- [x] reproduce the loop')
     expect(out).toContain('text between')
     expect(out).not.toContain('session: 0000-aaaa')
   })
 
   test('unchecks (also an upper-case X) and indexes past free text', () => {
-    expect(setPlanItem(md, 2, false)).toContain('- [ ] write a test')
-    expect(setPlanItem(md, 0, false)).toContain('- [ ] reproduce the loop')
+    expect(setTodoItem(md, 2, false)).toContain('- [ ] write a test')
+    expect(setTodoItem(md, 0, false)).toContain('- [ ] reproduce the loop')
   })
 
   test('headings are case-insensitive; a missing item is null', () => {
-    expect(setPlanItem('## plan\n- [ ] a\n', 0, true)).toBe('## plan\n- [x] a\n')
-    expect(setPlanItem(md, 3, true)).toBeNull()
-    expect(setPlanItem('## Summary\n- [ ] a\n', 0, true)).toBeNull()
+    expect(setTodoItem('## todos\n- [ ] a\n', 0, true)).toBe('## todos\n- [x] a\n')
+    expect(setTodoItem(md, 3, true)).toBeNull()
+    expect(setTodoItem('## Summary\n- [ ] a\n', 0, true)).toBeNull()
+  })
+
+  test('a legacy ## Plan section counts as Todos, in file order', () => {
+    expect(setTodoItem('## Plan\n- [ ] a\n', 0, true)).toBe('## Plan\n- [x] a\n')
+    const both = '## Todos\n- [ ] a\n\n## Notes\n- [ ] n\n\n## Plan\n- [ ] b\n'
+    expect(setTodoItem(both, 1, true)).toBe('## Todos\n- [ ] a\n\n## Notes\n- [ ] n\n\n## Plan\n- [x] b\n')
+    expect(setTodoItem(both, 2, true)).toBeNull()
   })
 
   test('toggling twice builds on the previous result', () => {
-    const once = setPlanItem(md, 1, true)!
-    const twice = setPlanItem(once, 0, false)!
+    const once = setTodoItem(md, 1, true)!
+    const twice = setTodoItem(once, 0, false)!
     expect(twice).toContain('- [ ] reproduce the loop')
     expect(twice).toContain('* [x] fix the redirect')
   })
 })
 
 const res = (kind: string | null, label: string): BriefResource => ({ kind, label, url: null, path: label, text: label })
+
+test('briefTodos prefers todos, falls back to the deprecated plan', () => {
+  const a = [{ done: true, text: 'a' }]
+  const b = [{ done: false, text: 'b' }]
+  expect(briefTodos({ todos: a, plan: b })).toEqual(a)
+  expect(briefTodos({ plan: b })).toEqual(b)
+  expect(briefTodos(null)).toEqual([])
+})
 
 describe('groupResources', () => {
   test('groups by kind in display order, notes last, order kept inside a group', () => {
@@ -75,11 +90,21 @@ describe('groupResources', () => {
       res('PR', 'p1'),
       res('Future', 'x'),
       res('File', 'f2'),
+      res('Spec', 's1'),
+      res('Artifact', 'a1'),
+      res('Worktree', 'w1'),
+      res('Git', 'g1'),
+      res('Issue', 'i1'),
     ])
     expect(groups.map((g) => [g.kind, g.label, g.items.map((i) => i.label)])).toEqual([
+      ['Git', 'Git', ['g1']],
+      ['Worktree', 'Worktree', ['w1']],
       ['PR', 'Pull requests', ['p1']],
-      ['File', 'Files', ['f1', 'f2']],
+      ['Issue', 'Issues', ['i1']],
+      ['Artifact', 'Artifacts', ['a1']],
+      ['Spec', 'Specs', ['s1']],
       ['Link', 'Links', ['l1']],
+      ['File', 'Files', ['f1', 'f2']],
       ['Future', 'Future', ['x']],
       [null, 'Notes', ['note']],
     ])
@@ -91,10 +116,25 @@ describe('groupResources', () => {
   })
 })
 
-test('planProgress', () => {
-  expect(planProgress([{ done: true }, { done: false }, { done: true }])).toEqual({ done: 2, total: 3 })
-  expect(planProgress([])).toBeNull()
-  expect(planProgress(null)).toBeNull()
+test('todoProgress', () => {
+  expect(todoProgress([{ done: true }, { done: false }, { done: true }])).toEqual({ done: 2, total: 3 })
+  expect(todoProgress([])).toBeNull()
+  expect(todoProgress(null)).toBeNull()
+})
+
+test('gitLine: branch + worktree / repo', () => {
+  expect(gitLine({ branch: 'fix-login', linked: true, path: '~/Code/project-wt' })).toEqual({ branch: 'fix-login', where: 'worktree ~/Code/project-wt' })
+  expect(gitLine({ branch: 'main', linked: false, path: '~/Code/project' })).toEqual({ branch: 'main', where: 'repo ~/Code/project' })
+  expect(gitLine({ branch: null, linked: null, path: '~/Code/project' })).toEqual({ branch: null, where: '~/Code/project' })
+  expect(gitLine({ path: null })).toEqual({ branch: null, where: null })
+})
+
+test('editorLabel', () => {
+  expect(editorLabel('vscode', 'vscode://file/x')).toBe('Open in VS Code')
+  expect(editorLabel('cursor', 'cursor://file/x')).toBe('Open in Cursor')
+  expect(editorLabel(undefined, 'cursor://file/x')).toBe('Open in Cursor')
+  expect(editorLabel(undefined, 'vscode://vscode-remote/ssh-remote+workstation/x')).toBe('Open in VS Code')
+  expect(editorLabel('vscode', null)).toBeNull()
 })
 
 test('continueDraft ends with a blank line for the caret', () => {

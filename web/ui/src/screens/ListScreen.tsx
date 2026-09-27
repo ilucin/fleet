@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type TouchEvent } from 'react'
-import { PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { GroupedList } from '@/components/board/GroupedList'
@@ -94,6 +94,11 @@ export function ListScreen() {
           >
             {note.text}
           </span>
+          <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
+            <a href="#/settings" aria-label="Settings" title="Settings">
+              <Settings2Icon />
+            </a>
+          </Button>
           <Button
             size="icon"
             aria-label="New session"
@@ -165,11 +170,11 @@ export function ListScreen() {
             aria-label="Filter by host"
             className="no-scrollbar mt-2 w-full overflow-x-auto"
           >
-            <ToggleGroupItem value={ALL_HOSTS} className={cn(chipClass, 'h-8 text-[13px]')}>
+            <ToggleGroupItem value={ALL_HOSTS} className={cn(chipClass, 'h-8 text-[0.8125rem]')}>
               All hosts
             </ToggleGroupItem>
             {hosts.map((h) => (
-              <ToggleGroupItem key={h.name} value={h.name} className={cn(chipClass, 'h-8 text-[13px]')}>
+              <ToggleGroupItem key={h.name} value={h.name} className={cn(chipClass, 'h-8 text-[0.8125rem]')}>
                 <HostDot host={h.name} />
                 <span className={cn(h.ok === false && 'text-destructive')}>{h.name}</span>
                 <span className="text-xs text-dimmer tabular-nums">{h.ok === false ? '!' : (hostCounts.get(h.name) ?? 0)}</span>

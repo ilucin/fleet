@@ -17,7 +17,6 @@ export type ShortcutAction =
   | 'term'
   | 'sidebar'
   | 'inspector'
-  | 'brief'
   | 'palette'
   | 'help'
   | 'refresh'
@@ -71,7 +70,6 @@ const PLAIN: Record<string, ShortcutAction> = {
   Escape: 'back',
   '[': 'sidebar',
   i: 'inspector',
-  p: 'brief',
   b: 'view',
   e: 'rename',
   F2: 'rename',
@@ -170,8 +168,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
     items: [
       { keys: [['['], ['mod', 'B']], label: 'Toggle the sidebar' },
       { keys: [['b']], label: 'Switch List / Board (sessions grouped by work)' },
-      { keys: [['i']], label: 'Toggle the details panel' },
-      { keys: [['p']], label: 'Toggle the brief panel (summary, plan, resources)' },
+      { keys: [['i']], label: 'Toggle the details panel (brief: summary, todos, resources)' },
       { keys: [['g', 'r']], label: 'Refresh now' },
       { keys: [['?']], label: 'This help' },
     ],

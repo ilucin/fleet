@@ -4,11 +4,13 @@ import { Loader2Icon } from 'lucide-react'
 import { Linkified } from '@/components/Markdown'
 import { LatestButton } from '@/components/session/LatestButton'
 import { useFollowScroll } from '@/hooks/useFollowScroll'
+import { termFontRem } from '@/lib/prefs'
 
 export interface TermViewProps {
   /** null = not loaded yet. */
   text: string | null
   failed: boolean
+  /** px at the default text size (`fleet.termFont`); rendered in rem, so it follows the text size. */
   fontSize: number
   jumpSignal: number
 }
@@ -33,7 +35,7 @@ export function TermView({ text, failed, fontSize, jumpSignal }: TermViewProps) 
         tabIndex={0}
         aria-label="Terminal output"
         className="absolute inset-0 m-0 overflow-auto overscroll-contain px-safe font-mono whitespace-pre text-foreground/90 outline-none [overflow-anchor:none] [tab-size:4]"
-        style={{ fontSize, lineHeight: 1.32 }}
+        style={{ fontSize: termFontRem(fontSize), lineHeight: 1.32 }}
       >
         <span className="block w-max min-w-full px-3 pt-2.5 pb-4">
           {text === null ? (

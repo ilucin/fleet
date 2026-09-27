@@ -11,6 +11,7 @@ import { useNow } from '@/hooks/useNow'
 import { clockTime } from '@/lib/format'
 import { msgKind, sameGroup, visibleMessages } from '@/lib/chat'
 import { pathCandidates } from '@/lib/paths'
+import { CHAT_FONT_REM } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
 
 export interface ChatViewProps {
@@ -21,7 +22,6 @@ export interface ChatViewProps {
   /** The session no longer exists. */
   gone?: boolean
   hideNotes: boolean
-  fontSize: number
   status: string
   waitingFor?: string | null
   /** Older messages exist and a bigger limit is available. */
@@ -42,16 +42,16 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
   if (kind === 'command') {
     return (
       <div className="self-center text-center">
-        <span className="inline-block rounded-full border bg-muted px-2.5 py-0.5 font-mono text-[11px] text-status-waiting/90 [overflow-wrap:anywhere]">
+        <span className="inline-block rounded-full border bg-muted px-2.5 py-0.5 font-mono text-[0.6875rem] text-status-waiting/90 [overflow-wrap:anywhere]">
           {text}
         </span>
       </div>
     )
   }
   if (kind === 'system') {
-    return <div className="max-w-[92%] self-center text-center text-[11px] text-dimmer [overflow-wrap:anywhere]">{text}</div>
+    return <div className="max-w-[92%] self-center text-center text-[0.6875rem] text-dimmer [overflow-wrap:anywhere]">{text}</div>
   }
-  const cap = caption ? <div className="px-1 pt-0.5 text-[10px] text-dimmer tabular-nums">{caption}</div> : null
+  const cap = caption ? <div className="px-1 pt-0.5 text-[0.625rem] text-dimmer tabular-nums">{caption}</div> : null
   if (kind === 'user') {
     return (
       <div className="flex w-full flex-col items-end">
@@ -125,7 +125,7 @@ export function ChatView(p: ChatViewProps) {
       setTop(el.scrollTop + (el.scrollHeight - lastHeight.current))
     } else stick()
     lastHeight.current = el.scrollHeight
-  }, [p.messages, p.hideNotes, p.fontSize, p.status, p.loadingOlder, ref, setFollow, setTop, stick])
+  }, [p.messages, p.hideNotes, p.status, p.loadingOlder, ref, setFollow, setTop, stick])
 
   useEffect(() => {
     if (p.jumpSignal) jump()
@@ -174,7 +174,7 @@ export function ChatView(p: ChatViewProps) {
         tabIndex={0}
         aria-label="Conversation"
         className="absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain px-safe outline-none [overflow-anchor:none]"
-        style={{ fontSize: p.fontSize, lineHeight: 1.5 }}
+        style={{ fontSize: CHAT_FONT_REM, lineHeight: 1.5 }}
       >
         <div className={p.wide ? 'mx-auto w-full max-w-4xl px-4 pt-3 pb-4' : 'mx-auto w-full max-w-3xl px-2 pt-3 pb-4'}>
           {p.canLoadOlder || p.loadingOlder ? (

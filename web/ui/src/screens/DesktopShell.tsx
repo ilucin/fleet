@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
+  CodeXmlIcon,
   CopyIcon,
   FilterIcon,
   KanbanIcon,
@@ -8,12 +9,12 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
-  NotebookTextIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
+  Settings2Icon,
   SparklesIcon,
   SquareTerminalIcon,
   SunIcon,
@@ -36,6 +37,7 @@ import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSessionList } from '@/hooks/useSessionList'
 import { useTheme } from '@/hooks/useTheme'
 import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
+import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
@@ -44,6 +46,7 @@ import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, t
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
 import { SessionScreen, type PaneApi } from '@/screens/SessionScreen'
+import { SettingsScreen } from '@/screens/SettingsScreen'
 
 const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false : undefined)
 const CHORD_MS = 1200
@@ -61,6 +64,7 @@ export function DesktopShell() {
   const { setTheme } = useTheme()
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
+  const [settingsOpen] = useRoute('/settings')
   const selected = match ? { host: params.host, id: params.id } : null
   const selectedKey = selected ? `${selected.host}/${selected.id}` : null
   const selectedSession = selected ? findSession(fleet, selected.host, selected.id) : null
@@ -73,18 +77,10 @@ export function DesktopShell() {
     typeof window !== 'undefined' && window.matchMedia?.(WIDE_QUERY).matches ? '1' : '0',
     (r) => (parseBool01(r) === undefined ? undefined : r),
   )
+  // The Details column: the brief first, then the session's details (`i`).
   const inspector = inspectorRaw === '1'
-  // The brief column (`p`) takes the details column's place while open; `i` switches back.
-  const [briefRaw, setBriefRaw] = usePersistentState<string>('fleet.briefPanel', '0', (r) => (parseBool01(r) === undefined ? undefined : r))
-  const briefPanel = briefRaw === '1'
   const toggleSidebar = () => setSidebarRaw(sidebarOpen ? '0' : '1')
-  const toggleInspector = () => {
-    if (briefPanel) {
-      setBriefRaw('0')
-      setInspectorRaw('1')
-    } else setInspectorRaw(inspector ? '0' : '1')
-  }
-  const toggleBrief = () => setBriefRaw(briefPanel ? '0' : '1')
+  const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
 
   // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
   // session sits in the pane to its right, so j/k, Enter and Esc work the same way.
@@ -208,7 +204,7 @@ export function DesktopShell() {
         setNewOpen(true)
         return true
       case 'back':
-        if (selectedKey) {
+        if (selectedKey || settingsOpen) {
           navigate('/')
           return true
         }
@@ -230,10 +226,6 @@ export function DesktopShell() {
       case 'inspector':
         if (!selectedKey) return false
         toggleInspector()
-        return true
-      case 'brief':
-        if (!selectedKey) return false
-        toggleBrief()
         return true
       case 'palette':
         setPaletteOpen((o) => !o)
@@ -298,6 +290,8 @@ export function DesktopShell() {
   // --- palette actions -----------------------------------------------------------
   const paletteSessions = useMemo(() => allSessions(fleet).sort(byLastActivity), [fleet])
   const attachCmd = sessionAttachCommand(selectedSession)
+  const editorUrl = selectedSession?.editorUrl ?? null
+  const editorText = editorLabel(null, editorUrl)
   const actions: { heading: string; items: PaletteAction[] }[] = [
     {
       heading: 'Actions',
@@ -309,18 +303,11 @@ export function DesktopShell() {
               { id: 'term', label: 'Terminal view', icon: <SquareTerminalIcon />, shortcut: 'G T', run: () => paneRef.current?.setMode('term') },
               {
                 id: 'inspector',
-                label: inspector && !briefPanel ? 'Hide details panel' : 'Show details panel',
+                label: inspector ? 'Hide details (brief)' : 'Show details (brief: summary, todos, resources)',
                 icon: <PanelRightIcon />,
                 shortcut: 'I',
+                keywords: ['details', 'brief', 'todos', 'summary', 'resources', 'continue', 'inspector'],
                 run: toggleInspector,
-              },
-              {
-                id: 'brief',
-                label: briefPanel ? 'Hide brief' : 'Show brief (summary, plan, resources)',
-                icon: <NotebookTextIcon />,
-                shortcut: 'P',
-                keywords: ['brief', 'plan', 'summary', 'resources', 'continue'],
-                run: toggleBrief,
               },
             ]
           : []),
@@ -339,6 +326,16 @@ export function DesktopShell() {
         ...(attachCmd
           ? [{ id: 'copy-attach', label: 'Copy attach command', icon: <CopyIcon />, keywords: ['tmux', 'terminal', 'enter', attachCmd], run: () => void copyWithToast(attachCmd) }]
           : []),
+        ...(editorUrl && editorText
+          ? [{ id: 'editor', label: editorText, icon: <CodeXmlIcon />, keywords: ['editor', 'vscode', 'cursor', 'code'], run: () => window.location.assign(editorUrl) }]
+          : []),
+        {
+          id: 'settings',
+          label: 'Settings…',
+          icon: <Settings2Icon />,
+          keywords: ['preferences', 'text size', 'font', 'zoom', 'theme', 'progress notes'],
+          run: () => navigate('/settings'),
+        },
         { id: 'refresh', label: 'Refresh now', icon: <RefreshCwIcon />, shortcut: 'G R', run: refresh },
         { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: '?', run: () => setHelpOpen(true) },
       ],
@@ -363,8 +360,8 @@ export function DesktopShell() {
     },
   ]
 
-  // Anything but `/` and `/s/:host/:id` → the list (same as mobile).
-  if (!match && location !== '/') return <Redirect to="/" replace />
+  // Anything but `/`, `/settings` and `/s/:host/:id` → the list (same as mobile).
+  if (!match && !settingsOpen && location !== '/') return <Redirect to="/" replace />
 
   const onSearchNav = (a: 'next' | 'prev' | 'open') => {
     if (a === 'open') {
@@ -381,11 +378,11 @@ export function DesktopShell() {
       layout="pane"
       inspector={inspector}
       onToggleInspector={toggleInspector}
-      briefPanel={briefPanel}
-      onToggleBrief={toggleBrief}
       paneRef={paneRef}
       autoFocusComposer={focusOnOpen === selectedKey}
     />
+  ) : settingsOpen ? (
+    <SettingsScreen layout="pane" />
   ) : null
 
   return (
@@ -519,7 +516,7 @@ function EmptyPane({ waitingSessions, modKey, onOpen }: { waitingSessions: Sessi
       </ul>
       {waitingSessions.length ? (
         <section aria-label="Needs you" className="w-full max-w-md text-left">
-          <h2 className="pb-1.5 text-[11px] font-semibold tracking-wider text-status-waiting uppercase">Needs you</h2>
+          <h2 className="pb-1.5 text-[0.6875rem] font-semibold tracking-wider text-status-waiting uppercase">Needs you</h2>
           <div className="flex flex-col gap-1.5">
             {waitingSessions.map((s) => (
               <button

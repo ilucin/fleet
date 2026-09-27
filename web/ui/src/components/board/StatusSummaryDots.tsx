@@ -10,7 +10,7 @@ export function StatusSummaryDots({ summary, className }: { summary: StatusSumma
     ['idle', 'idle'],
   ]
   return (
-    <span className={cn('flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums', className)}>
+    <span className={cn('flex shrink-0 items-center gap-1.5 text-[0.6875rem] text-muted-foreground tabular-nums', className)}>
       {parts
         .filter(([k]) => summary[k] > 0)
         .map(([k, label]) => (

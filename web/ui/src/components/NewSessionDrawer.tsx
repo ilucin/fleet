@@ -249,7 +249,7 @@ function NewSessionForm({
                       <FolderIcon className={cn('size-4 shrink-0', on ? 'text-primary' : 'text-dimmer')} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-medium">{d.label}</span>
-                        <span className="block truncate font-mono text-[11px] text-dimmer">{shortCwd(d.path, 60)}</span>
+                        <span className="block truncate font-mono text-[0.6875rem] text-dimmer">{shortCwd(d.path, 60)}</span>
                       </span>
                       {on ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
                     </button>
@@ -334,7 +334,7 @@ function NewSessionForm({
             </Alert>
           ) : null}
 
-          <Button type="submit" className="h-11 w-full rounded-xl text-[15px]" disabled={busy || !dir || progress != null}>
+          <Button type="submit" className="h-11 w-full rounded-xl text-[0.9375rem]" disabled={busy || !dir || progress != null}>
             {busy ? <Loader2Icon className="animate-spin" /> : <PlayIcon />}
             {busy ? 'Starting…' : `Start on ${host}`}
           </Button>

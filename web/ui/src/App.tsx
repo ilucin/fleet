@@ -4,6 +4,7 @@ import { useHashLocation } from 'wouter/use-hash-location'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FleetProvider } from '@/providers/FleetProvider'
+import { PrefsProvider } from '@/providers/PrefsProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
 import { usePreventFileNavigation } from '@/hooks/useAttach'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -11,9 +12,11 @@ import { ThemeProvider } from '@/providers/ThemeProvider'
 import { DesktopShell } from '@/screens/DesktopShell'
 import { ListScreen } from '@/screens/ListScreen'
 import { SessionScreen } from '@/screens/SessionScreen'
+import { SettingsScreen } from '@/screens/SettingsScreen'
 
 /**
- * Hash routing, same URLs as the classic UI: `#/` (list), `#/s/<host>/<session_id>` (detail).
+ * Hash routing, same URLs as the classic UI: `#/` (list), `#/s/<host>/<session_id>` (detail),
+ * plus `#/settings` (this viewer's preferences).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
  */
@@ -25,6 +28,7 @@ export default function App() {
   usePreventFileNavigation()
   return (
     <ThemeProvider>
+      <PrefsProvider>
       <SettingsProvider>
         <FleetProvider>
           <TooltipProvider>
@@ -35,6 +39,9 @@ export default function App() {
                 <Switch>
                   <Route path="/">
                     <ListScreen />
+                  </Route>
+                  <Route path="/settings">
+                    <SettingsScreen />
                   </Route>
                   <Route path="/s/:host/:id">
                     {(p) => <SessionScreen key={`${p.host}/${p.id}`} host={p.host} id={p.id} />}
@@ -49,6 +56,7 @@ export default function App() {
           </TooltipProvider>
         </FleetProvider>
       </SettingsProvider>
+      </PrefsProvider>
     </ThemeProvider>
   )
 }

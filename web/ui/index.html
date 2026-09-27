@@ -25,6 +25,14 @@
           document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
         }
       } catch (e) {}
+      // Pre-paint text size (same rule as PrefsProvider / lib/prefs.ts rootFontSize): scales every rem.
+      try {
+        var f = localStorage.getItem('fleet.chatFont')
+        if (f === '13' || f === '17') {
+          document.documentElement.style.fontSize = f === '13' ? '86.667%' : '113.333%'
+          document.documentElement.dataset.textSize = f
+        }
+      } catch (e) {}
     </script>
   </head>
   <body>

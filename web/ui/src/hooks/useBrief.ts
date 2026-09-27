@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { ApiError, api, isAbortError, sessionErrorMessage } from '@/api/client'
 import type { Brief } from '@/api/types'
 import { usePoller } from '@/hooks/usePoller'
-import { retryMinutes, setPlanItem } from '@/lib/brief'
+import { briefTodos, retryMinutes, setTodoItem } from '@/lib/brief'
 
 /** While open: refresh this often (GET never calls the model, so it is cheap). */
 export const BRIEF_POLL_MS = 30_000
@@ -20,7 +20,7 @@ function briefError(err: unknown): string {
 
 /**
  * A session's brief while `open`: GET on open, every 30s, every 2.5s while generating.
- * `regenerate()` (POST, 429 → toast), `save(body)` (PUT), `togglePlan(i)` (optimistic PUT,
+ * `regenerate()` (POST, 429 → toast), `save(body)` (PUT), `toggleTodo(i)` (optimistic PUT,
  * rolled back with a toast on failure). A poll that started before a local write is dropped,
  * so it can never paint over the edit.
  */
@@ -108,29 +108,30 @@ export function useBrief(host: string, id: string, open: boolean) {
     }
   }
 
-  const togglePlan = async (index: number) => {
+  const toggleTodo = async (index: number) => {
     const prev = brief
-    const item = prev?.parsed.plan[index]
+    const todos = briefTodos(prev?.parsed)
+    const item = todos[index]
     if (!prev || !item) return
-    const markdown = setPlanItem(prev.markdown, index, !item.done)
+    const markdown = setTodoItem(prev.markdown, index, !item.done)
     if (markdown == null) return
-    const plan = prev.parsed.plan.map((p, i) => (i === index ? { ...p, done: !p.done } : p))
+    const next = todos.map((t, i) => (i === index ? { ...t, done: !t.done } : t))
     const mine = ++writes.current
     pending.current += 1
     // The optimistic brief carries the new markdown too, so a second quick toggle builds on it.
-    setState({ key, brief: { ...prev, markdown, parsed: { ...prev.parsed, plan } } })
+    setState({ key, brief: { ...prev, markdown, parsed: { ...prev.parsed, todos: next, plan: next } } })
     try {
       const b = await api.saveBrief(host, id, markdown)
       if (mine === writes.current) apply(b)
     } catch (err) {
       if (mine === writes.current) setState({ key, brief: prev })
-      toast.error('Could not update the plan', { description: briefError(err) })
+      toast.error('Could not update the todos', { description: briefError(err) })
     } finally {
       pending.current -= 1
     }
   }
 
-  return { brief, error, generating, regenerating, saving, refresh, regenerate, save, togglePlan }
+  return { brief, error, generating, regenerating, saving, refresh, regenerate, save, toggleTodo }
 }
 
 export type BriefState = ReturnType<typeof useBrief>

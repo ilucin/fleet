@@ -1,7 +1,7 @@
 // Session briefs — pure helpers for the brief panel (unit-tested in brief.test.ts).
 // The file format is the server's contract (docs/architecture.md → "Session briefs"); these
-// only touch the body the way a human editor would: toggle a checkbox, keep every other line.
-import type { BriefResource, BriefResourceKind } from '@/api/types'
+// only touch the body the way a human editor would: toggle a todo's checkbox, keep every other line.
+import type { BriefResource, BriefResourceKind, BriefTodo } from '@/api/types'
 
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---[ \t]*(?:\n|$)/
 const HEADING_RE = /^##\s+(.+?)\s*#*\s*$/
@@ -13,21 +13,30 @@ export function briefBody(markdown: string | null | undefined): string {
   return src.replace(FRONTMATTER_RE, '').replace(/^\n+/, '')
 }
 
+/** Section headings whose checkbox lines are the todos (`## Plan` is the legacy name; the server reads it as Todos). */
+const TODO_HEADINGS = new Set(['todos', 'plan'])
+
+/** The brief's todos: `parsed.todos`, else the deprecated `parsed.plan` (older servers). */
+export function briefTodos(parsed: { todos?: readonly BriefTodo[] | null; plan?: readonly BriefTodo[] | null } | null | undefined): BriefTodo[] {
+  return [...(parsed?.todos ?? parsed?.plan ?? [])]
+}
+
 /**
- * Set plan item `index` (0-based, the order of `parsed.plan`: checkbox lines of `## Plan`) to
- * `done`. → the new body (frontmatter dropped), or null when there is no such item.
+ * Set todo `index` (0-based, the order of `parsed.todos`: checkbox lines of `## Todos`, or of a
+ * legacy `## Plan`, in file order) to `done`. → the new body (frontmatter dropped), or null when
+ * there is no such item.
  */
-export function setPlanItem(markdown: string, index: number, done: boolean): string | null {
+export function setTodoItem(markdown: string, index: number, done: boolean): string | null {
   const lines = briefBody(markdown).split('\n')
-  let inPlan = false
+  let inTodos = false
   let n = 0
   for (let i = 0; i < lines.length; i++) {
     const h = HEADING_RE.exec(lines[i])
     if (h) {
-      inPlan = h[1].trim().toLowerCase() === 'plan'
+      inTodos = TODO_HEADINGS.has(h[1].trim().toLowerCase())
       continue
     }
-    if (!inPlan) continue
+    if (!inTodos) continue
     const m = CHECK_RE.exec(lines[i])
     if (!m) continue
     if (n === index) {
@@ -39,10 +48,15 @@ export function setPlanItem(markdown: string, index: number, done: boolean): str
   return null
 }
 
-/** Display order of resource groups; hand-written lines (`kind: null`) come last as Notes. */
-export const RESOURCE_ORDER: BriefResourceKind[] = ['PR', 'Issue', 'Artifact', 'Spec', 'File', 'Branch', 'Worktree', 'Link']
+/**
+ * Display order of resource groups: where the work lives (Git, and the legacy Branch / Worktree
+ * lines), what it produced, links, then files (long, collapsed by default); hand-written lines
+ * (`kind: null`) come last as Notes.
+ */
+export const RESOURCE_ORDER: BriefResourceKind[] = ['Git', 'Branch', 'Worktree', 'PR', 'Issue', 'Artifact', 'Spec', 'Link', 'File']
 
 const GROUP_LABEL: Record<string, string> = {
+  Git: 'Git',
   PR: 'Pull requests',
   Issue: 'Issues',
   Artifact: 'Artifacts',
@@ -60,7 +74,7 @@ export interface ResourceGroup {
   items: BriefResource[]
 }
 
-/** Group resources by kind in RESOURCE_ORDER (unknown kinds after, then notes); order inside a group is kept. */
+/** Group resources by kind in RESOURCE_ORDER (unknown kinds before notes); order inside a group is kept. */
 export function groupResources(resources: readonly BriefResource[] | null | undefined): ResourceGroup[] {
   const by = new Map<string | null, BriefResource[]>()
   for (const r of resources ?? []) {
@@ -79,10 +93,28 @@ export function groupResources(resources: readonly BriefResource[] | null | unde
     .map(([kind, items]) => ({ kind, label: kind == null ? 'Notes' : (GROUP_LABEL[kind] ?? kind), items }))
 }
 
-/** "3/7" progress of a plan; null when it has no items. */
-export function planProgress(plan: readonly { done: boolean }[] | null | undefined): { done: number; total: number } | null {
-  if (!plan?.length) return null
-  return { done: plan.filter((i) => i.done).length, total: plan.length }
+/**
+ * A `Git` resource as one line: the branch (null = detached / unknown) and where it is checked
+ * out — `worktree ~/path` for a linked worktree, `repo ~/path` for the main checkout, just the
+ * path when the server could not tell.
+ */
+export function gitLine(r: Pick<BriefResource, 'branch' | 'linked' | 'path'>): { branch: string | null; where: string | null } {
+  const branch = r.branch ?? null
+  const where = r.path ? (r.linked === true ? `worktree ${r.path}` : r.linked === false ? `repo ${r.path}` : r.path) : null
+  return { branch, where }
+}
+
+/** "Open in VS Code" / "Open in Cursor" for an editorUrl; null = no button. Guesses from the URL when `editor` is missing. */
+export function editorLabel(editor: string | null | undefined, url: string | null | undefined): string | null {
+  if (!url) return null
+  const which = editor ?? (url.startsWith('cursor:') ? 'cursor' : url.startsWith('vscode:') ? 'vscode' : null)
+  return which === 'cursor' ? 'Open in Cursor' : which === 'vscode' ? 'Open in VS Code' : 'Open in editor'
+}
+
+/** "3/7" progress of the todos; null when there are none. */
+export function todoProgress(todos: readonly { done: boolean }[] | null | undefined): { done: number; total: number } | null {
+  if (!todos?.length) return null
+  return { done: todos.filter((i) => i.done).length, total: todos.length }
 }
 
 /** The New session prompt for "Continue in new session": the brief's prompt, a blank line, the caret. */

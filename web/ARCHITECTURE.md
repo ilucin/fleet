@@ -334,8 +334,9 @@ the model-free extraction (so a brief exists as soon as someone looks), never th
 
 ## UI (`ui/`, React)
 
-Feature parity with the classic UI below, plus a host filter, theme choice and session details:
-same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
+Feature parity with the classic UI below, plus a host filter, a Settings screen (`#/settings`: text
+size for the whole UI, terminal text, theme, progress notes) and a Details panel (the session brief,
+then session details): same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
 paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,
 `fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`,
 `fleet.spawnHost`, `fleet.spawnDirLabel.<host>`; React only: `fleet.spawnModel`), so switching UIs keeps preferences. Built with

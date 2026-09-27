@@ -14,7 +14,7 @@ import { sessionKey } from '@/lib/shortcuts'
 import { echoesTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
 
-const chip = 'inline-flex h-4.5 shrink-0 items-center rounded-[5px] border px-1 text-[11px] whitespace-nowrap'
+const chip = 'inline-flex h-4.5 shrink-0 items-center rounded-[5px] border px-1 text-[0.6875rem] whitespace-nowrap'
 
 export interface SessionRowProps {
   session: Session
@@ -57,12 +57,12 @@ export function SessionRow({ session: s, now, selected, cursor }: SessionRowProp
     >
       <div className="flex min-w-0 items-center gap-2">
         <StatusDot status={s.status} />
-        <EditableTitle session={s} scope="row" className="text-[15px] font-bold" />
+        <EditableTitle session={s} scope="row" className="text-[0.9375rem] font-bold" />
         <HostBadge host={s.host} />
         <span className={cn('max-w-[45%] shrink-0 truncate text-xs', STATUS_TEXT[meta.key])}>{statusLabel(s)}</span>
       </div>
-      {subtitle ? <p className="mt-1 line-clamp-2 text-[13px] break-words text-muted-foreground">{subtitle}</p> : null}
-      <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-dimmer">
+      {subtitle ? <p className="mt-1 line-clamp-2 text-[0.8125rem] break-words text-muted-foreground">{subtitle}</p> : null}
+      <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-dimmer">
         {cwd ? <span className="min-w-0 truncate font-mono">{cwd}</span> : null}
         {backend !== 'unknown' ? <span className={cn(chip, 'border-border')}>{backend}</span> : null}
         <span className="ml-auto flex shrink-0 items-center gap-2">

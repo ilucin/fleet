@@ -14,7 +14,7 @@ export function GroupsStatus({ state, now, size = 'sm', className }: { state: Gr
   return (
     <span className={cn('flex min-w-0 items-center gap-1.5', className)}>
       <span
-        className={cn('min-w-0 truncate text-[11px] tabular-nums', failed || error ? 'text-destructive' : 'text-dimmer')}
+        className={cn('min-w-0 truncate text-[0.6875rem] tabular-nums', failed || error ? 'text-destructive' : 'text-dimmer')}
         title={groups?.lastRun?.error || groups?.lastRun?.note || (groups?.host ? `grouping runs on ${groups.host}` : undefined)}
         aria-live="polite"
       >

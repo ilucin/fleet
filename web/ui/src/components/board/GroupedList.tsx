@@ -35,7 +35,7 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
             >
               <ChevronRightIcon className={cn('size-4 shrink-0 text-dimmer transition-transform', open && 'rotate-90')} />
               <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-[15px] font-semibold', c.ungrouped && 'text-muted-foreground')}>{c.label}</span>
+                <span className={cn('block truncate text-[0.9375rem] font-semibold', c.ungrouped && 'text-muted-foreground')}>{c.label}</span>
                 {c.description ? <span className="block truncate text-xs text-dimmer">{c.description}</span> : null}
               </span>
               <StatusSummaryDots summary={c.summary} />
