@@ -66,7 +66,9 @@ fleet -H workstation list             # ...on the workstation
 fleet web serve                       # web UI on :7777 (run it on each machine)
 ```
 
-Then open `http://<workstation-tailscale-ip>:7777` on your phone and add it to the home screen.
+Then open `http://<workstation-tailscale-ip>:7777` on your phone and add it to the home screen. On a
+Mac, `crates/fleet-desktop/bundle.sh --install` builds **Fleet.app**, the same UI as a desktop app
+([docs/desktop.md](docs/desktop.md)).
 
 Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phone):
 [docs/setup.md](docs/setup.md).
@@ -101,6 +103,7 @@ fleet tmux stale                        # idle shells nothing is using
 - [docs/setup.md](docs/setup.md) — end-to-end guide: workstation, Tailscale, ssh, tmux, Claude Code, phone
 - [docs/architecture.md](docs/architecture.md) — components, config, discovery, JSON contracts, extension points
 - [docs/cli.md](docs/cli.md) — command reference
+- [docs/desktop.md](docs/desktop.md) — Fleet.app, the web UI as a macOS app (Tauri)
 - [docs/migration.md](docs/migration.md) — coming from `tb-fleet`, `ws` or `fleet-web`
 - [web/](web/) — the web server and its HTTP API
 

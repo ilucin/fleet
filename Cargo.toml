@@ -1,5 +1,7 @@
 [workspace]
 members = ["crates/*"]
+# The desktop app (Tauri) builds only when asked: `cargo build -p fleet-desktop`.
+default-members = ["crates/fleet"]
 resolver = "2"
 
 [workspace.package]

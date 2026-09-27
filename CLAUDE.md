@@ -13,6 +13,7 @@ crates/fleet/          the `fleet` binary + library
   src/tui/             the `watch` dashboard (ratatui)
   SKILL.md             Claude Code skill installed by `fleet skill install`
   tests/               integration tests
+crates/fleet-desktop/  Fleet.app: Tauri 2 shell around the web UI (not a default member — use -p fleet-desktop)
 web/                   web server (server.mjs, lib/), Node >= 22, no npm deps
   ui/                  React + shadcn/ui PWA (npm, Vite build → ui/dist, gitignored) — see web/ui/README.md
   public/              classic vanilla-JS PWA (no build; fallback / `web.ui: "classic"`)
@@ -33,6 +34,7 @@ cargo test                        # Rust unit + integration tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo run -q -p fleet -- --help   # run the CLI from source
+cargo test -p fleet-desktop       # the desktop app (crates/fleet-desktop/bundle.sh builds Fleet.app)
 
 cd web && node --test tests/      # web tests (no network, child processes mocked)
 cd web/ui && npm ci && npm run build && npm run lint && npm test   # React UI (fleet web build does ci+build)
