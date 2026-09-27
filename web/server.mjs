@@ -7,12 +7,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadConfig, ensurePath } from './lib/config.mjs';
+import { loadConfig, ensurePath, resolveBinary } from './lib/config.mjs';
 import { run } from './lib/run.mjs';
 import { createFleetCli } from './lib/fleet-cli.mjs';
 import { createFleet } from './lib/fleet.mjs';
 import { createBackend } from './lib/backends.mjs';
-import { createTranscriptReader } from './lib/transcript.mjs';
+import { createTranscriptReader, locateTranscript } from './lib/transcript.mjs';
 import { createSpawner } from './lib/spawn.mjs';
 import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer, createSpawnNamer } from './lib/autoname.mjs';
@@ -20,6 +20,8 @@ import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { createFiles } from './lib/files.mjs';
 import { createTouchedIndex } from './lib/touched.mjs';
+import { createBriefExtractor } from './lib/brief-extract.mjs';
+import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -78,6 +80,23 @@ const grouper = config.grouping.enabled
       log,
     })
   : null;
+// Session briefs: GET/PUT always work; background generation only with web.briefs.enabled.
+const briefs = createBriefs({
+  settings: config.briefs,
+  self: config.self,
+  store: createBriefStore({ dir: config.briefs.dir }),
+  extractor: createBriefExtractor({ locate: (cwd, id) => locateTranscript(cwd, id) }),
+  listSessions: async () => {
+    const host = await fleet.localHost();
+    return host.ok ? host.sessions : null;
+  },
+  ask: createClaudeAsk({
+    bin: resolveBinary('claude', { extraDirs: [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.claude', 'local')] }),
+    run,
+  }),
+  git: (cwd) => gitInfo(cwd, { run }),
+  log,
+});
 const handleApi = createApi({
   config,
   fleet,
@@ -90,6 +109,7 @@ const handleApi = createApi({
   spawnNamer,
   uploader,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
+  briefs,
   grouper,
   name: NAME,
   version: VERSION,
@@ -125,6 +145,13 @@ server.listen(config.port, config.bind, () => {
   } else {
     log('[fleet-web] grouping off (web.grouping.enabled = false)');
   }
+  if (config.briefs.enabled) {
+    briefs.start();
+    const b = config.briefs;
+    log(`[fleet-web] briefs on (${b.dir}; ${b.model}, idle ${b.idleMs / 1000}s, every ≥ ${b.minIntervalMs / 60000}m per session, ≤ ${b.maxCallsPerHour}/h)`);
+  } else {
+    log(`[fleet-web] briefs: background generation off (web.briefs.enabled = false); ${config.briefs.dir}`);
+  }
 });
 
 let shuttingDown = false;
@@ -135,6 +162,7 @@ function shutdown(signal) {
   autoNamer.stop();
   spawnNamer?.stop();
   grouper?.stop();
+  briefs.stop();
   uploader.stop();
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);

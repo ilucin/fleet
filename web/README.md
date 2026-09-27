@@ -28,12 +28,12 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
+`web.ui` (a path, or `"classic"`), `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` / `PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME` (`0` / `1`), `FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` (`0` / `1`), `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX`.
 
 `web.autoName` (default off; opt in with `{ "enabled": true, "intervalMinutes": 5 }`) makes each server run
 `fleet name --all --apply` on its own host every few minutes, so sessions started without a
@@ -44,6 +44,15 @@ name get a task-shaped one (tmux session included, when its name was generic). S
 and point the others at it with top-level `"grouping": { "host": "<that host>" }`) makes that
 server run `fleet group` over the whole fleet and serve `GET /api/groups` for the Board view; the
 others proxy to it. It only reads sessions and calls `claude -p`; nothing is sent to a session.
+
+`web.briefs` (default off; opt in with `fleet config set web.briefs.enabled true`) makes the server keep a **brief** per
+idle session on its host — summary, resources it produced, plan — in
+`~/.local/state/fleet/briefs/<session_id>.md`, for starting a new session that continues the work.
+Resources and todo plans come from the transcript for free; the summary costs one
+`claude -p --model haiku` call, gated hard (idle ≥ 60s, ≥ 2 new prompts or 2000 new characters,
+≥ 15 min per session, one at a time, ≤ 12/hour — all tunable: `model`, `idleMs`, `minIntervalMs`,
+`maxDeltaChars`, `maxCallsPerHour`, `minNewTurns`, `minNewChars`, `maxBriefChars`). Reading and
+editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
 
 ## Another UI
 

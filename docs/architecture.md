@@ -122,6 +122,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule (tmux names follow the titles, see [Session titles](#session-titles)); a web spawn with a first prompt also gets a targeted `fleet name <id> --apply` once it has replied |
 | `web.grouping` | `{ enabled, intervalMinutes }` (default off, 10): this host's web server runs `fleet group` over the whole fleet on that schedule and serves `/api/groups` (see [Smart grouping](#smart-grouping)) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }` (default `~/.local/share/fleet/uploads`, 100, 14): files dropped / pasted / picked in the web UI are stored there on the session's host as `YYYY-MM-DD/<rand>-<name>`, and their absolute path goes into the prompt; day dirs older than `retentionDays` are removed (`0` keeps them) |
+| `web.briefs` | `{ enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns, minNewChars, maxBriefChars }` (default off, `haiku`, 60 s, 15 min, 12000, 12, 2, 2000, 3000): background generation of [session briefs](#session-briefs) on this host; reading and editing briefs (and a manual regenerate) work either way |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra roots a relative file path in chat may be under. A relative path missing under the session cwd first matches files the session touched (from its transcript), then ancestors of those, then these roots; the sandbox stays `$HOME` + cwd |
 | `tmux` | tmux binary; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |
 | `hosts.<name>.fleetBin` | path to `fleet` on that host; `null` → `~/.local/bin/fleet`, then `PATH` |
@@ -138,7 +139,7 @@ the single host `local`, and remote features say "run `fleet init`"; a present b
 an error.
 
 Env overrides for the web server: `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME`, `FLEET_WEB_GROUPING`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
+`FLEET_WEB_AUTONAME`, `FLEET_WEB_GROUPING`, `FLEET_WEB_BRIEFS`, `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
 
 ## Session discovery
 
@@ -280,6 +281,9 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths }` (≤ 200, as written in chat, `:line` allowed) → per path: resolved absolute path, `exists`, `isFile`, size, mtime, `kind` (markdown/text/image/pdf/other); the UI links only existing files |
 | GET | `/api/hosts/:host/sessions/:id/files/raw?path=…[&download=1]` | the file itself, streamed (also through a peer); text/markdown over 5 MB only as a download |
 | POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` → opens it with its default app **on that host** (`open` / `xdg-open`; runnable files are revealed in their folder instead) |
+| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id |
+| PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` → a human edit (sets `editedAt`) → the same shape |
+| POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` → **202** `{ host, id, started, queued, generating: true }`, the model call runs in the background (poll GET); **429** `{ error, retryAfterMs }` at the hourly cap |
 
 `:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars). The
 full contract (status codes, limits, timeouts) lives with the server: [web/README.md](../web/README.md),
@@ -313,6 +317,116 @@ The web Board view shows sessions as columns of work streams, and nobody maintai
   once the model is back. The UI does the same grouping client-side when no server runs grouping.
 - **Cost.** A run with nothing new makes no model call; a typical run after one new session makes
   one (haiku, ~2–8k prompt characters, 10–45s wall clock with `claude -p` start-up).
+
+## Session briefs
+
+A brief is a small markdown doc per session: 1–2 sentences on exactly what the session is doing and
+where (repo/cwd, branch, host), every resource it produced, and a short plan with progress — enough
+to start a **new** session from it and just continue (`continuePrompt` in the API is that first
+prompt). The user can edit it; their edits are authoritative.
+
+**Storage.** One file per session on the host the session lives on:
+`$FLEET_BRIEFS_DIR/<session_id>.md`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs/<session_id>.md`
+(dir `0700`, files `0600`), always written atomically (temp file + rename). The web server owns
+generation (`web/lib/briefs.mjs`); any other reader/writer (a `fleet brief` CLI) uses the same
+files and must follow the same format and merge rules.
+
+**Format** (a contract, like the JSON outputs — add keys freely, never rename or retype one):
+
+```markdown
+---
+session: <session_id>
+host: laptop
+cwd: ~/Code/project
+updated: 2026-01-02T03:04:05.000Z
+generatedThrough: 48213
+generatedAt: 2026-01-02T03:04:05.000Z
+editedAt: 2026-01-02T03:10:00.000Z
+todos: 3f2a9c01b7de
+dismissed: ["https://github.com/owner/repo/pull/9"]
+---
+## Summary
+Fixing the login redirect loop in ~/Code/project on branch fix-login; the fix is in review.
+
+## Resources
+- Branch: `fix-login`
+- PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
+- File: `src/login.ts`
+- Spec: `specs/login/SPEC.md`
+- Artifact: [Login report](https://claude.ai/code/artifact/…)
+- Link: [docs.example.dev/auth](https://docs.example.dev/auth)
+
+## Plan
+- [x] reproduce the loop
+- [ ] fix the redirect (in progress)
+```
+
+- Frontmatter: `key: value` lines between `---` fences. Numbers are bare, arrays/objects are
+  one-line JSON, a string that would read back as another type is a JSON string. Keys:
+  `session`, `host`, `cwd` (informational, written by the server); `updated` (last write of any
+  kind, ISO 8601); **`generatedThrough`** — the **byte offset** into the session's transcript JSONL
+  (`~/.claude/projects/<encoded cwd>/<session_id>.jsonl`) up to which the conversation has been
+  summarised, always at a line boundary (a transcript smaller than it was replaced: start over);
+  `generatedAt` (last model generation); `editedAt` (last human edit, absent until one);
+  `todos` (hash of the todo list last copied into Plan); `dismissed` (resource keys a human
+  deleted — never added back; at most 200). Unknown keys are preserved.
+- Body: exactly three `## ` sections, written in this order — `Summary`, `Resources`, `Plan`.
+  Parsers are tolerant: headings case-insensitive, sections in any order or missing, text before
+  the first heading and other `## ` sections are kept (written after Plan), `*`/`+` bullets,
+  `[X]`.
+- Resources: one bullet per item, `- <Kind>: <value>`, value a markdown link `[label](url)` or a
+  code span `` `path` ``. Kinds: `PR`, `Issue`, `Artifact`, `Spec`, `File`, `Branch`, `Worktree`,
+  `Link`. Any other bullet (no kind, free text) is a hand-written line and kept as is. An item's
+  **key** is its URL (fragment and trailing `/` dropped), else its path (`branch:<name>` /
+  `worktree:<path>` for those two kinds). Paths are relative to the session's cwd when inside it,
+  else `~/…`, else absolute.
+- Plan: `- [ ] step` / `- [x] step` lines; other lines in the section are kept.
+
+**Merge rules** (every writer): never drop a line a human wrote; new auto items are appended
+unless their key is already present or in `dismissed`; a human edit (PUT) that removes a
+resource line adds its key to `dismissed`; the machine keys (`generatedThrough`, `generatedAt`,
+`todos`, `dismissed`) are the writer's, not taken from an edited body.
+
+**Generation** (hybrid, `web/lib/brief-extract.mjs` + `web/lib/briefs.mjs`):
+
+1. *Resources without a model*, read incrementally from the transcript: files the session wrote
+   (Edit / Write / MultiEdit / NotebookEdit targets, shell redirects and `tee`; temp dirs skipped;
+   `SPEC.md`, `FINAL.md` and files under `specs/` are `Spec`), PR/issue URLs printed by
+   `gh pr|issue create`, artifact URLs returned by an Artifact publish, PR/issue/artifact/other
+   links in the assistant's text, PR/issue/artifact links in the user's prompts; branch and
+   worktree from one `git rev-parse` in the cwd. Links to this machine or the private network (IP
+   literals, dotless or `.local`/`.ts.net` hosts), schema hosts, templated or `…`-truncated URLs are
+   dropped. Read-only tool output (a file that lists PRs) never counts.
+2. *Plan without a model* when the session keeps todos: the latest `TodoWrite` list, or the task
+   list from `TaskCreate`/`TaskUpdate`, is the Plan (rewritten only when the list changes, so a
+   hand edit stands until the next todo change).
+3. *Summary* (and the Plan when there are no todos) from `claude -p --model <model>` — flags as in
+   `core::naming` (prompt on stdin, `--strict-mcp-config`, tools disallowed, a neutral cwd) plus
+   `--no-session-persistence`, 2 min timeout. Input: the current Summary + Plan (≤ `maxBriefChars`)
+   and ONLY the conversation since `generatedThrough` — user prompts and turn-ending assistant
+   text, each clipped, newest kept, ≤ `maxDeltaChars` — told that hand-edited content is
+   authoritative and to update, not rewrite. The answer must be a `## Summary` (≤ 1200 chars) and
+   optionally a `## Plan` of checkboxes; anything else keeps the old brief. An edit that lands
+   while the model runs wins (the answer is discarded).
+
+**Budget** — model calls are what costs, so every automatic one has to pass all of:
+
+- the session is `idle` or `waiting`, and has been for `idleMs` (registry `updated_at`);
+- its transcript grew past `generatedThrough` by ≥ `minNewTurns` user prompts or ≥
+  `minNewChars` characters of conversation;
+- ≥ `minIntervalMs` since that session's last call (a gated update stays pending and runs when the
+  gate opens, without needing more growth);
+- no other brief call is running on this host (one at a time), and fewer than
+  `maxCallsPerHour` calls in the last hour.
+
+The background pass checks this host's live sessions every 30 s (the 2 s discovery cache — no
+extra `fleet list` while a UI is polling) and forgets sessions that are gone. Resource and plan
+extraction (no model) runs whenever the transcript grew — in the background pass and on GET. A
+manual regenerate skips the idle, interval and new-content gates (with nothing new it re-reads the
+recent conversation) but waits for the one-at-a-time slot and counts against the hourly cap. Each
+call is logged with its input size (`[briefs] idle 1a2b3c4d: claude -p --model haiku, 12 msg(s) /
+3 user turn(s), 8123 chars in (4/12 this hour)`); `/api/health` reports `briefs: { enabled, model,
+callsLastHour, maxCallsPerHour, generating, lastRun }`.
 
 ## Extension points
 

@@ -39,6 +39,9 @@ lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fl
 lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
 lib/files.mjs         files mentioned in chat: resolve against the session cwd (+ touched/roots fallback), $HOME/cwd sandbox, stat/kind, raw stream, open
 lib/touched.mjs       absolute paths a session's tool calls touched, parsed incrementally from its transcript (for lib/files.mjs)
+lib/brief-format.mjs  session brief file format: parse/serialise, resource merge, model-output check, continue prompt (pure)
+lib/brief-extract.mjs brief resources + todo plan from a transcript (incremental, no model); the conversation delta for the model
+lib/briefs.mjs        brief store (atomic files), budgeted `claude -p` generation, background pass (see Session briefs)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
@@ -68,6 +71,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass and the targeted pass after a spawn (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
+| `web.briefs` | `{ enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns, minNewChars, maxBriefChars }`, default `{ false, "haiku", 60000, 900000, 12000, 12, 2, 2000, 3000 }` (opt-in): background brief generation on this host (see Session briefs); GET/PUT and a manual regenerate work when off |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
@@ -76,7 +80,8 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `spawnDirs[]` | `{ label, paths: { <host>: dir } }` → this host offers `{ label, path: paths[self] }`; `{ label, path }` means the same dir on every host; `~` expanded; none → `[{ label: "Home", path: $HOME }]` |
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` (`0`/`false`/`off` disables, anything else enables), `FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` (`0`/`false`/`off` disables, anything else enables),
+`FLEET_BRIEFS_DIR` (where brief files live), `FLEET_BIN`, `FLEET_TMUX`.
 
 Missing config → runs as a single host `local` on 127.0.0.1 and logs a hint to run
 `fleet init`. A config that exists but is not valid JSON / has a bad shape → exits with code
@@ -134,7 +139,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 
 | method | path | request | response |
 | --- | --- | --- | --- |
-| GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun } }` |
+| GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun }, grouping, briefs: { enabled, model, callsLastHour, maxCallsPerHour, generating, lastRun } }` |
 | GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }] }` |
 | GET | `/api/fleet` | `?local=1` = this host only | `{ self, hosts: [Host], snapshotAt }` — self first, then peers (`snapshotAt` only on the merged view) |
 | GET | `/api/hosts/:host/sessions/:id/peek` | `?lines=200` (10..2000) | `{ host, id, backend, lines, text, capturedAt }` |
@@ -151,6 +156,16 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths: [string] }` (≤ 200) | `{ host, id, cwd, home, files: [FileStat] }` — 400 not an array / too many |
 | GET | `/api/hosts/:host/sessions/:id/files/raw` | `?path=<as in chat or absolute>`, `&download=1` | the file's bytes (streamed; see Files). 400 no path / a directory, 403 outside the sandbox, 404 missing, 413 text over 5 MB inline |
 | POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` | `{ ok, host, path, revealed, command }` — 403/404 as raw, 501 no `open`/`xdg-open` on the host, 502 the opener failed |
+| GET | `/api/hosts/:host/sessions/:id/brief` | | `Brief` (below). No brief yet → the empty skeleton with `exists: false` (not an error). A session that is gone: served from its file by full id, else 404 |
+| PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` (≤ 60000 chars; frontmatter optional — the server keeps its own keys) | `Brief` after the edit (`editedAt` set; resource lines removed by the edit become `dismissed`). 400 not a string |
+| POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` | **202** `{ host, id, started, queued, generating: true }` — returns at once, poll GET until `generating` is false. `started: false, queued: false` = one for this session is already running; `queued: true` = waiting for another session's call. **429** `{ error, retryAfterMs }` at `maxCallsPerHour`; 404 no transcript / gone session |
+
+**Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text }], plan: [{ done, text }] }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt }` —
+`markdown` is the whole file (frontmatter included, canonical form); `kind` is `PR` | `Issue` |
+`Artifact` | `Spec` | `File` | `Branch` | `Worktree` | `Link` | `null` (a hand-written line);
+`url` or `path` is set, `text` is the bullet as written; `continuePrompt` is the first prompt for a
+new session that continues this one; `enabled` = background generation is on for that host.
+Proxied to a peer like the other session routes (PUT bodies included).
 
 **Host** = `{ name, ok, error?, fetchedAt, spawnDirs?: [{ label, path }], sessions: [Session] }`.
 Each host advertises its own `spawnDirs` (absolute paths on that host).
@@ -295,6 +310,18 @@ de-duplicated; `/api/health` reports `grouping: { enabled, host, lastRun }`.
 
 Other servers answer `/api/groups` by proxying to `grouping.host` (or the first peer whose
 `/api/groups?local=1` says `enabled: true`, cached 5 min); `?local=1` is never forwarded again.
+
+## Session briefs
+
+Format, merge rules, generation and budget: docs/architecture.md → Session briefs. In the server:
+`createBriefs` (lib/briefs.mjs) is always created; with `web.briefs.enabled` it also runs a
+background pass every 30s over this host's live sessions (`fleet.localHost()`, so it rides the 2s
+discovery cache). Per idle session whose transcript grew: model-free extraction
+(lib/brief-extract.mjs, incremental, first read ≤ the last 16 MB) merged into the file, then — only
+past every gate (idle ≥ `idleMs`, ≥ `minNewTurns` / `minNewChars` new, ≥ `minIntervalMs` since that
+session's call, nothing else generating, < `maxCallsPerHour`) — one `claude -p` call. GET also runs
+the model-free extraction (so a brief exists as soon as someone looks), never the model. The
+`claude` binary is resolved from `PATH`, `~/.local/bin`, `~/.claude/local` and the Homebrew dirs.
 
 ## UI (`ui/`, React)
 

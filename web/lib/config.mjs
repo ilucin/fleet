@@ -5,7 +5,8 @@
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
 //     web: { port, bind, dir, ui, quickReplies, models: [ { id, label } ],
 //            autoName: { enabled, intervalMinutes },
-//            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays } },
+//            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays },
+//            briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, … } },
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
@@ -23,6 +24,26 @@ export const DEFAULT_GROUPING_MINUTES = 10;
 export const DEFAULT_UPLOADS_DIR = '~/.local/share/fleet/uploads';
 export const DEFAULT_UPLOAD_MAX_MB = 100;
 export const DEFAULT_UPLOAD_RETENTION_DAYS = 14;
+
+/** web.briefs defaults (lib/briefs.mjs). Off by default: it spends model calls. */
+export const DEFAULT_BRIEFS = Object.freeze({
+  enabled: false,
+  model: 'haiku',
+  idleMs: 60 * 1000, // idle this long before a background pass looks at a session
+  minIntervalMs: 15 * 60 * 1000, // per session, between two background model calls
+  maxDeltaChars: 12000, // conversation fed to one call
+  maxCallsPerHour: 12, // this host, background + manual
+  minNewTurns: 2, // new user prompts needed for a background call …
+  minNewChars: 2000, // … or this much new conversation text
+  maxBriefChars: 3000, // the previous Summary + Plan fed back
+});
+
+/** Where brief files live: $FLEET_BRIEFS_DIR, else ${XDG_STATE_HOME:-~/.local/state}/fleet/briefs. */
+export function briefsDir(env = process.env, home = os.homedir()) {
+  if (env.FLEET_BRIEFS_DIR) return path.resolve(expandHome(env.FLEET_BRIEFS_DIR, home));
+  const base = env.XDG_STATE_HOME ? expandHome(env.XDG_STATE_HOME, home) : path.join(home, '.local', 'state');
+  return path.join(base, 'fleet', 'briefs');
+}
 
 /** A model id typed after `--model` in a shell: letters, digits and `._[]-` only. */
 export const MODEL_ID_RE = /^[A-Za-z0-9._[\]-]{1,100}$/;
@@ -153,7 +174,8 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImp
  *   { self, port, bind, peers: { name: url }, hosts: [names], fleetBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
- *     configFile, configFound }
+ *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
+ *               minNewChars, maxBriefChars, dir }, configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -311,6 +333,24 @@ export function normalizeConfig(
   }
   const files = { roots: fileRoots };
 
+  // web.briefs: per-session briefs (lib/briefs.mjs) — the budget knobs for its model calls.
+  const wb = web.briefs == null ? {} : web.briefs;
+  if (!isObject(wb)) throw new Error('config.web.briefs must be an object { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour }');
+  if (wb.enabled != null && typeof wb.enabled !== 'boolean') throw new Error('config.web.briefs.enabled must be true or false');
+  const briefs = { ...DEFAULT_BRIEFS, enabled: wb.enabled === true };
+  if (wb.model != null) {
+    if (typeof wb.model !== 'string' || !MODEL_ID_RE.test(wb.model)) throw new Error('config.web.briefs.model must be a model id (letters, digits and ._[]-)');
+    briefs.model = wb.model;
+  }
+  for (const [key, min] of [['idleMs', 0], ['minIntervalMs', 0], ['maxDeltaChars', 500], ['maxCallsPerHour', 0], ['minNewTurns', 0], ['minNewChars', 0], ['maxBriefChars', 200]]) {
+    if (wb[key] == null) continue;
+    const n = Number(wb[key]);
+    if (!Number.isFinite(n) || n < min) throw new Error(`config.web.briefs.${key} must be a number >= ${min}: ${wb[key]}`);
+    briefs[key] = n;
+  }
+  if (env.FLEET_WEB_BRIEFS != null && env.FLEET_WEB_BRIEFS !== '') briefs.enabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_BRIEFS);
+  briefs.dir = briefsDir(env, home);
+
   return {
     self: self.trim(),
     port,
@@ -328,6 +368,7 @@ export function normalizeConfig(
     grouping,
     uploads,
     files,
+    briefs,
   };
 }
 

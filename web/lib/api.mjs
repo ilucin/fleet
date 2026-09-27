@@ -13,6 +13,7 @@ import {
 import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 import { DEFAULT_MODELS } from './config.mjs';
+import { SESSION_ID_RE } from './briefs.mjs';
 
 export const API_VERSION = 1;
 
@@ -22,6 +23,7 @@ const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
 const FILES_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/files\/(stat|raw|open)$/;
+const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenerate)?$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -45,6 +47,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *               spawn with a first prompt (only when web.autoName is enabled; absent → none)
  *   uploader    lib/uploads.mjs instance (uploads route; absent → 501)
  *   files       lib/files.mjs instance (files/stat|raw|open; absent → 501)
+ *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
@@ -65,6 +68,7 @@ export function createApi({
   spawnNamer = null,
   uploader = null,
   files = null,
+  briefs = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -310,7 +314,7 @@ export function createApi({
       });
       return { status: proxied.status, body: proxied.body };
     }
-    const rawBody = req.method === 'POST' ? JSON.stringify(await readJsonBody(req)) : null;
+    const rawBody = req.method === 'POST' || req.method === 'PUT' ? JSON.stringify(await readJsonBody(req)) : null;
     const proxied = await proxyToPeer(target.url, {
       method: req.method,
       pathname: url.pathname,
@@ -338,6 +342,7 @@ export function createApi({
             host: grouper ? config.self : (config.grouping?.host ?? null),
             lastRun: grouper?.lastRun ?? null,
           },
+          briefs: briefs?.status() ?? { enabled: false },
         },
       };
     }
@@ -439,7 +444,51 @@ export function createApi({
       });
     }
 
+    const b = BRIEF_ROUTE.exec(url.pathname);
+    if (b) {
+      const [, rawHost, rawId, regen] = b;
+      const allowed = regen ? ['POST'] : ['GET', 'PUT'];
+      if (!allowed.includes(req.method)) throw new HttpError('method not allowed', 405);
+      const id = decodeURIComponent(rawId);
+      return forHost({
+        req,
+        url,
+        host: decodeURIComponent(rawHost),
+        local: () => localBrief({ action: regen ? 'regenerate' : req.method, id, req }),
+      });
+    }
+
     throw new HttpError('not found', 404);
+  }
+
+  /** A live session, or — for GET/PUT — a gone one whose brief file is still there (exact id). */
+  async function briefSession(id, { allowGone }) {
+    try {
+      return { session: await resolveLocalSession(id), id: null };
+    } catch (err) {
+      if (!allowGone || err?.status !== 404 || !SESSION_ID_RE.test(id)) throw err;
+      const text = await briefs.store?.read(id).catch(() => null);
+      if (text == null) throw err;
+      return { session: null, id };
+    }
+  }
+
+  async function localBrief({ action, id, req }) {
+    if (!briefs) throw new HttpError('session briefs are not available on this server', 501);
+    const body = action === 'GET' ? null : await readJsonBody(req);
+    const found = await briefSession(id, { allowGone: action !== 'regenerate' });
+    const sid = found.session?.session_id ?? found.id;
+    if (!sid || !SESSION_ID_RE.test(sid)) throw new HttpError('this session has no session id yet', 409);
+    try {
+      if (action === 'GET') return { status: 200, body: await briefs.get(sid, found.session) };
+      if (action === 'PUT') return { status: 200, body: await briefs.put(sid, body.markdown, found.session) };
+      const r = await briefs.regenerate(found.session);
+      return { status: 202, body: { host: config.self, id: sid, started: r.started, queued: r.queued, generating: r.generating } };
+    } catch (err) {
+      if (err?.status === 429) return { status: 429, body: { error: err.message, retryAfterMs: err.retryAfterMs ?? null } };
+      if (err?.status) throw new HttpError(err.message, err.status);
+      throw err;
+    }
   }
 
   async function localFiles({ action, id, url, req }) {
