@@ -7,6 +7,7 @@ import {
   PanelRightIcon,
   SquareTerminalIcon,
   WifiOffIcon,
+  XIcon,
 } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { toast } from 'sonner'
@@ -76,6 +77,10 @@ export interface SessionScreenProps {
   paneRef?: React.RefObject<PaneApi | null>
   /** Pane only: focus the composer on mount (opened with Enter). */
   autoFocusComposer?: boolean
+  /** Pane only: a close button in the header (the Board view's flyout). */
+  onClose?: () => void
+  /** Pane only: the pane is too narrow for a details column — lay it over the chat instead. */
+  detailsOverlay?: boolean
 }
 
 /**
@@ -91,6 +96,8 @@ export function SessionScreen({
   onToggleInspector,
   paneRef,
   autoFocusComposer = false,
+  onClose,
+  detailsOverlay = false,
 }: SessionScreenProps) {
   const pane = layout === 'pane'
   const { fleet, refresh: refreshFleet, applyFleet } = useFleet()
@@ -451,6 +458,11 @@ export function SessionScreen({
               <EllipsisIcon className="size-5" />
             </Button>
           )}
+          {pane && onClose ? (
+            <Button variant="ghost" size="icon" aria-label="Close session" title="Close (Esc)" onClick={onClose} className="size-11 shrink-0 rounded-xl">
+              <XIcon className="size-5" />
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -495,6 +507,15 @@ export function SessionScreen({
         ) : (
           <TermView text={peek?.text ?? null} failed={!!peekErr} fontSize={termFont} jumpSignal={jumpSignal} />
         )}
+        {pane && inspector && detailsOverlay ? (
+          // A narrow pane: the details lie over the chat (header and composer stay usable).
+          <aside
+            aria-label="Session details"
+            className="absolute inset-y-0 right-0 z-30 w-80 max-w-[90%] border-l bg-background shadow-xl xl:w-96"
+          >
+            <DetailsPanel {...menuProps} open variant="panel" />
+          </aside>
+        ) : null}
         {errText ? (
           <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center px-3">
             <div className="flex max-w-full items-center gap-2 rounded-full border border-destructive/40 bg-popover/95 px-3 py-1.5 text-xs text-destructive shadow-md backdrop-blur-sm">
@@ -527,7 +548,7 @@ export function SessionScreen({
         <section aria-label={`Session ${name}`} className="relative flex min-w-0 flex-1 flex-col" {...drop.bind}>
           {column}
         </section>
-        {inspector ? (
+        {inspector && !detailsOverlay ? (
           <aside aria-label="Session details" className="w-80 shrink-0 border-l bg-card/30 xl:w-96">
             <DetailsPanel {...menuProps} open variant="panel" />
           </aside>

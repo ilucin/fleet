@@ -33,8 +33,12 @@ export interface BoardProps {
   now: number
   cursorKey: string | null
   selectedKey: string | null
-  /** A session is open next to the board: columns get a little narrower. */
-  compact: boolean
+  /**
+   * Width (px) of the session flyout over the board's right edge, 0 when none. The columns keep
+   * their size and place; the board can scroll the last ones out from under it, and the cursor
+   * card is scrolled clear of it.
+   */
+  overlayInset: number
   searchRef: Ref<HTMLInputElement>
   onSearchNav: (action: 'next' | 'prev' | 'open') => void
   onOpen: (s: Session) => void
@@ -48,7 +52,7 @@ export interface BoardProps {
  * Regroup) over horizontal Kanban columns — one per group, cards = sessions. The same
  * search / status / host filters as the list apply to the cards.
  */
-export function Board({ list, groups, columns, now, cursorKey, selectedKey, compact, searchRef, onSearchNav, onOpen, onNew, view, onView }: BoardProps) {
+export function Board({ list, groups, columns, now, cursorKey, selectedKey, overlayInset, searchRef, onSearchNav, onOpen, onNew, view, onView }: BoardProps) {
   const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view: lv, hostCounts, summary, unreachable, note } = list
   const boardRef = useRef<HTMLDivElement>(null)
 
@@ -188,7 +192,12 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
         </div>
       ) : null}
 
-      <div ref={boardRef} data-session-list className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-x-contain p-3">
+      <div
+        ref={boardRef}
+        data-session-list
+        className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto overscroll-x-contain p-3"
+        style={overlayInset ? { scrollPaddingRight: overlayInset + 12 } : undefined}
+      >
         {!fleet ? (
           [0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-72 shrink-0 rounded-xl" />)
         ) : columns.length === 0 ? (
@@ -201,8 +210,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
               key={c.id}
               aria-label={`${c.label}: ${c.sessions.length} sessions`}
               className={cn(
-                'flex max-h-full shrink-0 flex-col rounded-xl border bg-muted/30',
-                compact ? 'w-64' : 'w-72',
+                'flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30',
                 c.ungrouped && 'border-dashed',
               )}
             >
@@ -232,6 +240,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, comp
             </section>
           ))
         )}
+        {fleet && columns.length && overlayInset ? <div aria-hidden className="shrink-0" style={{ width: overlayInset }} /> : null}
       </div>
     </div>
   )

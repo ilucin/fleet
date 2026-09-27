@@ -52,7 +52,8 @@ src/
                       parsePathRef() (`:line[:col]` / `#L12`), POSIX helpers normalizePath() / dirname() / resolveFrom()
   lib/attach.ts       attachments: insertPaths() (paths at the caret, padded), formatPath() (quote on spaces),
                       uploadName() (clipboard images → pasted-<stamp>.<ext>), overLimit(), formatBytes(), dragHasFiles()
-  lib/layout.ts       sidebar width bounds + clampSidebarWidth()
+  lib/layout.ts       sidebar width bounds + clampSidebarWidth(); Board flyout bounds: clampFlyoutWidth(),
+                      defaultFlyoutWidth(), flyoutMaxWidth(), detailsFitBeside()
   lib/gestures.ts     touch gestures: swipeIntent() (composer chips), pullIntent() (list filter drawer),
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
@@ -253,9 +254,13 @@ session in the pane), so a link opens the same session on either layout.
 - **Board** (`b`, the toggle in the sidebar / board header, or ⌘K): the Kanban replaces the
   sidebar — full width, one column per group (label, status dots, count, description), cards
   with status, name, host, subtitle, status / `waiting_for`, context meter and age. Clicking a
-  card (or j/k + Enter / o, walking the columns left to right) opens the session in the normal
-  pane to the right of the board (`#/s/<host>/<id>`, same route as the list), with the board
-  still visible and scrollable beside it; Esc closes the pane. `[` does nothing on the board.
+  card (or j/k + Enter / o, walking the columns left to right) opens the session as a non-modal
+  flyout over the board's right edge (`#/s/<host>/<id>`, same route as the list): the board keeps
+  its width and layout, stays scrollable (the last columns scroll out from under the flyout) and
+  clickable — another card switches the flyout. Its left edge resizes it (drag, or focus it and
+  ←/→, Shift for bigger steps; double-click resets to 55% of the board; min 420px, max the board
+  minus 240px; `fleet.flyoutWidth`). Esc (outside a field) or ✕ closes it. A flyout narrower than
+  54rem lays the Details panel over the chat instead of beside it. `[` does nothing on the board.
 - **Details panel** (right, `i`, the header button or ⌘K; ✕ top-right closes it; `fleet.inspector`,
   open by default from 1440px): the mobile ⋯ drawer's content (`DetailsPanel`) — the brief first
   (summary, todos, resources, continue), then chat/terminal, scrollback, auto-name,

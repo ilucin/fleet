@@ -41,7 +41,17 @@ import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
-import { clampSidebarWidth, SIDEBAR_DEFAULT_W, SIDEBAR_MAX_W, SIDEBAR_MIN_W } from '@/lib/layout'
+import {
+  clampFlyoutWidth,
+  clampSidebarWidth,
+  detailsFitBeside,
+  FLYOUT_KEY_STEP,
+  FLYOUT_MIN_W,
+  flyoutMaxWidth,
+  SIDEBAR_DEFAULT_W,
+  SIDEBAR_MAX_W,
+  SIDEBAR_MIN_W,
+} from '@/lib/layout'
 import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutAction } from '@/lib/shortcuts'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
@@ -83,7 +93,8 @@ export function DesktopShell() {
   const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
 
   // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
-  // session sits in the pane to its right, so j/k, Enter and Esc work the same way.
+  // session is a flyout over its right edge (the board never relayouts), so j/k, Enter and
+  // Esc work the same way.
   const [mode, setMode] = useViewMode()
   const board = mode === 'board'
   const toggleView = () => setMode(board ? 'list' : 'board')
@@ -287,6 +298,36 @@ export function DesktopShell() {
     drag.current = null
   }
 
+  // --- board flyout: width pref (`fleet.flyoutWidth`, 0 = default share), bounded by the board --
+  const boardAreaRef = useRef<HTMLDivElement>(null)
+  const [boardW, setBoardW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
+  useEffect(() => {
+    const el = boardAreaRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([entry]) => entry && setBoardW(entry.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [board])
+  const [flyoutPref, setFlyoutPref] = usePersistentState<number>('fleet.flyoutWidth', 0, (r) => {
+    const n = Number(r)
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined
+  })
+  const flyoutW = clampFlyoutWidth(flyoutPref, boardW)
+  const flyoutDrag = useRef<{ x: number; w: number } | null>(null)
+  const onFlyoutDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    flyoutDrag.current = { x: e.clientX, w: flyoutW }
+  }
+  // The handle is the flyout's left edge: dragging left widens it.
+  const onFlyoutMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!flyoutDrag.current) return
+    setFlyoutPref(clampFlyoutWidth(flyoutDrag.current.w - (e.clientX - flyoutDrag.current.x), boardW))
+  }
+  const onFlyoutUp = () => {
+    flyoutDrag.current = null
+  }
+
   // --- palette actions -----------------------------------------------------------
   const paletteSessions = useMemo(() => allSessions(fleet).sort(byLastActivity), [fleet])
   const attachCmd = sessionAttachCommand(selectedSession)
@@ -380,6 +421,8 @@ export function DesktopShell() {
       onToggleInspector={toggleInspector}
       paneRef={paneRef}
       autoFocusComposer={focusOnOpen === selectedKey}
+      onClose={board ? () => navigate('/') : undefined}
+      detailsOverlay={board && !detailsFitBeside(flyoutW, parseFloat(getComputedStyle(document.documentElement).fontSize))}
     />
   ) : settingsOpen ? (
     <SettingsScreen layout="pane" />
@@ -388,23 +431,72 @@ export function DesktopShell() {
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
       {board ? (
-        <section aria-label="Session board" className="flex min-w-0 flex-1">
-          <Board
-            list={list}
-            groups={groups}
-            columns={columns}
-            now={now}
-            cursorKey={cursorKey}
-            selectedKey={selectedKey}
-            compact={!!selected}
-            searchRef={searchRef}
-            onSearchNav={onSearchNav}
-            onOpen={(s) => openSession(s, false)}
-            onNew={() => setNewOpen(true)}
-            view={mode}
-            onView={setMode}
-          />
-        </section>
+        <div ref={boardAreaRef} className="relative flex min-w-0 flex-1">
+          <section aria-label="Session board" className="flex min-w-0 flex-1">
+            <Board
+              list={list}
+              groups={groups}
+              columns={columns}
+              now={now}
+              cursorKey={cursorKey}
+              selectedKey={selectedKey}
+              overlayInset={pane ? flyoutW : 0}
+              searchRef={searchRef}
+              onSearchNav={onSearchNav}
+              onOpen={(s) => openSession(s, false)}
+              onNew={() => setNewOpen(true)}
+              view={mode}
+              onView={setMode}
+            />
+          </section>
+          {pane ? (
+            // Non-modal: no backdrop, the board stays scrollable and clickable (a card switches the session).
+            <main
+              className={cn(
+                'absolute inset-y-0 right-0 z-20 flex border-l bg-background shadow-2xl',
+                'animate-in duration-200 ease-out fade-in-0 slide-in-from-right-8 motion-reduce:animate-none',
+              )}
+              style={{ width: flyoutW }}
+            >
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize session panel"
+                aria-valuemin={Math.min(FLYOUT_MIN_W, flyoutMaxWidth(boardW))}
+                aria-valuemax={flyoutMaxWidth(boardW)}
+                aria-valuenow={flyoutW}
+                tabIndex={0}
+                title="Drag to resize · double-click to reset"
+                onPointerDown={onFlyoutDown}
+                onPointerMove={onFlyoutMove}
+                onPointerUp={onFlyoutUp}
+                onPointerCancel={onFlyoutUp}
+                onDoubleClick={() => setFlyoutPref(0)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    e.preventDefault()
+                    const step = e.shiftKey ? FLYOUT_KEY_STEP * 4 : FLYOUT_KEY_STEP
+                    setFlyoutPref(clampFlyoutWidth(flyoutW + (e.key === 'ArrowLeft' ? step : -step), boardW))
+                  }
+                }}
+                className={cn(
+                  'group/grip absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize touch-none outline-none',
+                  'after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:transition-colors',
+                  'hover:after:w-0.5 hover:after:bg-primary/50 focus-visible:after:w-0.5 focus-visible:after:bg-ring',
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'absolute top-1/2 left-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-background opacity-0 shadow-sm transition-opacity',
+                    'group-hover/grip:opacity-100 group-focus-visible/grip:opacity-100',
+                  )}
+                />
+              </div>
+              {pane}
+            </main>
+          ) : null}
+        </div>
       ) : sidebarOpen ? (
         <aside aria-label="Session list" className="relative shrink-0 border-r bg-background" style={{ width: sidebarW }}>
           <Sidebar
@@ -459,11 +551,7 @@ export function DesktopShell() {
         />
       )}
 
-      {board ? (
-        pane ? (
-          <main className="flex w-[min(62%,1200px)] min-w-[34rem] shrink-0 border-l">{pane}</main>
-        ) : null
-      ) : (
+      {board ? null : (
         <main className="flex min-w-0 flex-1">
           {pane ?? (
             <EmptyPane
