@@ -16,14 +16,17 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <script>
-      // Pre-paint theme (same rule as ThemeProvider): dark unless chosen/OS-preferred light.
+      // Pre-paint theme (same rules as ThemeProvider): dark unless chosen/OS-preferred light, plus
+      // the palette (lib/palettes.ts; theme-color = the palette's --background per mode).
       try {
         var t = localStorage.getItem('fleet.theme')
         var light = t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)
-        if (light) {
-          document.documentElement.classList.remove('dark')
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
-        }
+        var p = localStorage.getItem('fleet.palette')
+        var colors = { default: ['#0b0c0e', '#ffffff'], earth: ['#1a1512', '#f7f2ea'], dusk: ['#121119', '#faf9fc'] }
+        if (!colors.hasOwnProperty(p)) p = 'default'
+        if (light) document.documentElement.classList.remove('dark')
+        if (p !== 'default') document.documentElement.dataset.palette = p
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', colors[p][light ? 1 : 0])
       } catch (e) {}
       // Pre-paint text size (same rule as PrefsProvider / lib/prefs.ts rootFontSize): scales every rem.
       try {

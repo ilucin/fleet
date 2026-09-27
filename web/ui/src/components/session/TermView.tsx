@@ -28,7 +28,7 @@ export function TermView({ text, failed, fontSize, jumpSignal }: TermViewProps) 
   }, [jumpSignal, jump])
 
   return (
-    <div className="relative min-h-0 flex-1 bg-black/[0.03] dark:bg-black/40">
+    <div className="relative min-h-0 flex-1 bg-terminal">
       <pre
         ref={ref}
         onScroll={onScroll}

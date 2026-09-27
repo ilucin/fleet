@@ -58,6 +58,8 @@ src/
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
                       font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
+  lib/palettes.ts     colour palettes (Settings → Theme: Default / Earth / Dusk, `data-palette` on <html>, tokens in
+                      index.css): PALETTES (picker swatches), parsePalette(), themeColor() (meta theme-color per mode)
   lib/notes.ts        notes explorer: buildTree(), notesHref() / parseNotesLocation() (`#/notes/<host>/<path>`),
                       indexNotes() + resolveNoteLink() (relative + `[[wiki]]` links), splitRanges(), highlightTerms()
   lib/drafts.ts       one-shot composer drafts (setDraft / takeDraft) — "Send to session" from a note

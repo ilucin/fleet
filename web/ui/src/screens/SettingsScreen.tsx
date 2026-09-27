@@ -11,6 +11,7 @@ import { usePrefs } from '@/hooks/usePrefs'
 import { useSessionList } from '@/hooks/useSessionList'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
+import { PALETTES, parsePalette } from '@/lib/palettes'
 import { TERM_FONT_SIZES, TEXT_SIZES, TEXT_SIZE_LABELS } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
 
@@ -18,8 +19,8 @@ const segItem =
   'h-9 flex-1 gap-1.5 rounded-md px-3 text-[0.8125rem] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-accent'
 
 /**
- * `#/settings`: the viewer's global preferences — text size (scales the whole app), terminal
- * text, theme, progress notes. Stored in this browser (localStorage). `screen` = the mobile page
+ * `#/settings`: the viewer's global preferences — text size (scales the whole app), theme
+ * (colour palette), mode (light/dark), terminal text, progress notes. Stored in this browser (localStorage). `screen` = the mobile page
  * (back button, swipe back); `pane` = the desktop main pane (✕ / Esc back to `#/`).
  */
 export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
@@ -54,6 +55,29 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
             ))}
           </ToggleGroup>
         </Stacked>
+        <Stacked label="Theme" hint="Colours for the whole app">
+          <ThemePicker />
+        </Stacked>
+        <Stacked label="Mode" hint="Light or dark; every theme has both">
+          <ToggleGroup
+            type="single"
+            value={theme}
+            onValueChange={(v) => v && setTheme(v as ThemeChoice)}
+            spacing={0}
+            aria-label="Mode"
+            className="w-full rounded-lg bg-muted p-1"
+          >
+            <ToggleGroupItem value="system" className={segItem}>
+              <MonitorIcon /> System
+            </ToggleGroupItem>
+            <ToggleGroupItem value="dark" className={segItem}>
+              <MoonIcon /> Dark
+            </ToggleGroupItem>
+            <ToggleGroupItem value="light" className={segItem}>
+              <SunIcon /> Light
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Stacked>
         <Stacked label="Terminal text" hint="The terminal view; follows the text size">
           <ToggleGroup
             type="single"
@@ -68,26 +92,6 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
                 {['Small', 'Default', 'Large'][i] ?? `${n}px`}
               </ToggleGroupItem>
             ))}
-          </ToggleGroup>
-        </Stacked>
-        <Stacked label="Theme">
-          <ToggleGroup
-            type="single"
-            value={theme}
-            onValueChange={(v) => v && setTheme(v as ThemeChoice)}
-            spacing={0}
-            aria-label="Theme"
-            className="w-full rounded-lg bg-muted p-1"
-          >
-            <ToggleGroupItem value="system" className={segItem}>
-              <MonitorIcon /> System
-            </ToggleGroupItem>
-            <ToggleGroupItem value="dark" className={segItem}>
-              <MoonIcon /> Dark
-            </ToggleGroupItem>
-            <ToggleGroupItem value="light" className={segItem}>
-              <SunIcon /> Light
-            </ToggleGroupItem>
           </ToggleGroup>
         </Stacked>
       </Section>
@@ -137,6 +141,48 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
       </ScreenHeader>
       {content}
     </div>
+  )
+}
+
+/**
+ * Theme (colour palette) picker: a radio group of swatches, each previewing that palette's
+ * page / card / primary in the current mode. Arrow keys move between them (radix roving focus).
+ */
+function ThemePicker() {
+  const { palette, setPalette, resolved } = useTheme()
+  return (
+    <ToggleGroup
+      type="single"
+      value={palette}
+      onValueChange={(v) => v && setPalette(parsePalette(v))}
+      aria-label="Theme"
+      className="grid w-full grid-cols-3 gap-2"
+    >
+      {PALETTES.map((p) => {
+        const sw = p.swatch[resolved]
+        return (
+          <ToggleGroupItem
+            key={p.id}
+            value={p.id}
+            title={p.hint}
+            className="h-auto min-w-0 flex-col items-stretch gap-1.5 rounded-xl border bg-transparent p-1.5 pb-1 text-[0.8125rem] font-normal text-muted-foreground hover:bg-muted/60 aria-checked:border-primary aria-checked:bg-transparent aria-checked:text-foreground aria-checked:ring-2 aria-checked:ring-primary/30 data-[state=on]:bg-transparent"
+          >
+            <span
+              aria-hidden
+              className="flex h-12 flex-col justify-between rounded-lg border border-black/10 p-1.5 dark:border-white/10"
+              style={{ background: sw.background }}
+            >
+              <span className="h-3 rounded-sm" style={{ background: sw.card }} />
+              <span className="flex items-center gap-1">
+                <span className="h-2.5 w-7 rounded-full" style={{ background: sw.primary }} />
+                <span className="h-1.5 flex-1 rounded-full opacity-60" style={{ background: sw.card }} />
+              </span>
+            </span>
+            <span className="truncate text-center">{p.label}</span>
+          </ToggleGroupItem>
+        )
+      })}
+    </ToggleGroup>
   )
 }
 

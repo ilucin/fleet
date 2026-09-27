@@ -11,6 +11,7 @@ import {
   MonitorIcon,
   MoonIcon,
   NotebookTextIcon,
+  PaletteIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PencilIcon,
@@ -44,6 +45,7 @@ import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { notesHref, parseNotesLocation } from '@/lib/notes'
+import { PALETTES } from '@/lib/palettes'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
 import {
   clampFlyoutWidth,
@@ -76,7 +78,7 @@ export function DesktopShell() {
   const now = useNow(1000)
   const list = useSessionList(now)
   const { fleet, refresh } = useFleet()
-  const { setTheme } = useTheme()
+  const { setTheme, setPalette } = useTheme()
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
   const [settingsOpen] = useRoute('/settings')
@@ -438,9 +440,16 @@ export function DesktopShell() {
     {
       heading: 'Theme',
       items: [
-        { id: 'theme-system', label: 'Theme: system', icon: <MonitorIcon />, run: () => setTheme('system') },
-        { id: 'theme-dark', label: 'Theme: dark', icon: <MoonIcon />, run: () => setTheme('dark') },
-        { id: 'theme-light', label: 'Theme: light', icon: <SunIcon />, run: () => setTheme('light') },
+        ...PALETTES.map((p) => ({
+          id: `palette-${p.id}`,
+          label: `Theme: ${p.label}`,
+          icon: <PaletteIcon />,
+          keywords: ['palette', 'colours', 'colors'],
+          run: () => setPalette(p.id),
+        })),
+        { id: 'theme-system', label: 'Mode: system', icon: <MonitorIcon />, keywords: ['theme', 'appearance'], run: () => setTheme('system') },
+        { id: 'theme-dark', label: 'Mode: dark', icon: <MoonIcon />, keywords: ['theme', 'appearance'], run: () => setTheme('dark') },
+        { id: 'theme-light', label: 'Mode: light', icon: <SunIcon />, keywords: ['theme', 'appearance'], run: () => setTheme('light') },
       ],
     },
   ]

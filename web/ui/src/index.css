@@ -29,6 +29,7 @@
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --color-dimmer: var(--dimmer);
+  --color-terminal: var(--terminal);
 
   /* fleet: session status colours (text-status-busy, bg-status-waiting, …) */
   --color-status-waiting: var(--status-waiting);
@@ -73,6 +74,7 @@
   --border: #e1e4e9;
   --input: #d6dae0;
   --ring: #93b4e8;
+  --terminal: rgb(0 0 0 / 0.03);
   --radius: 0.75rem;
 
   --status-waiting: #b86e00;
@@ -108,6 +110,7 @@
   --border: #24282f;
   --input: #2a2f37;
   --ring: #37506e;
+  --terminal: rgb(0 0 0 / 0.4);
 
   --status-waiting: #f5a524;
   --status-busy: #3ecf6b;
@@ -116,6 +119,150 @@
   --status-error: #ff6b6b;
 
   --host-0: #c9b6ff;
+  --host-1: #ffd28a;
+  --host-2: #8fd8e8;
+  --host-3: #f2a7c3;
+}
+
+/* Palettes (Settings → Theme, lib/palettes.ts): `data-palette` on <html>, orthogonal to light/dark.
+   No attribute = the default tokens above. Each palette overrides every token for both modes:
+   light is `:root[data-palette=…]` (0,2,0 — it beats plain `.dark`, which is why the palette's
+   dark variant is `:root[data-palette=…].dark`, 0,3,0). Keep lib/palettes.ts THEME_COLORS / swatches in
+   sync (palettes.test.ts checks them against this file). */
+
+/* Earth: warm paper / espresso, terracotta primary, olive-leaning status greens. */
+:root[data-palette="earth"] {
+  --background: #f7f2ea;
+  --foreground: #2b221b;
+  --card: #efe7da;
+  --card-foreground: #2b221b;
+  --popover: #fbf8f3;
+  --popover-foreground: #2b221b;
+  --primary: #a14a2a;
+  --primary-foreground: #fffaf4;
+  --secondary: #e9dfcf;
+  --secondary-foreground: #2b221b;
+  --muted: #e9dfcf;
+  --muted-foreground: #66584a;
+  --dimmer: #8a7a69;
+  --accent: #f1dccb;
+  --accent-foreground: #2b221b;
+  --destructive: #b3261e;
+  --border: #e3d8c6;
+  --input: #d8cbb6;
+  --ring: #d49a7c;
+  --terminal: #f0e9de;
+
+  --status-waiting: #9a5a00;
+  --status-busy: #3d7a26;
+  --status-idle: #6b6052;
+  --status-unknown: #9b8f80;
+  --status-error: #b3261e;
+
+  --host-0: #7449a8;
+  --host-1: #8f5400;
+  --host-2: #1f6e78;
+  --host-3: #a8365c;
+}
+
+:root[data-palette="earth"].dark {
+  --background: #1a1512;
+  --foreground: #ece3d6;
+  --card: #221c17;
+  --card-foreground: #ece3d6;
+  --popover: #2b231d;
+  --popover-foreground: #ece3d6;
+  --primary: #e39a6f;
+  --primary-foreground: #1a1512;
+  --secondary: #2b231d;
+  --secondary-foreground: #ece3d6;
+  --muted: #2b231d;
+  --muted-foreground: #b2a391;
+  --dimmer: #877866;
+  --accent: #3b2b21;
+  --accent-foreground: #fff6ec;
+  --destructive: #f07c6c;
+  --border: #342a23;
+  --input: #3d322a;
+  --ring: #724b35;
+  --terminal: #14100d;
+
+  --status-waiting: #e8aa3e;
+  --status-busy: #93c46e;
+  --status-idle: #a5978a;
+  --status-unknown: #6f6358;
+  --status-error: #f07c6c;
+
+  --host-0: #cfb6f0;
+  --host-1: #f0cf8f;
+  --host-2: #a0d6cf;
+  --host-3: #efabc1;
+}
+
+/* Dusk: muted violet-grey neutrals, violet primary. */
+:root[data-palette="dusk"] {
+  --background: #faf9fc;
+  --foreground: #1d1b26;
+  --card: #f2f0f7;
+  --card-foreground: #1d1b26;
+  --popover: #ffffff;
+  --popover-foreground: #1d1b26;
+  --primary: #6547c2;
+  --primary-foreground: #ffffff;
+  --secondary: #eae7f2;
+  --secondary-foreground: #1d1b26;
+  --muted: #eae7f2;
+  --muted-foreground: #5d586e;
+  --dimmer: #7f7991;
+  --accent: #ebe5fa;
+  --accent-foreground: #1d1b26;
+  --destructive: #cc2539;
+  --border: #e2dfea;
+  --input: #d6d1e1;
+  --ring: #b2a2e6;
+  --terminal: #f3f1f8;
+
+  --status-waiting: #ad6800;
+  --status-busy: #157a3c;
+  --status-idle: #5b5c84;
+  --status-unknown: #8d899d;
+  --status-error: #cc2539;
+
+  --host-0: #3a5fc4;
+  --host-1: #9c5900;
+  --host-2: #0f7488;
+  --host-3: #b3366a;
+}
+
+:root[data-palette="dusk"].dark {
+  --background: #121119;
+  --foreground: #e8e6f0;
+  --card: #1a1823;
+  --card-foreground: #e8e6f0;
+  --popover: #221f2d;
+  --popover-foreground: #e8e6f0;
+  --primary: #b3a0ff;
+  --primary-foreground: #121119;
+  --secondary: #221f2d;
+  --secondary-foreground: #e8e6f0;
+  --muted: #221f2d;
+  --muted-foreground: #a39fb5;
+  --dimmer: #736e86;
+  --accent: #2d2742;
+  --accent-foreground: #ffffff;
+  --destructive: #ff6b7a;
+  --border: #2a2735;
+  --input: #332f40;
+  --ring: #54478a;
+  --terminal: #0d0c12;
+
+  --status-waiting: #f5a524;
+  --status-busy: #3ecf6b;
+  --status-idle: #9290b8;
+  --status-unknown: #5f5b70;
+  --status-error: #ff6b7a;
+
+  --host-0: #a3b8ff;
   --host-1: #ffd28a;
   --host-2: #8fd8e8;
   --host-3: #f2a7c3;
