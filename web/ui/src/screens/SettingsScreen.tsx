@@ -111,7 +111,10 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
   if (pane) {
     return (
       <section aria-label="Settings" className="flex h-full min-w-0 flex-1 flex-col bg-background">
-        <header className="flex shrink-0 items-center gap-1 border-b py-1.5 pr-2 pl-4">
+        <header
+          data-tauri-drag-region="deep"
+          className="titlebar titlebar-lead flex shrink-0 items-center gap-1 border-b py-1.5 pr-2 pl-4 [--titlebar-pad:1rem]"
+        >
           <h1 className="min-w-0 flex-1 text-[0.9375rem] leading-tight font-bold">Settings</h1>
           <Button variant="ghost" size="icon" aria-label="Close settings" title="Close (Esc)" onClick={back} className="size-11 shrink-0 rounded-xl">
             <XIcon className="size-5" />

@@ -217,7 +217,10 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
   if (pane) {
     return (
       <section aria-label="Notes" className="flex h-full min-w-0 flex-1 flex-col bg-background">
-        <header className="flex shrink-0 items-center gap-2 border-b py-1.5 pr-2 pl-2">
+        <header
+          data-tauri-drag-region="deep"
+          className="titlebar titlebar-lead flex shrink-0 items-center gap-2 border-b py-1.5 pr-2 pl-2 [--titlebar-pad:0.5rem]"
+        >
           <Button asChild variant="ghost" size="sm" className="shrink-0 text-muted-foreground">
             <a href="#/" title="Back to the sessions (Esc)">
               <ChevronLeftIcon /> Sessions

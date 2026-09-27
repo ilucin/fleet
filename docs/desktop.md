@@ -72,12 +72,41 @@ within 30 s — shows "Fleet server is not running" with the error, the log tail
 | downloads | the preview's Download saves to `~/Downloads` (no overwrite: `name (1).ext`) and reveals the file in Finder |
 | files | dropping files on a session / the New session form, pasting images and the paperclip picker work as in the browser (Tauri's own drop handler is off, so the page gets the drop) |
 | clipboard | Copy path and ⌘C/⌘V/⌘X/⌘A work (Edit menu); on a plain-http tailnet URL the UI uses its non-secure-context copy fallback |
-| window | size, position and maximized/fullscreen state are remembered; the title follows the page (`(2) session · Fleet`) |
+| title bar | none: the traffic lights sit over the UI's own top bar (vertically centred on its 56 px row), the page's headers leave room for them and collapse that room in full screen, where macOS hides them |
+| dragging | drag the window by the empty parts of any top bar (sidebar / board / session / settings / notes header, the empty pane, the collapsed rail); double-click there zooms. Buttons, fields, toggles and links don't drag |
+| window | size, position and maximized/fullscreen state are remembered; the title follows the page (`(2) session · Fleet`, shown in the Window menu and Mission Control) |
 | single instance | opening the app again focuses the running one |
 
-The server's page gets no Tauri IPC: only the bundled start page may call the app's two commands
-(`connect`, `open_log`). The web app has no notifications today, so the app asks for no
+The server's page gets no app commands: only the bundled start page may call the app's two
+commands (`connect`, `open_log`). The web app has no notifications today, so the app asks for no
 notification permission.
+
+### Window chrome and the one IPC grant
+
+The window uses Tauri's `titleBarStyle: Overlay` with a hidden title, so the page draws under the
+traffic lights. The page learns it is inside the app without IPC: the window's initialization
+script (it runs on every page, the server's too) sets `data-shell="desktop"` (and the class
+`shell-desktop`), `data-fullscreen`, `--titlebar-inset-left` (88px; 0 in full screen) and
+`--titlebar-height` (56px) on `<html>`. On a page load and whenever the window resizes into or
+out of full screen, the app evaluates the same script again with the current state. The web UI's
+rules for these live in `web/ui/src/index.css` (→ "Desktop app"); without `data-shell` — any
+browser — nothing changes.
+
+Dragging uses Tauri's `data-tauri-drag-region` (`"deep"` on the top bars: any non-interactive
+part drags; buttons, inputs, links, `tabindex` and `role=button`-like elements don't). Tauri's
+drag script turns a mousedown there into the window's `start_dragging` command (and a
+double-click into `internal_toggle_maximize`), which is IPC. So the app adds one runtime
+capability, `window-drag`: exactly `core:window:allow-start-dragging` and
+`core:window:allow-internal-toggle-maximize`, for the `main` window, on the start page and on the
+resolved server's origin only (`remote.urls: ["<scheme>://<host>:<port>/*"]`). Every other
+command stays denied to the server's page (other window commands, every plugin, `connect`,
+`open_log`).
+
+Trade-off: any script running in the server's page — the UI itself, or injected content if the
+page were ever compromised — can start a window drag or zoom/unzoom the window. That is all it
+can do: no file, shell, navigation or settings access, and a drag follows the mouse until the
+button is released. Native dragging without IPC would mean hit-testing the page's layout from Rust,
+duplicating the UI's layout knowledge in the app; the narrow grant is the smaller risk.
 
 ## Develop
 
@@ -89,6 +118,7 @@ cargo clippy -p fleet-desktop --all-targets -- -D warnings
 ```
 
 Layout: `src/server.rs` (URL resolution, health probe, starting the server), `src/links.rs` (the
-navigation / new-window policy), `src/main.rs` (window, menu, plugins), `start/index.html` (the
+navigation / new-window policy), `src/shell.rs` (traffic-light position, the page's
+initialization script, the drag capability's URL pattern), `src/main.rs` (window, menu, plugins), `start/index.html` (the
 start page), `tauri.conf.json`, `icons/` (`icon.svg` is the web icon on the macOS icon grid;
 `icon.png` is rendered from it).

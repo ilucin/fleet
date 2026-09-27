@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   CodeXmlIcon,
   CopyIcon,
@@ -504,7 +504,7 @@ export function DesktopShell() {
                 'absolute inset-y-0 right-0 z-20 flex border-l bg-background shadow-2xl',
                 'animate-in duration-200 ease-out fade-in-0 slide-in-from-right-8 motion-reduce:animate-none',
               )}
-              style={{ width: flyoutW }}
+              style={{ width: flyoutW, ...titlebarOffset(boardW - flyoutW) }}
             >
               <div
                 role="separator"
@@ -600,7 +600,7 @@ export function DesktopShell() {
       )}
 
       {board || notesOpen ? null : (
-        <main className="flex min-w-0 flex-1">
+        <main className="flex min-w-0 flex-1" style={titlebarOffset(sidebarOpen ? sidebarW : '3rem')}>
           {pane ?? (
             <EmptyPane
               waitingSessions={paletteSessions.filter((s) => s.status === 'waiting').slice(0, 6)}
@@ -625,6 +625,12 @@ export function DesktopShell() {
   )
 }
 
+/** How far a pane's top bar is from the window's left edge: the desktop app's traffic lights
+ *  (index.css → Desktop app) only need room in a bar that starts under them. */
+function titlebarOffset(left: number | string): CSSProperties {
+  return { '--titlebar-offset': typeof left === 'number' ? `${left}px` : left } as CSSProperties
+}
+
 function EmptyPane({ waitingSessions, modKey, onOpen }: { waitingSessions: Session[]; modKey: string; onOpen: (s: Session) => void }) {
   const hints: [string[], string][] = [
     [['j', 'k'], 'move'],
@@ -635,7 +641,7 @@ function EmptyPane({ waitingSessions, modKey, onOpen }: { waitingSessions: Sessi
     [['?'], 'all shortcuts'],
   ]
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
+    <div data-tauri-drag-region className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
       <div>
         <p className="text-base font-semibold">No session open</p>
         <p className="mt-1 text-sm text-dimmer">Pick one from the list, or use the keyboard.</p>

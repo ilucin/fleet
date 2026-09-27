@@ -197,3 +197,26 @@
     display: none;
   }
 }
+
+/* Desktop app (Fleet.app, docs/desktop.md): no OS title bar; the traffic lights sit over the
+   top-left corner of the page. The app's initialization script sets data-shell="desktop",
+   data-fullscreen and --titlebar-inset-left (0 in full screen, where the lights hide) /
+   --titlebar-height on <html>. Nothing here applies in a browser.
+   .titlebar       a top bar row: at least as tall as the traffic-light row (bars with their own
+                   bottom border get the extra pixel, so every bar lines up).
+   .titlebar-lead  a top bar that may start under the lights: its left padding becomes the inset,
+                   less --titlebar-offset (how far the bar starts from the window's left edge, set
+                   by the layout), never below its own padding (--titlebar-pad).
+   .titlebar-rail  the collapsed sidebar rail: its buttons start below the lights. */
+:root[data-shell="desktop"] .titlebar {
+  min-height: var(--titlebar-height, 56px);
+}
+:root[data-shell="desktop"] .titlebar.border-b {
+  min-height: calc(var(--titlebar-height, 56px) + 1px);
+}
+:root[data-shell="desktop"] .titlebar-lead {
+  padding-left: max(var(--titlebar-pad, 0px), calc(var(--titlebar-inset-left, 0px) - var(--titlebar-offset, 0px)));
+}
+:root[data-shell="desktop"]:not([data-fullscreen="true"]) .titlebar-rail {
+  padding-top: var(--titlebar-height, 56px);
+}

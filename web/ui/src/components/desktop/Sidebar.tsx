@@ -71,8 +71,9 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <div className="shrink-0 space-y-2 border-b px-3 pt-3 pb-2.5">
-        <div className="flex min-h-8 items-center gap-2">
+      <div data-tauri-drag-region className="shrink-0 space-y-2 border-b px-3 pt-3 pb-2.5">
+        {/* The desktop app's traffic lights sit over this row (see index.css → Desktop app). */}
+        <div data-tauri-drag-region="deep" className="titlebar-lead flex min-h-8 items-center gap-2 [--titlebar-offset:0.75rem]">
           <h1 className="text-lg font-bold tracking-tight">Fleet</h1>
           {fleet ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums" aria-label="Status summary">
@@ -245,7 +246,7 @@ export function SidebarRail({
   onHelp: () => void
 }) {
   return (
-    <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r py-3">
+    <div data-tauri-drag-region className="titlebar-rail flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r py-3">
       <Button variant="ghost" size="icon" aria-label="Expand sidebar" title="Expand sidebar ([)" onClick={onExpand}>
         <PanelLeftOpenIcon />
       </Button>

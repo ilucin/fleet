@@ -381,10 +381,15 @@ export function SessionScreen({
 
   const column = (
     <>
-      <header className="z-20 shrink-0 border-b bg-background/90 pt-safe px-safe backdrop-blur-md backdrop-saturate-150">
+      <header
+        data-tauri-drag-region={pane ? 'deep' : undefined}
+        className="z-20 shrink-0 border-b bg-background/90 pt-safe px-safe backdrop-blur-md backdrop-saturate-150"
+      >
         <div
           className={
-            pane ? 'flex w-full items-center gap-1 py-1.5 pr-2 pl-4' : 'mx-auto flex w-full max-w-3xl items-center gap-1 py-1.5 pr-2 pl-1'
+            pane
+              ? 'titlebar titlebar-lead flex w-full items-center gap-1 py-1.5 pr-2 pl-4 [--titlebar-pad:1rem]'
+              : 'mx-auto flex w-full max-w-3xl items-center gap-1 py-1.5 pr-2 pl-1'
           }
         >
           {pane ? null : (

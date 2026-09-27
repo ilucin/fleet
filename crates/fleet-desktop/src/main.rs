@@ -1,19 +1,23 @@
 //! Fleet as a macOS app: one window on this machine's Fleet web server
 //! (`fleet web serve`), which the app starts when nothing is listening.
-//! The server's page gets no IPC; only the bundled start page (`start/`) does.
+//! The server's page gets no app commands (only the bundled start page, `start/`,
+//! does) — just the window-dragging permission its top bar needs (see `shell`).
 
 mod links;
 mod server;
+mod shell;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::ipc::CapabilityBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::webview::{DownloadEvent, NewWindowResponse};
+use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
 use tauri::{
     AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -33,6 +37,8 @@ struct State {
     /// The `fleet web serve` this app started, and when.
     child: Mutex<Option<(Child, Instant)>>,
     downloads: Mutex<HashMap<String, PathBuf>>,
+    /// The full-screen state the page was last told (see `sync_shell`).
+    fullscreen: AtomicBool,
 }
 
 impl State {
@@ -254,11 +260,17 @@ fn build_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .map(|t| t.url.clone())
         .unwrap_or_else(|_| start_page());
     let dl = app.clone();
-    let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Fleet")
         .inner_size(1280.0, 820.0)
         .min_inner_size(420.0, 480.0)
         .visible(false)
+        .initialization_script(shell::script(false))
+        .on_page_load(|w, p| {
+            if p.event() == PageLoadEvent::Finished {
+                sync_shell(&w, true);
+            }
+        })
         // Let the page get file drops (composer attachments) instead of Tauri.
         .disable_drag_drop_handler()
         .on_navigation(move |url| match links::navigation(url, &server) {
@@ -301,11 +313,50 @@ fn build_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
                 _ => {}
             }
             true
-        })
-        .build()?;
+        });
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(
+            shell::TRAFFIC_LIGHTS.0,
+            shell::TRAFFIC_LIGHTS.1,
+        ));
+    let w = builder.build()?;
     let _ = w.restore_state(StateFlags::all() & !StateFlags::VISIBLE);
     w.show()?;
     Ok(w)
+}
+
+/// Tell the page whether the window is in full screen (the traffic lights hide
+/// there, so its top-bar inset collapses) — when it changed, or always (`force`,
+/// after a page load, which starts from the initialization script's default).
+fn sync_shell(w: &WebviewWindow, force: bool) {
+    let Ok(fs) = w.is_fullscreen() else { return };
+    let last = w.state::<State>().fullscreen.swap(fs, Ordering::Relaxed);
+    if force || last != fs {
+        let _ = w.eval(shell::script(fs));
+    }
+}
+
+/// Window dragging for the page's top bar (`data-tauri-drag-region`): Tauri's
+/// drag script calls these two window commands. Granted to the start page and
+/// the server's origin, in this window only — nothing else is exposed to the page.
+fn allow_window_drag(app: &AppHandle) -> tauri::Result<()> {
+    let mut cap = CapabilityBuilder::new("window-drag")
+        .window("main")
+        .permission("core:window:allow-start-dragging")
+        .permission("core:window:allow-internal-toggle-maximize");
+    let st = app.state::<State>();
+    if let Some(p) = st
+        .target
+        .as_ref()
+        .ok()
+        .and_then(|t| shell::drag_pattern(&t.url))
+    {
+        cap = cap.remote(p);
+    }
+    app.add_capability(cap)
 }
 
 fn show_main(app: &AppHandle) {
@@ -337,19 +388,30 @@ fn main() {
             path: OnceLock::new(),
             child: Mutex::new(None),
             downloads: Mutex::new(HashMap::new()),
+            fullscreen: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![connect, open_log])
         .menu(menu)
         .on_menu_event(|app, ev| on_menu(app, ev.id().as_ref()))
         .setup(|app| {
+            allow_window_drag(app.handle())?;
             build_window(app.handle())?;
             Ok(())
         })
         .on_window_event(|w, ev| {
             // ⌘W / the close button hide the window; ⌘Q quits.
-            if let WindowEvent::CloseRequested { api, .. } = ev {
-                api.prevent_close();
-                let _ = w.hide();
+            match ev {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = w.hide();
+                }
+                // Entering / leaving full screen resizes the window.
+                WindowEvent::Resized(_) => {
+                    if let Some(wv) = w.app_handle().get_webview_window(w.label()) {
+                        sync_shell(&wv, false);
+                    }
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

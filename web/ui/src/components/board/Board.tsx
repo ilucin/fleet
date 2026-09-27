@@ -81,7 +81,10 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 pt-3 pb-2.5">
+      <div
+        data-tauri-drag-region="deep"
+        className="titlebar-lead flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 pt-3 pb-2.5 [--titlebar-pad:1rem]"
+      >
         <h1 className="text-lg font-bold tracking-tight">Fleet</h1>
         {fleet ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums" aria-label="Status summary">
