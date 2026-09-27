@@ -328,8 +328,10 @@ prompt). The user can edit it; their edits are authoritative.
 **Storage.** One file per session on the host the session lives on:
 `$FLEET_BRIEFS_DIR/<session_id>.md`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs/<session_id>.md`
 (dir `0700`, files `0600`), always written atomically (temp file + rename). The web server owns
-generation (`web/lib/briefs.mjs`); any other reader/writer (a `fleet brief` CLI) uses the same
-files and must follow the same format and merge rules.
+generation (`web/lib/briefs.mjs`); any other reader/writer — `fleet brief` (`core::brief`, a port
+of `web/lib/brief-format.mjs` and the PUT rules) — uses the same files and must follow the same
+format and merge rules. Both implementations pin the shared fixtures in `testdata/briefs/`
+(regenerate the expected outputs from the server code with `node testdata/briefs/gen.mjs`).
 
 **Format** (a contract, like the JSON outputs — add keys freely, never rename or retype one):
 

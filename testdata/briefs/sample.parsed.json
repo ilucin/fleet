@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "session": "aaaaaaaa-1111-2222-3333-444444444444",
+    "host": "laptop",
+    "cwd": "~/Code/project",
+    "updated": "2026-01-02T03:04:05.000Z",
+    "generatedThrough": 48213,
+    "generatedAt": "2026-01-02T03:04:05.000Z",
+    "todos": "3f2a9c01b7de",
+    "dismissed": [
+      "https://github.com/owner/repo/pull/9"
+    ],
+    "zeta": "kept as is",
+    "alpha": {
+      "nested": [
+        1,
+        2
+      ],
+      "b": "x"
+    },
+    "quoted": "123"
+  },
+  "preamble": "A note before the first heading.",
+  "summary": "Fixing the login redirect loop in ~/Code/project on branch fix-login.\n\nIt is in review.",
+  "resourcesText": "- PR: [owner/repo#12](https://github.com/owner/repo/pull/12)\n- File: `src/login.ts`\n* Branch: `fix-login`\n+ see https://github.com/owner/repo/issues/7.\n- Artifact: [Login report](https://claude.ai/code/artifact/0123456789abcdef)\n- link: https://docs.example.dev/auth/)\n- a hand-written line, no kind",
+  "planText": "- [x] reproduce the loop\n* [X] write a failing test\n- [ ] fix the redirect (in progress)\nnot a checkbox\n- [ ] open the PR",
+  "extra": [
+    {
+      "heading": "Notes",
+      "body": "free text the user added"
+    }
+  ],
+  "resources": [
+    {
+      "kind": "PR",
+      "label": "owner/repo#12",
+      "url": "https://github.com/owner/repo/pull/12",
+      "path": null,
+      "text": "PR: [owner/repo#12](https://github.com/owner/repo/pull/12)",
+      "key": "https://github.com/owner/repo/pull/12"
+    },
+    {
+      "kind": "File",
+      "label": "src/login.ts",
+      "url": null,
+      "path": "src/login.ts",
+      "text": "File: `src/login.ts`",
+      "key": "src/login.ts"
+    },
+    {
+      "kind": "Branch",
+      "label": "fix-login",
+      "url": null,
+      "path": "fix-login",
+      "text": "Branch: `fix-login`",
+      "key": "branch:fix-login"
+    },
+    {
+      "kind": "Issue",
+      "label": "https://github.com/owner/repo/issues/7",
+      "url": "https://github.com/owner/repo/issues/7",
+      "path": null,
+      "text": "see https://github.com/owner/repo/issues/7.",
+      "key": "https://github.com/owner/repo/issues/7"
+    },
+    {
+      "kind": "Artifact",
+      "label": "Login report",
+      "url": "https://claude.ai/code/artifact/0123456789abcdef",
+      "path": null,
+      "text": "Artifact: [Login report](https://claude.ai/code/artifact/0123456789abcdef)",
+      "key": "https://claude.ai/code/artifact/0123456789abcdef"
+    },
+    {
+      "kind": "Link",
+      "label": "https://docs.example.dev/auth/",
+      "url": "https://docs.example.dev/auth/",
+      "path": null,
+      "text": "link: https://docs.example.dev/auth/)",
+      "key": "https://docs.example.dev/auth"
+    },
+    {
+      "kind": null,
+      "label": "a hand-written line, no kind",
+      "url": null,
+      "path": "a hand-written line, no kind",
+      "text": "a hand-written line, no kind",
+      "key": "a hand-written line, no kind"
+    }
+  ],
+  "plan": [
+    {
+      "done": true,
+      "text": "reproduce the loop"
+    },
+    {
+      "done": true,
+      "text": "write a failing test"
+    },
+    {
+      "done": false,
+      "text": "fix the redirect (in progress)"
+    },
+    {
+      "done": false,
+      "text": "open the PR"
+    }
+  ]
+}

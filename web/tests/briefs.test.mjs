@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   addDismissed,
@@ -154,6 +155,20 @@ test('format: continue prompt carries where, resources and the first open step',
   assert.match(p, /Resources:\n- PR: \[o\/r#12\]/);
   assert.match(p, /Pick up the first open plan item \("fix"\)/);
   assert.match(continuePrompt(emptyBrief(SID), { host: 'workstation' }), /Pick up where it left off/);
+});
+
+// Shared with the Rust `core::brief` tests: both implementations must produce these bytes.
+test('format: shared fixtures in testdata/briefs (pinned by the Rust tests too)', async () => {
+  const dir = fileURLToPath(new URL('../../testdata/briefs/', import.meta.url));
+  const read = (f) => fs.readFileSync(path.join(dir, f), 'utf8');
+  const { parsedShape, humanEdit } = await import('../../testdata/briefs/gen.mjs');
+  const b = parseBrief(read('sample.md'));
+  assert.equal(serializeBrief(b), read('sample.canonical.md'));
+  assert.deepEqual(parsedShape(b), JSON.parse(read('sample.parsed.json')));
+  assert.equal(continuePrompt(b), read('sample.continue.txt'));
+  assert.equal(await humanEdit(read('sample.md'), read('edit.md')), read('sample.edited.md'));
+  assert.equal(await humanEdit(read('sample.md'), read('edit-frontmatter.md')), read('sample.edited-frontmatter.md'));
+  assert.equal(await humanEdit(null, read('edit.md')), read('empty.edited.md'));
 });
 
 // ------------------------------------------------------------------ extraction

@@ -542,7 +542,10 @@ fn default_backend() -> Backend {
     }
 }
 
-pub fn spawn(prompt: Option<String>, opts: SpawnOpts) -> Result<()> {
+pub fn spawn(prompt: Option<String>, from: Option<String>, opts: SpawnOpts) -> Result<()> {
+    if let Some(src) = from {
+        return spawn_from(&src, prompt, opts);
+    }
     let (dir, backend_kind, name) = opts.resolve()?;
     let model = opts
         .model
@@ -552,6 +555,15 @@ pub fn spawn(prompt: Option<String>, opts: SpawnOpts) -> Result<()> {
         .flatten();
     let prompt = prompt.unwrap_or_default();
     let launcher = with_model(&resolve_launcher(), model.as_deref());
+    if crate::core::hosts::dry_run() {
+        let line =
+            backend::launch_command(&dir, Prompt::Inline(&prompt), name.as_deref(), &launcher);
+        println!(
+            "dry-run: would spawn a {} session: {line}",
+            backend_kind.label()
+        );
+        return Ok(());
+    }
     let desc = backend::spawn(
         backend_kind,
         &dir,
@@ -566,6 +578,74 @@ pub fn spawn(prompt: Option<String>, opts: SpawnOpts) -> Result<()> {
     } else {
         println!("{desc} in {} — \"{prompt}\"", home_rel(&dir));
     }
+    Ok(())
+}
+
+/// `spawn --from <session>`: a new session in the source's cwd (on this host — `-H` already
+/// brought us to the source's host) whose first prompt is the brief's continue prompt, plus
+/// `extra` after a blank line. The prompt goes through a file, like a handoff brief: it is
+/// multi-line, and the file stays as the record of what was handed on.
+fn spawn_from(source: &str, extra: Option<String>, mut opts: SpawnOpts) -> Result<()> {
+    let c = crate::cli::brief::continue_from(source)?;
+    if opts.dir.is_none() {
+        opts.dir = Some(c.cwd.clone().ok_or_else(|| {
+            Error::Other(format!(
+                "no working directory known for {} — pass --dir",
+                c.label
+            ))
+        })?);
+    }
+    let (dir, backend_kind, name) = opts.resolve()?;
+    let model = opts
+        .model
+        .as_deref()
+        .map(clean_model)
+        .transpose()?
+        .flatten();
+    let mut text = c.prompt.clone();
+    if let Some(e) = extra.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+        text.push_str("\n\n");
+        text.push_str(e);
+    }
+    let now = chrono::Local::now();
+    let short: String = c.id.chars().take(8).collect();
+    let path = handoff_dir().join(format!(
+        "{}-continue-{short}.md",
+        now.format("%Y%m%d-%H%M%S")
+    ));
+    let path_s = path.display().to_string();
+    let launcher = with_model(&resolve_launcher(), model.as_deref());
+    if crate::core::hosts::dry_run() {
+        let line = backend::launch_command(&dir, Prompt::File(&path_s), name.as_deref(), &launcher);
+        println!(
+            "dry-run: would spawn a {} session continuing {}: {line}",
+            backend_kind.label(),
+            c.label
+        );
+        println!(
+            "dry-run: first prompt ({} — not written):\n{text}",
+            home_rel(&path_s)
+        );
+        return Ok(());
+    }
+    std::fs::create_dir_all(handoff_dir())?;
+    std::fs::write(&path, &text)?;
+    let desc = backend::spawn(
+        backend_kind,
+        &dir,
+        Prompt::File(&path_s),
+        name.as_deref(),
+        opts.tmux_session.as_deref(),
+        opts.window,
+        &launcher,
+    )?;
+    println!(
+        "{} {desc} in {} — continuing {} (prompt: {})",
+        "→".cyan(),
+        home_rel(&dir),
+        c.label.bold(),
+        home_rel(&path_s).dimmed()
+    );
     Ok(())
 }
 
@@ -695,6 +775,20 @@ pub fn handoff(
         now.format("%Y%m%d-%H%M%S"),
         slug(&brief)
     ));
+    if crate::core::hosts::dry_run() {
+        let launcher = with_model(&resolve_launcher(), model.as_deref());
+        let path_s = path.display().to_string();
+        let line = backend::launch_command(&dir, Prompt::File(&path_s), name.as_deref(), &launcher);
+        println!(
+            "dry-run: would hand off to a {} session: {line}",
+            backend_kind.label()
+        );
+        println!(
+            "dry-run: brief ({} — not written):\n{text}",
+            home_rel(&path_s)
+        );
+        return Ok(());
+    }
     std::fs::create_dir_all(handoff_dir())?;
     std::fs::write(&path, &text)?;
 

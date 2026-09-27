@@ -4,7 +4,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use fleet::cli::{
-    commands, config_cmd, group, hosts as host_cmds, init, skill, tmux as tmux_cmds, web,
+    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, skill,
+    tmux as tmux_cmds, web,
 };
 use fleet::core::config;
 use fleet::core::discovery::Backend;
@@ -173,10 +174,38 @@ enum Commands {
         input: Option<String>,
     },
 
+    /// A session's brief: what it is doing, what it produced, its plan (read, edit, regenerate)
+    Brief {
+        /// generated title, session name, sessionId prefix, or pid — or the full id of a gone
+        /// session whose brief is still there
+        target: String,
+        /// The parsed brief as JSON (the web API's shape, plus `body` and `path`)
+        #[arg(long, conflicts_with = "prompt")]
+        json: bool,
+        /// Only the prompt that continues this session's work in a new one (for piping)
+        #[arg(long)]
+        prompt: bool,
+        /// Edit the body in $VISUAL / $EDITOR (saved as a human edit)
+        #[arg(long, conflicts_with_all = ["set", "regenerate", "prompt"])]
+        edit: bool,
+        /// Save the markdown on stdin as a human edit
+        #[arg(long, conflicts_with_all = ["regenerate", "prompt"])]
+        set: bool,
+        /// With --set: refuse (exit 3) unless the stored brief's `updated` is this ("" = none yet)
+        #[arg(long, requires = "set", value_name = "ISO")]
+        expect_updated: Option<String>,
+        /// Ask this host's web server to regenerate it (in the background; capped per hour)
+        #[arg(long, conflicts_with = "prompt")]
+        regenerate: bool,
+    },
+
     /// Spawn a new Claude session in a fresh tab/pane
     Spawn {
-        /// Initial prompt (optional)
+        /// Initial prompt (optional; with --from, added after the continue prompt)
         prompt: Option<String>,
+        /// Continue this session's work: same host and cwd, its brief's continue prompt first
+        #[arg(long, value_name = "SESSION")]
+        from: Option<String>,
         /// Working directory (defaults to the current directory)
         #[arg(long)]
         dir: Option<String>,
@@ -461,6 +490,7 @@ fn placement(c: &Commands) -> Placement {
         Commands::Tmux { .. } | Commands::Enter { .. } | Commands::Last | Commands::New(_) => {
             Placement::Dispatch(Scope::DefaultHost)
         }
+        Commands::Brief { edit: true, .. } => Placement::Here,
         Commands::List {
             all_hosts: true, ..
         }
@@ -565,8 +595,29 @@ fn run(cli: Cli) -> Result<i32> {
             input,
             dry_run: cli.dry_run,
         })?,
+        Commands::Brief {
+            target: session,
+            json,
+            prompt,
+            edit,
+            set,
+            expect_updated,
+            regenerate,
+        } => {
+            if edit {
+                let t = target(cli.host.as_deref(), cli.local, Scope::SelfHost)?;
+                return brief_cmd::edit(&t, &session, json);
+            } else if set {
+                brief_cmd::set(&session, json, expect_updated.as_deref())?
+            } else if regenerate {
+                brief_cmd::regenerate(&session, json)?
+            } else {
+                brief_cmd::show(&session, json, prompt)?
+            }
+        }
         Commands::Spawn {
             prompt,
+            from,
             dir,
             backend,
             name,
@@ -575,6 +626,7 @@ fn run(cli: Cli) -> Result<i32> {
             window,
         } => commands::spawn(
             prompt,
+            from,
             commands::SpawnOpts {
                 dir,
                 backend: backend.map(Into::into),

@@ -398,17 +398,33 @@ impl Captured {
 }
 
 /// Run a command to completion with piped output and a deadline.
-pub fn capture(mut c: Command, timeout: Duration) -> Result<Captured> {
+pub fn capture(c: Command, timeout: Duration) -> Result<Captured> {
+    capture_input(c, None, timeout)
+}
+
+/// [`capture`], with `input` fed to the command's stdin (then closed).
+pub fn capture_input(mut c: Command, input: Option<&[u8]>, timeout: Duration) -> Result<Captured> {
     let started = Instant::now();
-    c.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    c.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
     let mut child = c.spawn().map_err(|e| {
         Error::Other(format!(
             "cannot run {}: {e}",
             c.get_program().to_string_lossy()
         ))
     })?;
+    if let (Some(data), Some(mut stdin)) = (input, child.stdin.take()) {
+        let data = data.to_vec();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&data);
+        });
+    }
     // Drain both pipes on threads: a large `list --json` would otherwise fill
     // the pipe buffer and deadlock against our poll loop.
     let mut out = child.stdout.take().expect("piped");

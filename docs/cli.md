@@ -47,12 +47,35 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet name [<target> \| --all] [--apply] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing; only `--apply` sends it (through the same path as `rename`, tmux included). `--all` = every session with a derived (cwd+hash) name. A derived-name session alone in a tmux session somebody named (`fleet new fix-login`) adopts that name (`(tmux)`, no model call) instead of getting a generated one. `--refresh` ignores the cache |
 | `fleet group [-a, --all-hosts] [--json] [--apply] [--refresh] [--consolidate] [--input <file\|->] [--cached]` | sort sessions into work-stream groups (the web Board view) — see [Grouping](#grouping). Reads sessions and asks `claude -p`; never sends anything to a session |
 | `fleet spawn [prompt] --dir <path> [--name <n>] [--model <id>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new Claude session in a new tab/pane. `--model <id>` runs `claude --model '<id>'` (letters, digits and `._[]-` only; blank = Claude's default). Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing) |
+| `fleet spawn --from <target> [prompt] [--name <n>] [--model <id>] [--backend …]` | continue a session's work in a new one: same host (with `-H`, the host the session is on) and its cwd (`--dir` overrides), first prompt = its [brief](#briefs)'s continue prompt, then a blank line and `prompt`. The prompt goes through a file under `~/.claude/fleet-handoffs/`, like a handoff. Errors when the session has no brief yet. `-n` prints the launch command and the prompt and writes nothing |
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--name <n>] [--model <id>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
+| `fleet brief <target> [--json \| --prompt]` | print the session's [brief](#briefs) — its body (Summary / Resources / Plan, no frontmatter); `--json` the parsed shape; `--prompt` only the continue prompt |
+| `fleet brief <target> --edit` / `--set [--expect-updated <iso>]` / `--regenerate` | edit it in `$VISUAL`/`$EDITOR`; save markdown from stdin; ask the web server to regenerate it — see [Briefs](#briefs) |
 | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` | live dashboard + notifications on finished/stuck sessions |
 | `fleet skill install [--force]\|show` | install / print the Claude Code skill (`~/.claude/skills/fleet/SKILL.md`; `--force` overwrites a different one) |
 
 `send`, `rename --force`, `name --apply` and `spawn` change a live agent's state — scripts and agents
 should confirm before running them.
+
+### Briefs
+
+A brief is a small markdown file per session — what it is doing, the resources it produced (PRs,
+files, branch, artifacts, links) and its plan — kept by the web server on the host the session
+lives on (`$FLEET_BRIEFS_DIR`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs/<session_id>.md`;
+format and merge rules in [architecture.md](architecture.md#session-briefs)). The CLI reads and
+edits the same files; generating one (a `claude -p` call) is the web server's job.
+
+`<target>` resolves like any other session target; a session that is gone still has its brief,
+reachable by its **full** session id. With `-H <host>` every form runs on that host, where the file is.
+
+| form | does |
+| --- | --- |
+| `fleet brief <target>` | the body as markdown (a skeleton, and a note on stderr, when there is none yet) |
+| `--json` | `{ host, id, exists, markdown, body, parsed: { summary, resources: [{ kind, label, url, path, text }], plan: [{ done, text }] }, updated, editedAt, generatedAt, generatedThrough, continuePrompt, path }` — the web API's GET shape (minus the server-only `generating` / `enabled`), plus `body` (markdown without frontmatter) and `path` |
+| `--prompt` | only the continue prompt — the first prompt for a new session that picks the work up (`fleet spawn --from` uses it) |
+| `--edit` | the body in `$VISUAL` / `$EDITOR` (default `vi`), saved as a human edit when changed. For a session on another host the brief is fetched over ssh (`fleet brief --json` there), edited here, and written back with `--set --expect-updated` |
+| `--set` | the markdown on stdin, saved as a human edit — the same rules as the web UI's save (`PUT`): it is authoritative for the body, the stored frontmatter is kept (the machine keys stay the server's), resource lines it removes are added to `dismissed` so they are never re-added, `editedAt` is stamped. `--expect-updated <iso>` refuses (exit 3, nothing written) unless the stored `updated` still is that (`""` = no brief yet) — what `--edit` uses so a brief regenerated while you were editing isn't overwritten. `-n` prints the result instead of writing it |
+| `--regenerate` | POST `/api/hosts/<self>/sessions/<id>/brief/regenerate` to this host's web server (`hosts.<self>.web`, else `http://127.0.0.1:<web.port>`) via `curl`; prints whether it started or was queued. The model call runs in the background — read the result with `fleet brief` a little later. At the server's hourly cap: exit 3 with the wait. Needs a live session and a running web server (`fleet web serve`) |
 
 ### Grouping
 
@@ -219,6 +242,8 @@ fleet init --yes --self laptop \
 | `FLEET_BIN` | `fleet` binary the web server calls |
 | `FLEET_NODE` | `node` binary for `fleet web serve` (over config `web.node`; set by the launchd agent) |
 | `FLEET_WEB_PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI` | web server listen address / UI directory (over config `web.*`) |
+| `FLEET_BRIEFS_DIR` | where [briefs](#briefs) live (default `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs`); shared with the web server |
+| `VISUAL`, `EDITOR` | the editor for `fleet brief --edit` and `fleet config edit` (default `vi`) |
 | `FLEET_GROUPS_STATE` | `fleet group` state file (default `${XDG_STATE_HOME:-~/.local/state}/fleet/groups.json`) |
 | `FLEET_FIXTURE=<sessions.json>` | read a canned fleet from a file instead of the live registry (demo/tests; backends are inert) |
 | `NO_COLOR=1` | no colors |
@@ -230,7 +255,7 @@ fleet init --yes --self laptop \
 | 0 | success |
 | 1 | error, bad usage |
 | 2 | tmux commands: ambiguous match (candidates are printed) |
-| 3 | tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
+| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
 | 4 | host unreachable |
 | 127 | a required tool (tmux, node) was not found |
 

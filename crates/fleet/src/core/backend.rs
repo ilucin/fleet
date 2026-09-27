@@ -485,7 +485,8 @@ fn run_command(prompt: Prompt, name: Option<&str>, launcher: &str) -> String {
     }
 }
 
-fn launch_command(dir: &str, prompt: Prompt, name: Option<&str>, launcher: &str) -> String {
+/// The shell line a spawn types: `cd <dir> && <launcher> [-n name] [prompt]`.
+pub fn launch_command(dir: &str, prompt: Prompt, name: Option<&str>, launcher: &str) -> String {
     format!("cd {} && {}", shq(dir), run_command(prompt, name, launcher))
 }
 

@@ -101,17 +101,7 @@ pub fn run(action: &ConfigAction) -> Result<()> {
                     format!("no config at {} — run: fleet init", path.display()),
                 ));
             }
-            let editor = std::env::var("VISUAL")
-                .or_else(|_| std::env::var("EDITOR"))
-                .unwrap_or_else(|_| "vi".into());
-            // $EDITOR may carry flags (`code -w`): let the shell split it.
-            let st = std::process::Command::new("sh")
-                .args(["-c", &format!("{editor} \"$1\""), "fleet-edit"])
-                .arg(&path)
-                .status()?;
-            if !st.success() {
-                return Err(Error::Other(format!("{editor} exited {st}")));
-            }
+            open_editor(&path)?;
             let l = config::load_from(&path);
             if let Some(p) = l.problem {
                 return Err(Error::Other(p));
@@ -122,4 +112,26 @@ pub fn run(action: &ConfigAction) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `$VISUAL`, else `$EDITOR`, else `vi`.
+pub fn editor() -> String {
+    ["VISUAL", "EDITOR"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| "vi".into())
+}
+
+/// Open `path` in the user's editor and wait for it to exit.
+pub fn open_editor(path: &std::path::Path) -> Result<()> {
+    let editor = editor();
+    // $EDITOR may carry flags (`code -w`): let the shell split it.
+    let st = std::process::Command::new("sh")
+        .args(["-c", &format!("{editor} \"$1\""), "fleet-edit"])
+        .arg(path)
+        .status()?;
+    if !st.success() {
+        return Err(Error::Other(format!("{editor} exited {st}")));
+    }
+    Ok(())
 }

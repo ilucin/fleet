@@ -20,6 +20,8 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | "name all the unnamed ones" | `fleet name --all [--apply] [--no-tmux-sync]` |
 | "that name is wrong / regenerate it" | `fleet name <target> --refresh` — ignores the cached name and replaces it |
 | "spawn / start a session to …" | `fleet spawn "<prompt>" --dir <path> [--name <name>] [--model <id>] [--backend iterm\|tmux] [--window]` |
+| "what is X doing / where was X" (summary, PRs, files, plan) | `fleet brief <target>` (`--json` to parse) — the session's brief; see below |
+| "continue X's work in a new session" | `fleet spawn --from <target> ["<extra instructions>"] [--name <name>]` — same host and cwd, seeded with X's brief |
 | "take this to another terminal" | `fleet handoff --file <brief.md> --dir <path> [--name <name>] [--tab] [--no-wait]` — see below |
 | "watch / notify me / anyone stuck" | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` |
 | "what's running everywhere" | `fleet list --all-hosts` (add `--json`; every row carries `host`) |
@@ -134,6 +136,15 @@ The phrase is the instruction: **do it, don't ask for confirmation.** Only ask w
 6. The receiving session is told how to `fleet send` an update **back** to this one when it finishes. If such a message arrives, treat it as a report from the session you dispatched.
 
 Keep working on whatever the user kept here — the point of a handoff is that both threads run in parallel.
+
+## Session briefs
+
+Every session can have a **brief** — a small markdown file (Summary / Resources / Plan) the web server keeps up to date on the host the session lives on. It is the quickest answer to "what is X doing, what has it produced, what's left" — cheaper than `peek` and not limited to the screen.
+
+- `fleet brief <target>` prints it; `--json` gives `parsed.summary`, `parsed.resources[]` (`kind`: PR / Issue / Artifact / Spec / File / Branch / Worktree / Link), `parsed.plan[]` (`done`, `text`), `updated`, `editedAt`; `--prompt` prints the continue prompt only. A gone session's brief is still there by its **full** session id. Add `-H <host>` for a session on another host.
+- `fleet spawn --from <target> ["<extra>"]` starts a new session in the same host and cwd whose first prompt is the brief's continue prompt (plus your extra line). It starts a new agent — confirm like `spawn`. Use it to resume or fork a session's work; use `handoff` to transplant *this* conversation.
+- `fleet brief <target> --set` (markdown on stdin) saves a human edit — edits are authoritative, and resource lines removed are never re-added. Only edit when the user asks. `--edit` opens an editor: tell the user to run it, don't run it inline.
+- `fleet brief <target> --regenerate` asks the host's web server for a fresh one (a model call, capped per hour) — only when the user asks; it runs in the background.
 
 ## Session names
 
