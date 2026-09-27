@@ -2,17 +2,17 @@
   <!-- web/ui/public/icon.svg on the macOS icon grid: 824px rounded square, 100px margin -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1b2230"/>
-      <stop offset="1" stop-color="#0b0c0e"/>
+      <stop offset="0" stop-color="#7cb3ff"/>
+      <stop offset="1" stop-color="#2563eb"/>
     </linearGradient>
     <clipPath id="r"><rect width="512" height="512" rx="114"/></clipPath>
   </defs>
   <g transform="translate(100 100) scale(1.609375)" clip-path="url(#r)">
     <rect width="512" height="512" fill="url(#bg)"/>
-    <path d="M96 128 h320 a40 40 0 0 1 40 40 v176 a40 40 0 0 1 -40 40 h-176 l-88 64 v-64 h-56 a40 40 0 0 1 -40 -40 v-176 a40 40 0 0 1 40 -40 z" fill="#161b22" stroke="#7fb7ff" stroke-width="18" stroke-linejoin="round"/>
-    <path d="M176 200 l60 56 l-60 56" fill="none" stroke="#7fb7ff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M268 312 h92" stroke="#e9ecef" stroke-width="30" stroke-linecap="round"/>
-    <circle cx="404" cy="108" r="34" fill="#0b0c0e"/>
-    <circle cx="404" cy="108" r="22" fill="#3ddc84"/>
+    <path transform="translate(146 336) scale(0.82)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff" fill-opacity="0.45"/>
+    <path transform="translate(366 336) scale(0.82)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff" fill-opacity="0.45"/>
+    <path transform="translate(256 206) scale(1.12)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff"/>
+    <circle cx="256" cy="420" r="22" fill="#12306b"/>
+    <circle cx="256" cy="420" r="14" fill="#3ddc84"/>
   </g>
 </svg>
