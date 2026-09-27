@@ -54,8 +54,8 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
   const cap = caption ? <div className="px-1 pt-0.5 text-[10px] text-dimmer tabular-nums">{caption}</div> : null
   if (kind === 'user') {
     return (
-      <div className="flex max-w-[85%] flex-col items-end self-end">
-        <div className="rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
+      <div className="flex w-full flex-col items-end">
+        <div className="w-full rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
           {text}
         </div>
         {cap}
@@ -64,14 +64,14 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
   }
   if (m.final === false) {
     return (
-      <div className="flex max-w-[94%] flex-col items-start self-start">
+      <div className="flex w-full flex-col items-start">
         <Markdown text={text} className="border-l-2 border-border pl-2.5 text-[0.86em] leading-normal text-muted-foreground" />
         {cap}
       </div>
     )
   }
   return (
-    <div className="flex w-[94%] flex-col items-start self-start">
+    <div className="flex w-full flex-col items-start">
       <div className="w-full rounded-2xl rounded-bl-md border border-border/70 bg-card px-3 py-2 text-card-foreground">
         <Markdown text={text} />
       </div>
@@ -176,7 +176,7 @@ export function ChatView(p: ChatViewProps) {
         className="absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain px-safe outline-none [overflow-anchor:none]"
         style={{ fontSize: p.fontSize, lineHeight: 1.5 }}
       >
-        <div className={p.wide ? 'mx-auto w-full max-w-4xl px-4 pt-3 pb-4' : 'mx-auto w-full max-w-3xl px-3 pt-3 pb-4'}>
+        <div className={p.wide ? 'mx-auto w-full max-w-4xl px-4 pt-3 pb-4' : 'mx-auto w-full max-w-3xl px-2 pt-3 pb-4'}>
           {p.canLoadOlder || p.loadingOlder ? (
             <div className="flex justify-center pb-3">
               <Button variant="outline" size="sm" className="h-8 rounded-full px-3.5" disabled={p.loadingOlder} onClick={p.onLoadOlder}>
