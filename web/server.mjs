@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadConfig, ensurePath, resolveBinary } from './lib/config.mjs';
+import { loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
 import { run } from './lib/run.mjs';
 import { createFleetCli } from './lib/fleet-cli.mjs';
 import { createFleet } from './lib/fleet.mjs';
@@ -34,6 +34,7 @@ const logError = (err, context = '') =>
   process.stderr.write(`[error]${context ? ` ${context}` : ''} ${err?.stack ?? String(err)}\n`);
 
 ensurePath(process.env);
+ensureUtf8Locale(process.env);
 
 let config;
 try {

@@ -81,7 +81,7 @@ end run"#
             &[handle],
         ),
         Backend::Tmux => {
-            let out = Command::new(crate::core::tools::tmux())
+            let out = crate::core::tools::tmux_cmd()
                 .args(["capture-pane", "-t", handle, "-p"])
                 .output()?;
             Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -92,7 +92,7 @@ end run"#
 
 /// One `tmux send-keys` at `handle`, failing when tmux says it failed.
 fn send_keys(handle: &str, rest: &[&str]) -> Result<()> {
-    let mut cmd = Command::new(crate::core::tools::tmux());
+    let mut cmd = crate::core::tools::tmux_cmd();
     cmd.args(["send-keys", "-t", handle]).args(rest);
     let out = cmd.output()?;
     if !out.status.success() {
@@ -177,7 +177,7 @@ end run"#,
         }
         Backend::Tmux => {
             // Resolve the pane's window, select both; switch the client too if we're in tmux.
-            let win = Command::new(crate::core::tools::tmux())
+            let win = crate::core::tools::tmux_cmd()
                 .args([
                     "display-message",
                     "-p",
@@ -188,18 +188,18 @@ end run"#,
                 .output()?;
             let win = String::from_utf8_lossy(&win.stdout).trim().to_string();
             if !win.is_empty() {
-                Command::new(crate::core::tools::tmux())
+                crate::core::tools::tmux_cmd()
                     .args(["select-window", "-t", &win])
                     .status()?;
                 if std::env::var_os("TMUX").is_some()
                     && let Some(session) = win.split(':').next()
                 {
-                    Command::new(crate::core::tools::tmux())
+                    crate::core::tools::tmux_cmd()
                         .args(["switch-client", "-t", session])
                         .status()?;
                 }
             }
-            Command::new(crate::core::tools::tmux())
+            crate::core::tools::tmux_cmd()
                 .args(["select-pane", "-t", handle])
                 .status()?;
             Ok(())
@@ -305,7 +305,7 @@ pub fn tmux_guard(
 
 /// Every live tmux session name, exactly as tmux stores it.
 fn tmux_session_names() -> Vec<String> {
-    Command::new(crate::core::tools::tmux())
+    crate::core::tools::tmux_cmd()
         .args(["list-sessions", "-F", "#{session_name}"])
         .output()
         .map(|o| {
@@ -320,7 +320,7 @@ fn tmux_session_names() -> Vec<String> {
 
 /// One `tmux display-message -p -t <target> <format>`, or why it didn't answer.
 fn tmux_query(target: &str, format: &str) -> std::result::Result<String, String> {
-    let out = Command::new(crate::core::tools::tmux())
+    let out = crate::core::tools::tmux_cmd()
         .args(["display-message", "-p", "-t", target, format])
         .output()
         .map_err(|e| format!("cannot run tmux: {e}"))?;
@@ -368,7 +368,7 @@ pub(crate) fn tmux_shape(target: &str) -> std::result::Result<(usize, usize), St
     let windows: usize = tmux_query(target, "#{session_windows}")?
         .parse()
         .map_err(|_| "tmux gave an unreadable window count".to_string())?;
-    let out = Command::new(crate::core::tools::tmux())
+    let out = crate::core::tools::tmux_cmd()
         .args(["list-panes", "-s", "-t", target, "-F", "#{pane_id}"])
         .output()
         .map_err(|e| format!("cannot run tmux: {e}"))?;
@@ -438,7 +438,7 @@ pub fn rename_tmux_session(s: &Session, title: &str) -> Result<TmuxSync> {
         TmuxPlan::Skip(why) => return Ok(TmuxSync::Skipped(why)),
         TmuxPlan::Rename { to, .. } => to,
     };
-    let out = Command::new(crate::core::tools::tmux())
+    let out = crate::core::tools::tmux_cmd()
         .args(["rename-session", "-t", target, &to])
         .output()?;
     if !out.status.success() {
@@ -539,7 +539,7 @@ end run"#,
                 plan_tmux_target(tmux_session, name, dir, &tmux_session_names())?;
             // A fresh session's first window is the one we want: opening another
             // next to it would leave an idle shell behind.
-            let out = Command::new(crate::core::tools::tmux())
+            let out = crate::core::tools::tmux_cmd()
                 .args(tmux_spawn_args(&session, dir, exists))
                 .output()?;
             if !out.status.success() {
@@ -551,10 +551,10 @@ end run"#,
             let win = String::from_utf8_lossy(&out.stdout).trim().to_string();
             // Window already opened in `dir`; just run the launcher in it.
             let run = run_command(prompt, name, launcher);
-            Command::new(crate::core::tools::tmux())
+            crate::core::tools::tmux_cmd()
                 .args(["send-keys", "-t", &win, "-l", &run])
                 .status()?;
-            Command::new(crate::core::tools::tmux())
+            crate::core::tools::tmux_cmd()
                 .args(["send-keys", "-t", &win, "Enter"])
                 .status()?;
             Ok(if exists {

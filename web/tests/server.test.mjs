@@ -19,7 +19,7 @@ import { resolveStaticPath, readJsonBody, contentTypeFor, HttpError } from '../l
 import { createBackend, BackendError, createScriptProvider, ITERM_SCRIPT } from '../lib/backends.mjs';
 import { createFleet, trimTitle, TITLE_MAX } from '../lib/fleet.mjs';
 import { createFleetCli } from '../lib/fleet-cli.mjs';
-import { ensurePath } from '../lib/config.mjs';
+import { ensurePath, ensureUtf8Locale } from '../lib/config.mjs';
 
 // ------------------------------------------------------------------ tailLines
 
@@ -468,6 +468,12 @@ test('ensurePath prepends the homebrew/local bins once', () => {
   const once = env.PATH;
   ensurePath(env);
   assert.equal(env.PATH, once, 'idempotent');
+});
+
+test('ensureUtf8Locale gives children a UTF-8 locale, keeping one that is already set', () => {
+  assert.equal(ensureUtf8Locale({}).LC_CTYPE, 'en_US.UTF-8');
+  assert.equal(ensureUtf8Locale({ LANG: 'hr_HR.UTF-8' }).LC_CTYPE, undefined);
+  assert.equal(ensureUtf8Locale({ LC_ALL: 'C' }).LC_ALL, 'en_US.UTF-8');
 });
 
 test('etagMatches: exact, weak/strong, lists and *', async () => {

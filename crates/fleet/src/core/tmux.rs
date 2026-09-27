@@ -13,7 +13,7 @@ use crate::core::tools;
 use crate::error::{Error, Result};
 
 fn tmux() -> Command {
-    Command::new(tools::tmux())
+    tools::tmux_cmd()
 }
 
 /// Is a tmux binary available at all?

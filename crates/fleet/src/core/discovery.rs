@@ -525,7 +525,7 @@ fn backend_from_env(
 /// pane_tty -> pane for every tmux pane, empty if tmux isn't running.
 fn tmux_panes() -> HashMap<String, Pane> {
     let mut map = HashMap::new();
-    let Ok(out) = Command::new(crate::core::tools::tmux())
+    let Ok(out) = crate::core::tools::tmux_cmd()
         .args([
             "list-panes",
             "-a",

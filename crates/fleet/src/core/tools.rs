@@ -58,6 +58,15 @@ pub fn tmux() -> &'static str {
     })
 }
 
+/// A `tmux` command with `-u`: without a UTF-8 locale (launchd, cron, `env -i`) tmux
+/// escapes non-ASCII and control characters in its output — `-F` tab separators come
+/// back as `_`, so pane discovery found nothing — and mangles UTF-8 typed via send-keys.
+pub fn tmux_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new(tmux());
+    cmd.arg("-u");
+    cmd
+}
+
 /// The `claude` binary used for headless naming calls.
 pub fn claude() -> Option<String> {
     find_binary("claude")

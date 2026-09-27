@@ -85,6 +85,17 @@ export function ensurePath(env = process.env, home = os.homedir()) {
   return env.PATH;
 }
 
+/**
+ * A UTF-8 locale for every child (tmux, the fleet CLI, `claude -p`). launchd and similar
+ * start the server with none, and then tmux escapes its `-F` output (tabs become `_`,
+ * so no pane matched and tmux sessions had no handle) and mangles UTF-8 in send-keys.
+ */
+export function ensureUtf8Locale(env = process.env) {
+  const current = env.LC_ALL || env.LC_CTYPE || env.LANG || '';
+  if (!/utf-?8/i.test(current)) env[env.LC_ALL ? 'LC_ALL' : 'LC_CTYPE'] = 'en_US.UTF-8';
+  return env;
+}
+
 function isExecutable(file, fsImpl = fs) {
   try {
     fsImpl.accessSync(file, fs.constants.X_OK);
