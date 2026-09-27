@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Fleet">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cb3ff"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <!-- the fleet: two followers, then the lead ship -->
+  <path transform="translate(146 336) scale(0.82)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff" fill-opacity="0.45"/>
+  <path transform="translate(366 336) scale(0.82)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff" fill-opacity="0.45"/>
+  <path transform="translate(256 206) scale(1.12)" d="M0 -78 L58 58 L0 30 L-58 58 Z" fill="#ffffff"/>
+  <!-- status dot -->
+  <circle cx="256" cy="420" r="22" fill="#12306b"/>
+  <circle cx="256" cy="420" r="14" fill="#3ddc84"/>
+</svg>
