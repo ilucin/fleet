@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type TouchEvent } from 'react'
-import { NotebookTextIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
+import { NotebookTextIcon, PlusIcon, SearchIcon, Settings2Icon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { GroupedList } from '@/components/board/GroupedList'
@@ -90,12 +90,20 @@ export function ListScreen() {
               </span>
             </div>
           ) : null}
-          <span
-            className={cn('ml-auto text-right text-xs tabular-nums', note.error ? 'text-destructive' : 'text-dimmer')}
-            aria-live="polite"
-          >
-            {note.text}
-          </span>
+          {/* Freshness lives in Settings → Status; the header only flags trouble. */}
+          <span className="ml-auto" />
+          {note.error || unreachable.length ? (
+            <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-destructive [&_svg:not([class*='size-'])]:size-5">
+              <a
+                href="#/settings"
+                role="status"
+                aria-label={note.error ? `Offline — ${note.text}` : `${unreachable.map((h) => h.name).join(', ')} unreachable`}
+                title={note.error ? note.text : `${unreachable.map((h) => h.name).join(', ')} unreachable`}
+              >
+                <TriangleAlertIcon />
+              </a>
+            </Button>
+          ) : null}
           {notesHosts.length ? (
             <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
               <a href="#/notes" aria-label="Notes" title="Notes">

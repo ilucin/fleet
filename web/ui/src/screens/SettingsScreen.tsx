@@ -6,10 +6,13 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useNow } from '@/hooks/useNow'
 import { usePrefs } from '@/hooks/usePrefs'
+import { useSessionList } from '@/hooks/useSessionList'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
 import { TERM_FONT_SIZES, TEXT_SIZES, TEXT_SIZE_LABELS } from '@/lib/prefs'
+import { cn } from '@/lib/utils'
 
 const segItem =
   'h-9 flex-1 gap-1.5 rounded-md px-3 text-[0.8125rem] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-accent'
@@ -100,6 +103,7 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
       </Section>
 
       <p className="pt-4 text-xs text-dimmer">Saved in this browser; every session uses them.</p>
+      <FleetStatus />
       <ViewportInfo />
     </div>
   )
@@ -208,5 +212,29 @@ function ViewportInfo() {
         </>
       ) : null}
     </details>
+  )
+}
+
+/** Connection status: how fresh the list is and which hosts answer (the list header only shows a ⚠ on trouble). */
+function FleetStatus() {
+  const now = useNow(5_000)
+  const { note, hosts } = useSessionList(now)
+  return (
+    <Section title="Status">
+      <div className="flex min-h-12 items-center justify-between gap-3 py-2">
+        <div className="text-sm">Session list</div>
+        <div className={cn('text-right text-xs tabular-nums', note.error ? 'text-destructive' : 'text-dimmer')} aria-live="polite">
+          {note.text || '—'}
+        </div>
+      </div>
+      {hosts.map((h) => (
+        <div key={h.name} className="flex min-h-12 items-center justify-between gap-3 py-2">
+          <div className="text-sm">{h.name}</div>
+          <div className={cn('min-w-0 truncate text-right text-xs', h.ok === false ? 'text-destructive' : 'text-dimmer')}>
+            {h.ok === false ? `unreachable: ${h.error || 'no response'}` : `${h.sessions?.length ?? 0} sessions`}
+          </div>
+        </div>
+      ))}
+    </Section>
   )
 }
