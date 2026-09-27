@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckIcon, FolderIcon, Loader2Icon, PaperclipIcon, PlayIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -29,34 +29,52 @@ const MODEL_KEY = 'fleet.spawnModel'
 // Radix ToggleGroup treats '' as "nothing selected": the default model ('' = no --model) needs a stand-in.
 const DEFAULT_MODEL_VALUE = '__default'
 
+// The extra directory row a prefill adds when its dir is not one of the host's spawnDirs.
+const PREFILL_DIR_LABEL = 'Same as the session'
+
+/** "Continue in new session": start on this host, in this directory, with this first prompt. Nothing is remembered. */
+export interface SpawnPrefill {
+  host: string
+  /** Absolute on `host` (a session's cwd); must be one of its spawnDirs or beneath one, else the spawn is a 400. */
+  dir?: string | null
+  prompt?: string
+}
+
 export interface NewSessionDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Open the new session once it registers (`#/s/…`). */
   onOpenSession: (href: string) => void
+  /** Start from these values (the caret goes to the end of the prompt). */
+  prefill?: SpawnPrefill | null
 }
+
+const samePath = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
 
 /**
  * `+` in the list header: host, directory (that host's spawnDirs), model and an optional first
  * prompt → POST spawn, then watch the fleet for the new session and open it. No name field:
  * the server's auto-namer names it (tmux `fw-hhmmss` when auto-naming is off).
  */
-export function NewSessionDrawer({ open, onOpenChange, onOpenSession }: NewSessionDrawerProps) {
+export function NewSessionDrawer({ open, onOpenChange, onOpenSession, prefill }: NewSessionDrawerProps) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="px-safe">
-        {open ? <NewSessionForm onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} /> : null}
+      <DrawerContent className="px-safe" onOpenAutoFocus={prefill?.prompt ? (e) => e.preventDefault() : undefined}>
+        {open ? <NewSessionForm onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} /> : null}
       </DrawerContent>
     </Drawer>
   )
 }
 
 /** Desktop: the same form in a centred dialog (`c` / `n`, the sidebar's `+`, the palette). */
-export function NewSessionDialog({ open, onOpenChange, onOpenSession }: NewSessionDrawerProps) {
+export function NewSessionDialog({ open, onOpenChange, onOpenSession, prefill }: NewSessionDrawerProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-4rem)] overflow-hidden p-0 sm:max-w-lg">
-        {open ? <NewSessionForm variant="dialog" onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} /> : null}
+      <DialogContent
+        className="max-h-[calc(100dvh-4rem)] overflow-hidden p-0 sm:max-w-lg"
+        onOpenAutoFocus={prefill?.prompt ? (e) => e.preventDefault() : undefined}
+      >
+        {open ? <NewSessionForm variant="dialog" onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} /> : null}
       </DialogContent>
     </Dialog>
   )
@@ -66,10 +84,12 @@ function NewSessionForm({
   onDone,
   onOpenSession,
   variant = 'drawer',
+  prefill = null,
 }: {
   onDone: () => void
   onOpenSession: (href: string) => void
   variant?: 'drawer' | 'dialog'
+  prefill?: SpawnPrefill | null
 }) {
   const dialog = variant === 'dialog'
   const Header = dialog ? DialogHeader : DrawerHeader
@@ -79,18 +99,24 @@ function NewSessionForm({
   const hosts = spawnTargets(fleet)
 
   const [host, setHost] = useState(() => {
+    if (prefill && hosts.some((h) => h.name === prefill.host)) return prefill.host
     const remembered = storage.get(HOST_KEY)
     return hosts.find((h) => h.name === remembered)?.name ?? hosts[0]?.name ?? ''
   })
-  const dirs = hosts.find((h) => h.name === host)?.dirs ?? []
+  const hostDirs = hosts.find((h) => h.name === host)?.dirs ?? []
+  // A prefilled dir (the session's cwd) is offered first when it is not one of the spawnDirs, and preselected.
+  const prefillDir = prefill?.dir && host === prefill.host ? prefill.dir : null
+  const dirs =
+    prefillDir && !hostDirs.some((d) => samePath(d.path, prefillDir)) ? [{ label: PREFILL_DIR_LABEL, path: prefillDir }, ...hostDirs] : hostDirs
   const [dirLabels, setDirLabels] = useState<Record<string, string | null>>({})
-  const rememberedLabel = dirLabels[host] ?? storage.get(dirKey(host))
+  const rememberedLabel =
+    dirLabels[host] ?? (prefillDir ? dirs.find((d) => samePath(d.path, prefillDir))?.label : null) ?? storage.get(dirKey(host))
   const dir = dirs.find((d) => d.label === rememberedLabel) ?? dirs[0] ?? null
 
   const { models } = useSettings()
   const [modelChoice, setModelChoice] = useState<string | null>(() => storage.get(MODEL_KEY))
   const model = pickModel(models, modelChoice)
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(() => prefill?.prompt ?? '')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // Files dropped on the form / pasted / picked: uploaded to the chosen host, paths go into the prompt.
@@ -98,6 +124,16 @@ function NewSessionForm({
   const picker = useRef<HTMLInputElement>(null)
   const { attach, onPaste, progress } = useAttach({ host, textarea: promptRef, setValue: setPrompt })
   const drop = useFileDrop((files) => void attach(files), !busy)
+
+  // Prefilled: the caret goes after the prompt, where the user types what comes next.
+  const prefilled = !!prefill?.prompt
+  useEffect(() => {
+    const el = promptRef.current
+    if (!prefilled || !el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+    el.scrollTop = el.scrollHeight
+  }, [prefilled])
 
   const pickHost = (h: string) => {
     setHost(h)
@@ -110,7 +146,7 @@ function NewSessionForm({
   }
   const pickDir = (label: string) => {
     setDirLabels((m) => ({ ...m, [host]: label }))
-    storage.set(dirKey(host), label)
+    if (label !== PREFILL_DIR_LABEL) storage.set(dirKey(host), label)
   }
 
   const start = async () => {
@@ -158,7 +194,7 @@ function NewSessionForm({
       }}
     >
       <Header className="px-0 pt-3 pb-2 text-left">
-        <Title className="text-left text-base font-semibold">New session</Title>
+        <Title className="text-left text-base font-semibold">{prefill ? 'Continue in new session' : 'New session'}</Title>
         <Description className="text-left text-xs">
           Starts Claude in a new tmux session. A first-run folder trust prompt is accepted for you.
         </Description>

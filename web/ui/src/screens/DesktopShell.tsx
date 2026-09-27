@@ -8,6 +8,7 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
+  NotebookTextIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PencilIcon,
@@ -73,8 +74,17 @@ export function DesktopShell() {
     (r) => (parseBool01(r) === undefined ? undefined : r),
   )
   const inspector = inspectorRaw === '1'
+  // The brief column (`p`) takes the details column's place while open; `i` switches back.
+  const [briefRaw, setBriefRaw] = usePersistentState<string>('fleet.briefPanel', '0', (r) => (parseBool01(r) === undefined ? undefined : r))
+  const briefPanel = briefRaw === '1'
   const toggleSidebar = () => setSidebarRaw(sidebarOpen ? '0' : '1')
-  const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
+  const toggleInspector = () => {
+    if (briefPanel) {
+      setBriefRaw('0')
+      setInspectorRaw('1')
+    } else setInspectorRaw(inspector ? '0' : '1')
+  }
+  const toggleBrief = () => setBriefRaw(briefPanel ? '0' : '1')
 
   // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
   // session sits in the pane to its right, so j/k, Enter and Esc work the same way.
@@ -221,6 +231,10 @@ export function DesktopShell() {
         if (!selectedKey) return false
         toggleInspector()
         return true
+      case 'brief':
+        if (!selectedKey) return false
+        toggleBrief()
+        return true
       case 'palette':
         setPaletteOpen((o) => !o)
         return true
@@ -295,10 +309,18 @@ export function DesktopShell() {
               { id: 'term', label: 'Terminal view', icon: <SquareTerminalIcon />, shortcut: 'G T', run: () => paneRef.current?.setMode('term') },
               {
                 id: 'inspector',
-                label: inspector ? 'Hide details panel' : 'Show details panel',
+                label: inspector && !briefPanel ? 'Hide details panel' : 'Show details panel',
                 icon: <PanelRightIcon />,
                 shortcut: 'I',
                 run: toggleInspector,
+              },
+              {
+                id: 'brief',
+                label: briefPanel ? 'Hide brief' : 'Show brief (summary, plan, resources)',
+                icon: <NotebookTextIcon />,
+                shortcut: 'P',
+                keywords: ['brief', 'plan', 'summary', 'resources', 'continue'],
+                run: toggleBrief,
               },
             ]
           : []),
@@ -359,6 +381,8 @@ export function DesktopShell() {
       layout="pane"
       inspector={inspector}
       onToggleInspector={toggleInspector}
+      briefPanel={briefPanel}
+      onToggleBrief={toggleBrief}
       paneRef={paneRef}
       autoFocusComposer={focusOnOpen === selectedKey}
     />

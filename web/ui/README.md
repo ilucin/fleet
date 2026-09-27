@@ -82,7 +82,7 @@ src/
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
   components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, SessionMenu (drawer) /
-                      SessionMenuBody (also the desktop details panel), LatestButton
+                      SessionMenuBody (also the desktop details panel), BriefPanel / BriefDrawer, LatestButton
   components/desktop/ Sidebar (+ SidebarRail when collapsed), CommandPalette (⌘K), ShortcutsDialog (?)
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
                       DesktopShell (≥ lg master–detail + the keyboard handler)
@@ -233,6 +233,14 @@ session in the pane), so a link opens the same session on either layout.
   1440px): name, host · cwd, context meter + model, view settings (chat/terminal, notes,
   scrollback, text size, theme), auto-name, tmux/backend/pid/id, Close session (click twice) —
   the mobile ⋯ menu's content (`SessionMenuBody`).
+- **Brief panel** (right, `p` or the header button; `fleet.briefPanel`, closed by default): the
+  session brief (see web/ARCHITECTURE.md → Session briefs) — summary, plan with clickable
+  checkboxes and `3/7`, resources grouped by kind (files open the file preview, URLs a new tab),
+  Regenerate, Edit (the body markdown in a textarea; ⌘/Ctrl+Enter saves, Esc cancels) and
+  **Continue in new session** (the New session form prefilled with the host, the session's cwd
+  and the brief's `continuePrompt`, caret at the end). It takes the details panel's place while
+  open; `i` switches back. GET on open, every 30s while open, every 2.5s while generating.
+  Mobile: the same content as a bottom sheet from the ⋯ menu (**Brief**).
 - **New session**: the mobile form in a dialog. Toasts sit bottom-right, above the composer.
 - **Polling** is unchanged: one `/api/fleet` loop (FleetProvider, 5s) feeds the sidebar and the
   pane's status; the pane runs exactly one messages (3s) or peek (2s) loop. The tab title is
@@ -258,6 +266,7 @@ open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through
 | `[`, ⌘/Ctrl+`B` | toggle the sidebar |
 | `b` | switch List / Board |
 | `i` | toggle the details panel |
+| `p` | toggle the brief panel |
 | `g r` | refresh now |
 | ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions, filters, theme |
 | `?` | shortcuts help |

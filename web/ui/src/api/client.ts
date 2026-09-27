@@ -2,6 +2,8 @@
 // in dev, Vite proxies /api to a running server (see vite.config.ts).
 import type {
   AutoNameRun,
+  Brief,
+  BriefRegenerateResponse,
   FileOpenResponse,
   FileStatResponse,
   FleetResponse,
@@ -22,10 +24,13 @@ import type {
 /** A failed request. `status` is the HTTP status, or 0 when the network is unreachable. */
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** The parsed JSON error body (e.g. `{ error, retryAfterMs }`), when there was one. */
+  data: unknown
+  constructor(message: string, status: number, data: unknown = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.data = data
   }
 }
 
@@ -35,7 +40,7 @@ export function isAbortError(err: unknown): boolean {
 
 export interface RequestOptions {
   signal?: AbortSignal
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT'
   body?: unknown
   /** A raw body (a File for uploads), sent as-is with its own type. */
   file?: Blob
@@ -65,7 +70,7 @@ export async function request<T>(path: string, { signal, method = 'GET', body, f
   }
   if (!res.ok) {
     const msg = (data as { error?: string } | null)?.error
-    throw new ApiError(msg || `HTTP ${res.status}`, res.status)
+    throw new ApiError(msg || `HTTP ${res.status}`, res.status, data)
   }
   return data as T
 }
@@ -125,6 +130,15 @@ export const api = {
     }
     return res.text()
   },
+
+  /** The session's brief (never calls the model); `exists: false` = none yet. */
+  brief: (host: string, id: string, o: Opts = {}) => request<Brief>(sessionPath(host, id, 'brief'), o),
+  /** A human edit: the body markdown (the server keeps its frontmatter keys). */
+  saveBrief: (host: string, id: string, markdown: string, o: Opts = {}) =>
+    request<Brief>(sessionPath(host, id, 'brief'), { ...o, method: 'PUT', body: { markdown } }),
+  /** 202 at once; poll `brief` until `generating` is false. 429 `{ retryAfterMs }` at the hourly cap. */
+  regenerateBrief: (host: string, id: string, o: Opts = {}) =>
+    request<BriefRegenerateResponse>(sessionPath(host, id, 'brief/regenerate'), { ...o, method: 'POST', body: {} }),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),

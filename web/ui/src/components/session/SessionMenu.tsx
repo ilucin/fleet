@@ -7,6 +7,7 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
+  NotebookTextIcon,
   PencilIcon,
   PowerIcon,
   SparklesIcon,
@@ -54,6 +55,8 @@ export interface SessionMenuProps {
   onClosed: () => void
   /** Open the inline title editor in the header (absent: no session to rename). */
   onRename?: () => void
+  /** Mobile: open the brief sheet (absent: the desktop has its own brief column). */
+  onBrief?: () => void
 }
 
 const segItem =
@@ -207,6 +210,14 @@ export function SessionMenuBody(p: SessionMenuProps & { variant: 'drawer' | 'pan
               </p>
             ) : null}
           </Header>
+
+          {p.onBrief ? (
+            <Button variant="outline" className="mt-2 mb-1 h-11 w-full justify-start rounded-xl px-3 text-sm" onClick={p.onBrief}>
+              <NotebookTextIcon />
+              Brief
+              <span className="truncate font-normal text-dimmer">summary, plan, resources</span>
+            </Button>
+          ) : null}
 
           <Section title="View">
             <div className="py-2">

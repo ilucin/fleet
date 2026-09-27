@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeftIcon, CircleAlertIcon, EllipsisIcon, MessageSquareTextIcon, PanelRightIcon, SquareTerminalIcon, WifiOffIcon } from 'lucide-react'
+import {
+  ChevronLeftIcon,
+  CircleAlertIcon,
+  EllipsisIcon,
+  MessageSquareTextIcon,
+  NotebookTextIcon,
+  PanelRightIcon,
+  SquareTerminalIcon,
+  WifiOffIcon,
+} from 'lucide-react'
 import { useLocation } from 'wouter'
 import { toast } from 'sonner'
 
@@ -9,7 +18,9 @@ import { ContextMeter } from '@/components/ContextMeter'
 import { DropOverlay } from '@/components/DropOverlay'
 import { EditableTitle } from '@/components/EditableTitle'
 import { HostBadge } from '@/components/HostBadge'
+import { NewSessionDialog, NewSessionDrawer, type SpawnPrefill } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
+import { BriefDrawer, BriefPanel } from '@/components/session/BriefPanel'
 import { ChatView } from '@/components/session/ChatView'
 import { Composer } from '@/components/session/Composer'
 import { FilePreview } from '@/components/session/FilePreview'
@@ -18,6 +29,7 @@ import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useFileDrop } from '@/hooks/useAttach'
+import { useBrief } from '@/hooks/useBrief'
 import { useFileStats } from '@/hooks/useFileLinks'
 import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
@@ -39,6 +51,7 @@ import {
   stepSize,
   type DetailMode,
 } from '@/lib/chat'
+import { continueDraft } from '@/lib/brief'
 import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
 import { STATUS_TEXT } from '@/lib/styles'
@@ -74,6 +87,9 @@ export interface SessionScreenProps {
   /** Pane only: show the details column (⋯ toggles it instead of opening the drawer). */
   inspector?: boolean
   onToggleInspector?: () => void
+  /** Pane only: show the brief column (it takes the details column's place while open). */
+  briefPanel?: boolean
+  onToggleBrief?: () => void
   /** Pane only: filled with the pane's API while mounted. */
   paneRef?: React.RefObject<PaneApi | null>
   /** Pane only: focus the composer on mount (opened with Enter). */
@@ -91,6 +107,8 @@ export function SessionScreen({
   layout = 'screen',
   inspector = false,
   onToggleInspector,
+  briefPanel = false,
+  onToggleBrief,
   paneRef,
   autoFocusComposer = false,
 }: SessionScreenProps) {
@@ -120,6 +138,12 @@ export function SessionScreen({
   const preview = previewOf?.key === sessionKey ? previewOf.file : null
   const openPreview = useCallback((file: FileStat) => setPreviewOf({ key: sessionKey, file }), [sessionKey])
   const fileLinks = useFileStats(host, id, openPreview)
+
+  // Brief: the desktop column (open state owned by the shell) or the mobile sheet (from ⋯).
+  const [briefOpen, setBriefOpen] = useState(false)
+  const brief = useBrief(host, id, pane ? briefPanel : briefOpen)
+  // "Continue in new session" → the New session form, prefilled (host, this cwd, the brief's prompt).
+  const [continueWith, setContinueWith] = useState<SpawnPrefill | null>(null)
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -311,7 +335,7 @@ export function SessionScreen({
   }
   // Mobile: swipe right anywhere on the screen = Back (the installed PWA has no native back swipe).
   const screenRef = useRef<HTMLDivElement>(null)
-  useSwipeBack(screenRef, back, !pane && !menuOpen)
+  useSwipeBack(screenRef, back, !pane && !menuOpen && !briefOpen && !continueWith)
 
   const fontSizes = mode === 'chat' ? CHAT_FONT_SIZES : TERM_FONT_SIZES
   const fontSize = mode === 'chat' ? chatFont : termFont
@@ -353,6 +377,13 @@ export function SessionScreen({
           else setTimeout(() => startEditing('header', titleKey), 350)
         }
       : undefined,
+    onBrief: pane
+      ? undefined
+      : () => {
+          // One drawer at a time: the menu closes, then the brief sheet opens.
+          setMenuOpen(false)
+          setTimeout(() => setBriefOpen(true), 300)
+        },
     onClosed: () => {
       // Drop it from the list now; the next polls confirm (discovery caches ~2s).
       if (fleet) applyFleet(withoutSession(fleet, host, id))
@@ -360,6 +391,23 @@ export function SessionScreen({
       navigate('/', { replace: true })
     },
   }
+
+  const continueInNew = (prompt: string) => {
+    const prefill: SpawnPrefill = { host, dir: session?.cwd ?? null, prompt: continueDraft(prompt) }
+    if (pane) return setContinueWith(prefill)
+    setBriefOpen(false)
+    setTimeout(() => setContinueWith(prefill), 300)
+  }
+  const briefProps = { host, brief, fileLinks, onContinue: continueInNew }
+  const NewSession = pane ? NewSessionDialog : NewSessionDrawer
+  const continueForm = (
+    <NewSession
+      open={continueWith != null}
+      onOpenChange={(o) => !o && setContinueWith(null)}
+      onOpenSession={(href) => navigate(href)}
+      prefill={continueWith}
+    />
+  )
 
   const column = (
     <>
@@ -420,11 +468,24 @@ export function SessionScreen({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Brief panel"
+              title="Brief (p)"
+              aria-pressed={briefPanel}
+              onClick={onToggleBrief}
+              className={cn('size-11 shrink-0 rounded-xl', briefPanel && 'bg-muted text-foreground')}
+            >
+              <NotebookTextIcon className="size-5" />
+            </Button>
+          ) : null}
+          {pane ? (
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label="Details panel"
               title="Details panel (i)"
-              aria-pressed={inspector}
+              aria-pressed={inspector && !briefPanel}
               onClick={onToggleInspector}
-              className={cn('size-11 shrink-0 rounded-xl', inspector && 'bg-muted text-foreground')}
+              className={cn('size-11 shrink-0 rounded-xl', inspector && !briefPanel && 'bg-muted text-foreground')}
             >
               <PanelRightIcon className="size-5" />
             </Button>
@@ -517,11 +578,16 @@ export function SessionScreen({
         <section aria-label={`Session ${name}`} className="relative flex min-w-0 flex-1 flex-col" {...drop.bind}>
           {column}
         </section>
-        {inspector ? (
+        {briefPanel ? (
+          <aside aria-label="Session brief" className="w-80 shrink-0 border-l bg-card/30 xl:w-96">
+            <BriefPanel {...briefProps} variant="panel" onClose={onToggleBrief} />
+          </aside>
+        ) : inspector ? (
           <aside aria-label="Session details" className="w-80 shrink-0 border-l bg-card/30">
             <SessionMenuBody {...menuProps} open variant="panel" />
           </aside>
         ) : null}
+        {continueForm}
       </div>
     )
   }
@@ -530,6 +596,8 @@ export function SessionScreen({
     <div ref={screenRef} className="fixed-app flex flex-col overflow-hidden bg-background" {...drop.bind}>
       {column}
       <SessionMenu {...menuProps} />
+      <BriefDrawer {...briefProps} open={briefOpen} onOpenChange={setBriefOpen} />
+      {continueForm}
     </div>
   )
 }

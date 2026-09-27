@@ -293,3 +293,50 @@ export interface GroupsResponse {
   groups: SessionGroup[]
   error?: string
 }
+
+/** A `## Resources` bullet of a session brief. `url` or `path` is set; `kind: null` = a hand-written line. */
+export type BriefResourceKind = 'PR' | 'Issue' | 'Artifact' | 'Spec' | 'File' | 'Branch' | 'Worktree' | 'Link'
+
+export interface BriefResource {
+  kind: BriefResourceKind | string | null
+  label: string | null
+  url: string | null
+  /** Relative to the session cwd when inside it, else `~/…`, else absolute (a branch name for `Branch`). */
+  path: string | null
+  /** The bullet as written. */
+  text: string
+}
+
+export interface BriefPlanItem {
+  done: boolean
+  text: string
+}
+
+/** GET/PUT /api/hosts/:host/sessions/:id/brief (`exists: false` = the empty skeleton, no file yet). */
+export interface Brief {
+  host: string
+  id: string
+  exists: boolean
+  /** The whole file, frontmatter included. */
+  markdown: string
+  parsed: { summary: string; resources: BriefResource[]; plan: BriefPlanItem[] }
+  /** ISO 8601 (frontmatter), null when never written. */
+  updated: string | null
+  editedAt: string | null
+  generatedAt: string | null
+  generatedThrough: number
+  generating: boolean
+  /** Background generation is on for that host (`web.briefs.enabled`). */
+  enabled: boolean
+  /** The first prompt for a new session that continues this one. */
+  continuePrompt: string
+}
+
+/** POST …/brief/regenerate (202). */
+export interface BriefRegenerateResponse {
+  host: string
+  id: string
+  started: boolean
+  queued: boolean
+  generating: true
+}
