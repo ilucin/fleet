@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronLeftIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
@@ -100,6 +100,7 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
       </Section>
 
       <p className="pt-4 text-xs text-dimmer">Saved in this browser; every session uses them.</p>
+      <ViewportInfo />
     </div>
   )
 
@@ -150,5 +151,62 @@ function Stacked({ label, hint, children }: { label: string; hint?: string; chil
       </div>
       {children}
     </div>
+  )
+}
+
+const PROBES = ['100vh', '100lvh', '100svh', '100dvh', 'var(--app-h)'] as const
+
+/** Viewport numbers (for layout bugs on phones / home-screen apps): what the browser reports. */
+function ViewportInfo() {
+  const [lines, setLines] = useState<string[]>([])
+  const [outline, setOutline] = useState(false)
+  useEffect(() => {
+    const measure = () => {
+      const probe = (css: Partial<CSSStyleDeclaration>) => {
+        const el = document.createElement('div')
+        Object.assign(el.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none', left: '0', top: '0', width: '1px' }, css)
+        document.body.appendChild(el)
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        el.remove()
+        return { h: Math.round(r.height), top: Math.round(r.top), cs }
+      }
+      const inset = probe({ bottom: '0' })
+      const safe = probe({ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', height: '0' }).cs
+      const vv = window.visualViewport
+      const nav = navigator as Navigator & { standalone?: boolean }
+      setLines([
+        `standalone ${nav.standalone === true || window.matchMedia('(display-mode: standalone)').matches}`,
+        `screen ${screen.width}×${screen.height} · dpr ${window.devicePixelRatio}`,
+        `inner ${window.innerWidth}×${window.innerHeight} · client ${document.documentElement.clientHeight}`,
+        `visualViewport ${vv ? `${Math.round(vv.height)} @${Math.round(vv.offsetTop)}` : '—'}`,
+        `fixed inset-0 ${inset.h} @${inset.top}`,
+        ...PROBES.map((v) => `${v} ${probe({ height: v }).h}`),
+        `safe top ${safe.paddingTop} · bottom ${safe.paddingBottom}`,
+      ])
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.visualViewport?.addEventListener('resize', measure)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.visualViewport?.removeEventListener('resize', measure)
+    }
+  }, [])
+  return (
+    <details className="pt-4 text-xs text-dimmer">
+      <summary className="cursor-pointer">Viewport diagnostics</summary>
+      <pre className="pt-2 font-mono text-[0.6875rem] leading-relaxed whitespace-pre-wrap">{lines.join('\n')}</pre>
+      <label className="flex items-center gap-2 pt-1">
+        <Switch checked={outline} onCheckedChange={setOutline} aria-label="Show viewport outlines" />
+        Outlines: red = fixed inset-0, blue = app height
+      </label>
+      {outline ? (
+        <>
+          <div aria-hidden className="pointer-events-none fixed inset-0 z-[100] border-4 border-red-500" />
+          <div aria-hidden className="pointer-events-none fixed inset-x-6 top-0 z-[100] h-app border-4 border-blue-500" />
+        </>
+      ) : null}
+    </details>
   )
 }
