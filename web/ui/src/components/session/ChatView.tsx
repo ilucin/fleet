@@ -42,20 +42,20 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
   if (kind === 'command') {
     return (
       <div className="self-center text-center">
-        <span className="inline-block rounded-full border bg-muted px-2.5 py-0.5 font-mono text-[11px] break-words text-status-waiting/90">
+        <span className="inline-block rounded-full border bg-muted px-2.5 py-0.5 font-mono text-[11px] text-status-waiting/90 [overflow-wrap:anywhere]">
           {text}
         </span>
       </div>
     )
   }
   if (kind === 'system') {
-    return <div className="max-w-[92%] self-center text-center text-[11px] break-words text-dimmer">{text}</div>
+    return <div className="max-w-[92%] self-center text-center text-[11px] text-dimmer [overflow-wrap:anywhere]">{text}</div>
   }
   const cap = caption ? <div className="px-1 pt-0.5 text-[10px] text-dimmer tabular-nums">{caption}</div> : null
   if (kind === 'user') {
     return (
       <div className="flex max-w-[85%] flex-col items-end self-end">
-        <div className="rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 break-words whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
+        <div className="rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
           {text}
         </div>
         {cap}
