@@ -62,7 +62,8 @@ src/
                       index.css): PALETTES (picker swatches), parsePalette(), themeColor() (meta theme-color per mode)
   lib/notes.ts        notes explorer: buildTree(), notesHref() / parseNotesLocation() (`#/notes/<host>/<path>`),
                       indexNotes() + resolveNoteLink() (relative + `[[wiki]]` links), splitRanges(), highlightTerms()
-  lib/drafts.ts       one-shot composer drafts (setDraft / takeDraft) — "Send to session" from a note
+  lib/drafts.ts       composer drafts per session: unsent text saved in `fleet.drafts` (saveDraft, 14 days,
+                      cleared on send) + one-shot parked text (setDraft) — "Send to session" from a note
   lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
                       (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
   lib/storage.ts      localStorage that never throws
@@ -190,7 +191,7 @@ src/
     re-renders happen only when the payload changed;
   - errors (`sessionErrorMessage`) as a pill over the pane; host-unreachable / not-in-fleet /
     gone banners; the composer locks for a gone session or `backend: unknown`.
-- **Composer**: auto-growing textarea (Enter sends on hardware keyboards, newline on touch;
+- **Composer**: auto-growing textarea (unsent text is kept per session as a draft across switching and restarts; Enter sends on hardware keyboards, newline on touch;
   1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down (mobile: a mini drawer above the input, hidden until you swipe up on the composer or tap its handle; swipe down hides it; desktop: always shown);
   a toast per result; two follow-up polls after steering.
 - **Attachments**: files dropped on the session (anywhere on the desktop pane or the mobile
