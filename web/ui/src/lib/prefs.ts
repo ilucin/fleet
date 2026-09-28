@@ -5,6 +5,8 @@ import { CHAT_FONT_SIZES, TERM_FONT_SIZES, parseSize } from '@/lib/chat'
 export const TEXT_SIZE_KEY = 'fleet.chatFont'
 export const TERM_FONT_KEY = 'fleet.termFont'
 export const HIDE_NOTES_KEY = 'fleet.chatHideNotes'
+/** Composer send delay (ms: 0 / 3000 / 5000, lib/outbox.ts SEND_DELAYS) — the undo window. */
+export const SEND_DELAY_KEY = 'fleet.sendDelay'
 
 /**
  * Text size steps, named by the chat text size they give (the classic UI's `fleet.chatFont`

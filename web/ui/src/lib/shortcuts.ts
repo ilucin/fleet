@@ -133,6 +133,16 @@ export function isMacPlatform(nav: { platform?: string; userAgent?: string } | u
   return /Mac|iPhone|iPad|iPod/.test(p)
 }
 
+/** ⌘+Enter (macOS) / Ctrl+Enter: submit a form from any of its fields (not while an IME composes). */
+export function isSubmitChord(e: KeyLike): boolean {
+  return e.key === 'Enter' && !!(e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && !e.isComposing
+}
+
+/** A bare Esc (no modifiers, not composing) — e.g. cancel a pending send. */
+export function isPlainEscape(e: KeyLike): boolean {
+  return e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing
+}
+
 export interface ShortcutHelp {
   keys: string[][]
   label: string
@@ -149,7 +159,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
       { keys: [['Enter']], label: 'Open and focus the composer' },
       { keys: [['o']], label: 'Open' },
       { keys: [['/']], label: 'Search (↑ ↓ Enter work in the field)' },
-      { keys: [['c'], ['n']], label: 'New session' },
+      { keys: [['c'], ['n']], label: 'New session (mod+Enter starts it)' },
       { keys: [['mod', 'K']], label: 'Command palette: jump to a session, run an action' },
     ],
   },
@@ -162,6 +172,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
       { keys: [['g', 't']], label: 'Terminal view' },
       { keys: [['Enter']], label: 'Send (in the composer; also mod+Enter)' },
       { keys: [['Shift', 'Enter']], label: 'New line' },
+      { keys: [['Esc']], label: 'Cancel a pending send (back into the composer)' },
       { keys: [['Esc']], label: 'Leave the field / close the session pane' },
     ],
   },

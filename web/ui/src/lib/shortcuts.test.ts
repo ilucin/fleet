@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, test } from 'vitest'
 
-import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutContext } from '@/lib/shortcuts'
+import { isMacPlatform, isPlainEscape, isSubmitChord, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutContext } from '@/lib/shortcuts'
 
 const idle: ShortcutContext = { typing: false, arrowsFree: true, pending: null }
 const act = (key: string, ctx: Partial<ShortcutContext> = {}, mods: Record<string, boolean> = {}) =>
@@ -105,4 +105,19 @@ describe('helpers', () => {
     expect(isMacPlatform({ platform: 'MacIntel' })).toBe(true)
     expect(isMacPlatform({ platform: 'Linux x86_64', userAgent: 'X11' })).toBe(false)
   })
+})
+
+test('isSubmitChord: ⌘/Ctrl+Enter only', () => {
+  expect(isSubmitChord({ key: 'Enter', metaKey: true })).toBe(true)
+  expect(isSubmitChord({ key: 'Enter', ctrlKey: true })).toBe(true)
+  expect(isSubmitChord({ key: 'Enter' })).toBe(false)
+  expect(isSubmitChord({ key: 'Enter', metaKey: true, shiftKey: true })).toBe(false)
+  expect(isSubmitChord({ key: 'Enter', metaKey: true, isComposing: true })).toBe(false)
+})
+
+test('isPlainEscape: bare Esc only', () => {
+  expect(isPlainEscape({ key: 'Escape' })).toBe(true)
+  expect(isPlainEscape({ key: 'Escape', metaKey: true })).toBe(false)
+  expect(isPlainEscape({ key: 'Escape', isComposing: true })).toBe(false)
+  expect(isPlainEscape({ key: 'Enter' })).toBe(false)
 })

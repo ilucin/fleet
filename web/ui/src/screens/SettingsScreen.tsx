@@ -11,6 +11,7 @@ import { usePrefs } from '@/hooks/usePrefs'
 import { useSessionList } from '@/hooks/useSessionList'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useTheme, type ThemeChoice } from '@/hooks/useTheme'
+import { SEND_DELAYS, SEND_DELAY_LABELS } from '@/lib/outbox'
 import { PALETTES, parsePalette } from '@/lib/palettes'
 import { TERM_FONT_SIZES, TEXT_SIZES, TEXT_SIZE_LABELS } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
@@ -20,14 +21,14 @@ const segItem =
 
 /**
  * `#/settings`: the viewer's global preferences — text size (scales the whole app), theme
- * (colour palette), mode (light/dark), terminal text, progress notes. Stored in this browser (localStorage). `screen` = the mobile page
+ * (colour palette), mode (light/dark), terminal text, progress notes, send delay. Stored in this browser (localStorage). `screen` = the mobile page
  * (back button, swipe back); `pane` = the desktop main pane (✕ / Esc back to `#/`).
  */
 export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
   const pane = layout === 'pane'
   const [, navigate] = useLocation()
   const { theme, setTheme } = useTheme()
-  const { textSize, setTextSize, termFont, setTermFont, hideNotes, setHideNotes } = usePrefs()
+  const { textSize, setTextSize, termFont, setTermFont, hideNotes, setHideNotes, sendDelay, setSendDelay } = usePrefs()
 
   const back = () => {
     if (!pane && window.history.length > 1) window.history.back()
@@ -104,6 +105,22 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
           </div>
           <Switch checked={!hideNotes} onCheckedChange={(v) => setHideNotes(!v)} aria-label="Show progress notes" />
         </div>
+        <Stacked label="Send delay" hint="Time to undo a message (Esc or Undo) before it goes out">
+          <ToggleGroup
+            type="single"
+            value={String(sendDelay)}
+            onValueChange={(v) => v && setSendDelay(Number(v))}
+            spacing={0}
+            aria-label="Send delay"
+            className="w-full rounded-lg bg-muted p-1"
+          >
+            {SEND_DELAYS.map((ms) => (
+              <ToggleGroupItem key={ms} value={String(ms)} className={segItem}>
+                {SEND_DELAY_LABELS[ms]}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </Stacked>
       </Section>
 
       <p className="pt-4 text-xs text-dimmer">Saved in this browser; every session uses them.</p>

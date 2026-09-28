@@ -34,6 +34,9 @@ export interface ChatViewProps {
   wide?: boolean
   /** Link file paths in Claude's messages that exist on the session's host (click → preview). */
   fileLinks?: FileStats
+  /** The outbox's optimistic bubbles, after the transcript; `outboxKey` changes when they do (keeps the tail followed). */
+  outbox?: React.ReactNode
+  outboxKey?: string
 }
 
 const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: string }) {
@@ -125,7 +128,7 @@ export function ChatView(p: ChatViewProps) {
       setTop(el.scrollTop + (el.scrollHeight - lastHeight.current))
     } else stick()
     lastHeight.current = el.scrollHeight
-  }, [p.messages, p.hideNotes, p.status, p.loadingOlder, ref, setFollow, setTop, stick])
+  }, [p.messages, p.hideNotes, p.status, p.loadingOlder, p.outboxKey, ref, setFollow, setTop, stick])
 
   useEffect(() => {
     if (p.jumpSignal) jump()
@@ -186,6 +189,7 @@ export function ChatView(p: ChatViewProps) {
             </div>
           ) : null}
           {p.fileLinks ? <FileLinksContext.Provider value={p.fileLinks.api}>{body}</FileLinksContext.Provider> : body}
+          {p.outbox}
           {p.messages ? <Typing status={p.status} waitingFor={p.waitingFor} /> : null}
         </div>
       </div>

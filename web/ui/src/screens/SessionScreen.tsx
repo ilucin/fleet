@@ -12,7 +12,7 @@ import {
 import { useLocation } from 'wouter'
 import { toast } from 'sonner'
 
-import { ApiError, api, isAbortError, isSessionGone, sessionErrorMessage } from '@/api/client'
+import { ApiError, api, isAbortError, isSessionGone, sendErrorMessage, sessionErrorMessage } from '@/api/client'
 import type { FileStat, Message, SessionKey } from '@/api/types'
 import { ContextMeter } from '@/components/ContextMeter'
 import { DropOverlay } from '@/components/DropOverlay'
@@ -21,8 +21,9 @@ import { HostBadge } from '@/components/HostBadge'
 import { NewSessionDialog, NewSessionDrawer, type SpawnPrefill } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
 import { ChatView } from '@/components/session/ChatView'
-import { Composer } from '@/components/session/Composer'
+import { Composer, type ComposerApi } from '@/components/session/Composer'
 import { FilePreview } from '@/components/session/FilePreview'
+import { OutboxBubbles } from '@/components/session/OutboxBubbles'
 import { DetailsDrawer, DetailsPanel, type DetailsPanelProps } from '@/components/session/DetailsPanel'
 import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ import { useBrief } from '@/hooks/useBrief'
 import { useFileStats } from '@/hooks/useFileLinks'
 import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
+import { useOutbox } from '@/hooks/useOutbox'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
 import { usePrefs } from '@/hooks/usePrefs'
@@ -41,7 +43,9 @@ import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitle
 import { CHAT_LIMITS, CHAT_POLL_MS, PEEK_POLL_MS, TERM_LINES, nextChatLimit, parseMode, parseSize, type DetailMode } from '@/lib/chat'
 import { continueDraft } from '@/lib/brief'
 import { modelLabel, relTime, shortCwd } from '@/lib/format'
+import { tailAnchor } from '@/lib/outbox'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
+import { isPlainEscape } from '@/lib/shortcuts'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
 
@@ -111,7 +115,7 @@ export function SessionScreen({
   // progress notes are global (the Settings screen).
   const [mode, setMode] = usePersistentState<DetailMode>('fleet.detailMode', 'chat', parseMode)
   const [termLines, setTermLines] = usePersistentState<number>('fleet.termLines', 200, parseSize(TERM_LINES))
-  const { termFont, hideNotes } = usePrefs()
+  const { termFont, hideNotes, sendDelay } = usePrefs()
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [jumpSignal, setJumpSignal] = useState(0)
@@ -153,7 +157,6 @@ export function SessionScreen({
   const [peekBackend, setPeekBackend] = useState<string | null>(null)
 
   const [gone, setGone] = useState(false)
-  const [sending, setSending] = useState(false)
 
   const pollChat = useCallback(
     async (signal: AbortSignal) => {
@@ -282,35 +285,87 @@ export function SessionScreen({
     toast.error(sessionErrorMessage(err))
   }
 
-  const send = async (text: string): Promise<boolean> => {
-    if (sending || lockedReason || !text.trim()) return false
-    setSending(true)
-    try {
-      await api.send(host, id, text)
-      toast.success('Sent', { duration: 1500 })
+  // Messages go through the outbox (lib/outbox.ts): an undo window (Settings → Send delay), then
+  // one POST at a time; the composer never waits. Keys stay immediate.
+  const composerApi = useRef<ComposerApi>(null)
+  const chatRef = useRef(chat)
+  useEffect(() => {
+    chatRef.current = chat
+  }, [chat])
+  const modeRef = useRef(mode)
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
+  const { box, items: outbox } = useOutbox({
+    host,
+    id,
+    onSent: () => {
+      // The terminal view has no bubble to turn into "Sent".
+      if (modeRef.current !== 'chat') toast.success('Sent', { duration: 1500 })
       afterSteer()
-      return true
-    } catch (err) {
-      steerError(err)
-      return false
-    } finally {
-      setSending(false)
-    }
+    },
+    onError: (err, _item, mounted) => {
+      if (isAbortError(err)) return
+      if (mounted && err instanceof ApiError && err.status === 404) setGone(true)
+      // In the chat the bubble says it (Retry / Edit); elsewhere only a toast can.
+      if (!mounted || modeRef.current !== 'chat') toast.error(`Not sent: ${sendErrorMessage(err)}`)
+    },
+  })
+  // The real message arrived → drop its optimistic bubble.
+  useEffect(() => {
+    if (chat) box.reconcile(chat.messages)
+  }, [chat, box])
+  const hasPending = outbox.some((it) => it.state === 'pending')
+
+  const send = (text: string): boolean => {
+    if (lockedReason || !text.trim()) return false
+    box.add(text, sendDelay, tailAnchor(chatRef.current?.messages))
+    setJumpSignal((n) => n + 1)
+    return true
   }
+  const undo = () => {
+    const it = box.cancel()
+    if (it) composerApi.current?.restore(it.text)
+  }
+  const editFailed = (itemId: number) => {
+    const text = box.discard(itemId)
+    if (text != null) composerApi.current?.restore(text)
+  }
+  const retryFailed = (itemId: number) => box.retry(itemId, tailAnchor(chatRef.current?.messages))
+
+  // Esc cancels the pending message before anything else handles Esc (blur, close the pane /
+  // flyout, cancel an edit) — capture phase, only while one counts down, not over a dialog.
+  const undoRef = useRef(undo)
+  useEffect(() => {
+    undoRef.current = undo
+  })
+  useEffect(() => {
+    if (!hasPending) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isPlainEscape(e) || e.defaultPrevented) return
+      if (document.querySelector('[role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')) return
+      e.preventDefault()
+      e.stopPropagation()
+      undoRef.current()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [hasPending])
 
   const sendKey = async (key: SessionKey) => {
-    if (sending || lockedReason) return
-    setSending(true)
+    if (lockedReason) return
     try {
       await api.keys(host, id, key)
       toast.success(`${key} sent`, { duration: 1200 })
       afterSteer()
     } catch (err) {
       steerError(err)
-    } finally {
-      setSending(false)
     }
   }
+
+  const outboxView = (variant: 'chat' | 'strip') => (
+    <OutboxBubbles items={outbox} desktop={pane} onUndo={undo} onRetry={retryFailed} onEdit={editFailed} variant={variant} />
+  )
 
   const back = () => {
     if (window.history.length > 1) window.history.back()
@@ -508,6 +563,8 @@ export function SessionScreen({
             jumpSignal={jumpSignal}
             wide={pane}
             fileLinks={fileLinks}
+            outbox={outboxView('chat')}
+            outboxKey={outbox.map((it) => `${it.id}:${it.state}`).join(',')}
           />
         ) : (
           <TermView text={peek?.text ?? null} failed={!!peekErr} fontSize={termFont} jumpSignal={jumpSignal} />
@@ -531,10 +588,14 @@ export function SessionScreen({
         ) : null}
       </main>
 
+      {mode === 'term' && outbox.some((it) => it.state !== 'sent') ? (
+        <div className={cn('shrink-0 px-safe', pane ? 'mx-auto w-full max-w-4xl px-4 pt-2' : 'mx-auto w-full max-w-3xl px-3 pt-2')}>
+          {outboxView('strip')}
+        </div>
+      ) : null}
       <Composer
         quickReplies={settings.quickReplies}
         lockedReason={lockedReason}
-        sending={sending}
         onSend={send}
         onKey={sendKey}
         desktop={pane}
@@ -542,6 +603,7 @@ export function SessionScreen({
         host={host}
         attachRef={attachRef}
         draftKey={sessionKey}
+        apiRef={composerApi}
       />
       <DropOverlay show={drop.dragging} hint={`Uploaded to ${host}; the path goes into the message`} />
       <FilePreview host={host} id={id} file={preview} onClose={() => setPreviewOf(null)} desktop={pane} />

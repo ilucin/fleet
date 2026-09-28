@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 
+import { DEFAULT_SEND_DELAY } from '@/lib/outbox'
 import { DEFAULT_TERM_FONT, DEFAULT_TEXT_SIZE } from '@/lib/prefs'
 
 /** Global viewer preferences (the Settings screen), persisted per viewer in localStorage. */
@@ -13,6 +14,9 @@ export interface PrefsState {
   /** Hide assistant narration between tool calls in the chat. */
   hideNotes: boolean
   setHideNotes: (v: boolean) => void
+  /** Composer undo window in ms (0 = send at once), one of SEND_DELAYS. */
+  sendDelay: number
+  setSendDelay: (ms: number) => void
 }
 
 export const PrefsContext = createContext<PrefsState>({
@@ -22,6 +26,8 @@ export const PrefsContext = createContext<PrefsState>({
   setTermFont: () => {},
   hideNotes: false,
   setHideNotes: () => {},
+  sendDelay: DEFAULT_SEND_DELAY,
+  setSendDelay: () => {},
 })
 
 export function usePrefs(): PrefsState {

@@ -337,6 +337,11 @@
   animation: fleet-dot 1.2s infinite ease-in-out;
 }
 
+/* The outbox's countdown ring (components/session/OutboxBubbles.tsx): full → empty. */
+@keyframes fleet-countdown {
+  to { stroke-dashoffset: var(--ring-len); }
+}
+
 /* Horizontally scrolling chip rows. */
 @utility no-scrollbar {
   scrollbar-width: none;

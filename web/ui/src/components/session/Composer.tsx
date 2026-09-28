@@ -7,6 +7,7 @@ import { useAttach } from '@/hooks/useAttach'
 import { MAX_SEND_CHARS } from '@/lib/chat'
 import { saveDraft, takeDraft } from '@/lib/drafts'
 import { swipeIntent } from '@/lib/gestures'
+import { restoreText } from '@/lib/outbox'
 import { cn } from '@/lib/utils'
 
 /** Built-in key chips (not configurable), as in the classic UI. */
@@ -28,9 +29,11 @@ export interface ComposerProps {
   quickReplies: QuickReply[]
   /** Why steering is impossible (gone / unknown backend); null = enabled. */
   lockedReason: string | null
-  sending: boolean
-  /** Resolves true when the text was delivered (the textarea is then cleared). */
-  onSend: (text: string) => Promise<boolean>
+  /**
+   * Hands the text to the outbox; true = accepted (the textarea clears at once — delivery, the
+   * undo window and errors show in the chat, never as a busy composer).
+   */
+  onSend: (text: string) => boolean
   onKey: (key: SessionKey) => void
   /**
    * Desktop pane: Enter (or ⌘/Ctrl+Enter) always sends, even on touch-capable laptops;
@@ -45,11 +48,18 @@ export interface ComposerProps {
   attachRef?: React.Ref<(files: File[]) => void>
   /** `host/id`: keys the unsent draft kept across sessions and restarts (lib/drafts.ts). */
   draftKey?: string
+  /** Receives the composer's API: put a cancelled / failed message back (lib/outbox.ts restoreText). */
+  apiRef?: React.Ref<ComposerApi>
+}
+
+export interface ComposerApi {
+  /** Put `text` back (before anything typed since), focus, caret at the end. */
+  restore: (text: string) => void
 }
 
 const MAX_TEXTAREA_PX = 21 * 5 + 22 // ~5 rows + padding
 
-export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, desktop = false, inputRef, host, attachRef, draftKey }: ComposerProps) {
+export function Composer({ quickReplies, lockedReason, onSend, onKey, desktop = false, inputRef, host, attachRef, draftKey, apiRef }: ComposerProps) {
   const [text, setText] = useState(() => takeDraft(draftKey))
   useEffect(() => saveDraft(draftKey, text), [draftKey, text])
   const ta = useRef<HTMLTextAreaElement>(null)
@@ -58,6 +68,18 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
   const { attach, onPaste, progress } = useAttach({ host, textarea: ta, setValue: setText, disabledReason: lockedReason })
   useImperativeHandle(attachRef, () => (files: File[]) => void attach(files), [attach])
   const picker = useRef<HTMLInputElement>(null)
+  // restore(): the caret goes to the end once the restored text is rendered.
+  const caretToEnd = useRef(false)
+  useImperativeHandle(
+    apiRef,
+    () => ({
+      restore: (t: string) => {
+        caretToEnd.current = true
+        setText((cur) => restoreText(t, cur))
+      },
+    }),
+    [],
+  )
   const locked = lockedReason != null
   const empty = text.trim().length === 0
   const tooLong = text.length > MAX_SEND_CHARS
@@ -85,11 +107,17 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(MAX_TEXTAREA_PX, Math.max(44, el.scrollHeight))}px`
+    if (caretToEnd.current) {
+      caretToEnd.current = false
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+      el.scrollTop = el.scrollHeight
+    }
   }, [text])
 
-  const submit = async () => {
-    if (locked || sending || empty || tooLong) return
-    if (await onSend(text)) setText('')
+  const submit = () => {
+    if (locked || empty || tooLong) return
+    if (onSend(text)) setText('')
   }
 
   // Hardware keyboards send on Enter; touch keyboards keep Enter as a newline.
@@ -125,7 +153,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
         className={cn(desktop ? 'mx-auto w-full max-w-4xl px-4 pt-2 pb-2' : 'mx-auto w-full max-w-3xl px-3 pb-2', locked && 'opacity-60')}
         onSubmit={(e) => {
           e.preventDefault()
-          void submit()
+          submit()
         }}
       >
         {desktop ? null : (
@@ -140,7 +168,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
               key={`${q.label}\u0000${q.text}`}
               type="button"
               className={chipClass}
-              disabled={locked || sending}
+              disabled={locked}
               title={q.text}
               onClick={() => void onSend(q.text)}
             >
@@ -158,7 +186,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
                 chipClass,
                 'flex items-center px-3 font-mono text-[0.8125rem] text-status-waiting/90 [&_svg]:size-4',
               )}
-              disabled={locked || sending}
+              disabled={locked}
               onClick={() => onKey(k.key)}
             >
               {k.icon ?? k.label}
@@ -204,7 +232,7 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
               if (isTouch && !desktop) return
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
-                void submit()
+                submit()
               }
             }}
             disabled={locked}
@@ -224,10 +252,10 @@ export function Composer({ quickReplies, lockedReason, sending, onSend, onKey, d
             type="submit"
             size="icon"
             aria-label="Send"
-            disabled={locked || sending || empty || tooLong}
+            disabled={locked || empty || tooLong}
             className="size-11 rounded-full [&_svg:not([class*='size-'])]:size-5"
           >
-            {sending ? <Loader2Icon className="animate-spin" /> : <SendHorizontalIcon />}
+            <SendHorizontalIcon />
           </Button>
         </div>
         {progress ? (

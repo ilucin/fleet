@@ -62,6 +62,9 @@ src/
                       index.css): PALETTES (picker swatches), parsePalette(), themeColor() (meta theme-color per mode)
   lib/notes.ts        notes explorer: buildTree(), notesHref() / parseNotesLocation() (`#/notes/<host>/<path>`),
                       indexNotes() + resolveNoteLink() (relative + `[[wiki]]` links), splitRanges(), highlightTerms()
+  lib/outbox.ts       composer outbox (send with an undo delay): pure transitions (schedule / cancel / flush / retry),
+                      reconcile() (dedupe optimistic bubbles against the transcript), the Outbox class (timer +
+                      one-at-a-time sender), SEND_DELAYS (Settings → Send delay, `fleet.sendDelay`)
   lib/drafts.ts       composer drafts per session: unsent text saved in `fleet.drafts` (saveDraft, 14 days,
                       cleared on send) + one-shot parked text (setDraft) — "Send to session" from a note
   lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
@@ -87,6 +90,7 @@ src/
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
   hooks/useNotes.ts   useNotesHosts() (hosts whose fleet entry has `notes`), useNotesTree() (cached, 30s poll),
                       useNotesSearch() (debounced, aborts the previous), useNoteFile()
+  hooks/useOutbox.ts  the session screen's Outbox: keepalive POSTs, flush on unmount / background, pagehide hand-off
   hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
   providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
                       PrefsProvider (text size → <html> font-size, terminal text, progress notes)
@@ -95,7 +99,8 @@ src/
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
   components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
-  components/session/ detail screen parts: ChatView, TermView, Composer, FilePreview, DetailsPanel (the desktop
+  components/session/ detail screen parts: ChatView, TermView, Composer, OutboxBubbles (pending / sending / sent /
+                      failed user bubbles; the terminal view's strip), FilePreview, DetailsPanel (the desktop
                       details column) / DetailsDrawer (mobile ⋯), BriefSection (its top), LatestButton
   components/desktop/ Sidebar (+ SidebarRail when collapsed, NotesLink), CommandPalette (⌘K), ShortcutsDialog (?)
   components/notes/   NoteTree, NoteResults / RecentNotes, NoteView (frontmatter, body, actions), SendNoteDialog
@@ -171,7 +176,8 @@ src/
   `api.spawn`. No name field: the server names it (a targeted auto-name pass right after the
   first reply when `web.autoName` is on, else tmux `fw-hhmmss`). 400/409 are shown inline; on success a loading toast watches
   `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
-  opens the session. Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys)
+  opens the session. ⌘/Ctrl+Enter starts it from any field (the prompt included — plain Enter
+  there is a newline; the dialog's button shows `⌘↵`). Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys)
   and `fleet.spawnModel` (a model id no longer offered falls back to the first option).
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
@@ -193,7 +199,33 @@ src/
     gone banners; the composer locks for a gone session or `backend: unknown`.
 - **Composer**: auto-growing textarea (unsent text is kept per session as a draft across switching and restarts; Enter sends on hardware keyboards, newline on touch;
   1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down (mobile: a mini drawer above the input, hidden until you swipe up on the composer or tap its handle; swipe down hides it; desktop: always shown);
-  a toast per result; two follow-up polls after steering.
+  two follow-up polls after steering. Keys go out at once (a toast per result).
+- **Send with undo** (`lib/outbox.ts`, `hooks/useOutbox.ts`): a message (typed or a quick reply) never
+  blocks the composer — it clears at once and the message shows as a dashed **pending** bubble with a
+  countdown ring (text only with reduced motion), "Sending in 3s", "Esc to cancel" (desktop) and
+  **Undo**; screen readers hear "Sending in 3 seconds, press Escape to cancel" once. Settings → Chat →
+  Send delay: Off / 3 s (default) / 5 s (`fleet.sendDelay`); Off still shows the optimistic bubble.
+  - One message counts down at a time: sending another flushes the first immediately and starts
+    its own window, so Esc / Undo always cancels the most recent one. POSTs go one at a time, in
+    order, as keepalive fetches.
+  - Esc / Undo puts the text back in the composer — before anything typed since (blank line
+    between), caret at the end, focused. While a message is pending, Esc cancels it before any
+    other Esc behaviour (blur, close the pane / flyout / Settings, cancel an inline edit) — a
+    capture-phase listener; not while a dialog or drawer is open.
+  - After the delay: "Sending…", then "Sent" until the next poll brings the real message; the
+    optimistic bubble is then dropped. Matching: in order, the first user message after the
+    transcript's last user message at send time (or, when that has scrolled out / the chat was
+    not loaded, with a timestamp at most a minute before the send) whose text equals it after
+    whitespace normalisation (or shares the first 32 chars — Claude Code may rewrite attached
+    paths); an unmatched "Sent" bubble expires after 3 min.
+  - Failure (409 with the server's reason, 404 gone, host / network unreachable): the bubble shows
+    "Not sent: …" with **Retry** (back of the line) and **Edit** (text back in the composer). In
+    the terminal view a strip above the composer shows pending / sending / failed messages, and a
+    toast says sent / not sent.
+  - Leaving the session (back, another session, the Board flyout switching or closing) sends
+    what is still counting down right away; so does the page going to the background (iOS
+    freezes timers). On `pagehide` (tab / app closing) the rest go as keepalive fetches, best
+    effort.
 - **Attachments**: files dropped on the session (anywhere on the desktop pane or the mobile
   screen), pasted into the composer (⌘/Ctrl+V with files on the clipboard — plain text pastes as
   usual) or picked with the paperclip (`multiple`) are uploaded one by one to the session's host
@@ -240,7 +272,8 @@ src/
   the board header on desktop, ⌘K → Settings…, Details → Settings): Text size (Small / Default /
   Large = chat at 13 / 15 / 17px, `fleet.chatFont`) scales the **whole** UI via the `<html>`
   font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
-  it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`). Per
+  it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`); Send
+  delay (`fleet.sendDelay`, above). Per
   viewer (localStorage), for every session.
 - **Notes** (`#/notes[/<host>[/<path>]]`; ../ARCHITECTURE.md → notes): browse, search and read the
   markdown notes of any host with `web.notes.root` (hosts come from `/api/fleet` entries carrying
@@ -315,7 +348,8 @@ open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through
 | `c`, `n` | new session |
 | `g c`, `g t` | chat / terminal view |
 | `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
-| `Esc` | leave the field; otherwise close the pane or Settings (`#/`) |
+| `Esc` | cancel a pending send (first, while one counts down); leave the field; otherwise close the pane or Settings (`#/`) |
+| ⌘/Ctrl+`Enter` | New session form: start |
 | `[`, ⌘/Ctrl+`B` | toggle the sidebar |
 | `b` | switch List / Board |
 | `g n` | notes explorer (again, or `Esc`: back to the sessions) |

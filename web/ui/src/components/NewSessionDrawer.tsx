@@ -8,6 +8,7 @@ import { DropOverlay } from '@/components/DropOverlay'
 import { HostDot } from '@/components/HostBadge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Kbd } from '@/components/ui/kbd'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { Label } from '@/components/ui/label'
@@ -20,6 +21,7 @@ import { shortCwd } from '@/lib/format'
 import { pickModel } from '@/lib/models'
 import { storage } from '@/lib/storage'
 import { sessionHref, spawnTargets } from '@/lib/sessions'
+import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
 // Same keys as the classic UI's sheet.
@@ -149,6 +151,9 @@ function NewSessionForm({
     if (label !== PREFILL_DIR_LABEL) storage.set(dirKey(host), label)
   }
 
+  // ⌘/Ctrl+Enter submits from any field (the prompt included; plain Enter there stays a newline).
+  const canStart = !busy && !!dir && progress == null
+
   const start = async () => {
     if (busy || progress) return
     if (!host) return setError('No reachable host to start a session on.')
@@ -191,6 +196,11 @@ function NewSessionForm({
       onSubmit={(e) => {
         e.preventDefault()
         void start()
+      }}
+      onKeyDown={(e) => {
+        if (!isSubmitChord(e.nativeEvent)) return
+        e.preventDefault()
+        if (canStart) void start()
       }}
     >
       <Header className="px-0 pt-3 pb-2 text-left">
@@ -334,9 +344,14 @@ function NewSessionForm({
             </Alert>
           ) : null}
 
-          <Button type="submit" className="h-11 w-full rounded-xl text-[0.9375rem]" disabled={busy || !dir || progress != null}>
+          <Button type="submit" className="h-11 w-full rounded-xl text-[0.9375rem]" disabled={!canStart}>
             {busy ? <Loader2Icon className="animate-spin" /> : <PlayIcon />}
             {busy ? 'Starting…' : `Start on ${host}`}
+            {dialog && !busy ? (
+              <Kbd aria-hidden className="ml-1 bg-primary-foreground/15 text-primary-foreground/80">
+                {isMacPlatform() ? '⌘↵' : 'Ctrl↵'}
+              </Kbd>
+            ) : null}
           </Button>
         </div>
       )}

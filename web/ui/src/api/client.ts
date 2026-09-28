@@ -47,10 +47,13 @@ export interface RequestOptions {
   body?: unknown
   /** A raw body (a File for uploads), sent as-is with its own type. */
   file?: Blob
+  /** Let the request outlive the page (unload, app close) — small bodies only (64 KB). */
+  keepalive?: boolean
 }
 
-export async function request<T>(path: string, { signal, method = 'GET', body, file }: RequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, { signal, method = 'GET', body, file, keepalive }: RequestOptions = {}): Promise<T> {
   const init: RequestInit = { method, signal, headers: {} }
+  if (keepalive) init.keepalive = true
   if (file !== undefined) {
     init.headers = { 'content-type': file.type || 'application/octet-stream' }
     init.body = file
@@ -94,7 +97,7 @@ export const api = {
   messages: (host: string, id: string, limit = 60, o: Opts = {}) =>
     request<MessagesResponse>(`${sessionPath(host, id, 'messages')}?limit=${limit}`, o),
 
-  send: (host: string, id: string, text: string, o: Opts = {}) =>
+  send: (host: string, id: string, text: string, o: Opts & { keepalive?: boolean } = {}) =>
     request<OkResponse>(sessionPath(host, id, 'send'), { ...o, method: 'POST', body: { text } }),
   keys: (host: string, id: string, key: SessionKey, o: Opts = {}) =>
     request<OkResponse>(sessionPath(host, id, 'keys'), { ...o, method: 'POST', body: { key } }),
@@ -180,6 +183,15 @@ export function sessionErrorMessage(err: unknown): string {
     default:
       return err.message || 'request failed'
   }
+}
+
+/**
+ * A failed send, for the chat's inline error: a 409 carries the server's reason (waiting on a
+ * prompt, no usable handle) when it gave one; anything else is sessionErrorMessage().
+ */
+export function sendErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409 && err.message && !/^HTTP \d+$/.test(err.message)) return err.message
+  return sessionErrorMessage(err)
 }
 
 /** 404 "unknown session: …" — the session no longer exists (vs. 404 "transcript not found"). */
