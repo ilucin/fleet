@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createSpawner, isWithin, launchCommand, resolveAllowedDir, sanitizeName, shq, validateSpawnRequest } from '../lib/spawn.mjs';
+import { createSpawner, isWithin, launchCommand, resolveAllowedDir, sanitizeName, shq, shqTyped, validateSpawnRequest } from '../lib/spawn.mjs';
 
 test('shq quotes like the fleet CLI', () => {
   assert.equal(shq('a b'), "'a b'");
@@ -20,6 +20,12 @@ test('launchCommand builds claude -n name [prompt]', () => {
   assert.equal(launchCommand({ name: 'job', prompt: '' }), "claude -n 'job'");
   assert.equal(launchCommand({ name: null, prompt: 'go' }), "claude 'go'");
   assert.equal(launchCommand({ launcher: 'cc', name: 'job', prompt: "do it's" }), "cc -n 'job' 'do it'\\''s'");
+});
+
+test('launchCommand types a multi-line prompt as one $\'…\' line (raw newlines get dropped)', () => {
+  assert.equal(shqTyped('one line'), "'one line'");
+  assert.equal(shqTyped("a\nit's \\ b\tc"), "$'a\\nit\\'s \\\\ b\\tc'");
+  assert.equal(launchCommand({ name: null, prompt: 'Testiram.\nMulti line.\n\nPrompt.' }), "claude $'Testiram.\\nMulti line.\\n\\nPrompt.'");
 });
 
 test('launchCommand adds --model <id> (quoted) before -n', () => {

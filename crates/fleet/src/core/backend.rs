@@ -453,6 +453,27 @@ fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Quote text that gets *typed* into a shell. A raw newline inside '…' does not survive
+/// being typed (zsh drops it), so multi-line text goes as ANSI-C `$'…'` with escapes.
+fn shq_typed(s: &str) -> String {
+    if !s.contains(['\n', '\r', '\t']) {
+        return shq(s);
+    }
+    let mut out = String::from("$'");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
 /// How the first prompt reaches the spawned session.
 #[derive(Clone, Copy)]
 pub enum Prompt<'a> {
@@ -480,7 +501,7 @@ fn run_command(prompt: Prompt, name: Option<&str>, launcher: &str) -> String {
     match prompt {
         Prompt::None => launcher,
         Prompt::Inline("") => launcher,
-        Prompt::Inline(p) => format!("{launcher} {}", shq(p)),
+        Prompt::Inline(p) => format!("{launcher} {}", shq_typed(p)),
         Prompt::File(path) => format!("{launcher} \"$(cat {})\"", shq(path)),
     }
 }
@@ -691,6 +712,14 @@ mod tests {
         assert_eq!(
             launch_command("/tmp", Prompt::Inline("hi"), None, "cc"),
             "cd '/tmp' && cc 'hi'"
+        );
+    }
+
+    #[test]
+    fn multi_line_prompt_is_typed_as_one_ansi_c_line() {
+        assert_eq!(
+            launch_command("/tmp", Prompt::Inline("a\nit's \\ b"), None, "claude"),
+            "cd '/tmp' && claude $'a\\nit\\'s \\\\ b'"
         );
     }
 

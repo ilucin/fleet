@@ -13,6 +13,17 @@ export function shq(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Quote a string that gets *typed* into a shell. A raw newline inside '…' does not survive
+ * being typed (zsh drops it), so multi-line text goes as ANSI-C `$'…'` with escapes instead.
+ */
+export function shqTyped(s) {
+  const str = String(s);
+  if (!/[\n\r\t]/.test(str)) return shq(str);
+  const esc = str.replace(/[\\'\n\r\t]/g, (c) => ({ '\\': '\\\\', "'": "\\'", '\n': '\\n', '\r': '\\r', '\t': '\\t' })[c]);
+  return `$'${esc}'`;
+}
+
 /** Sanitize a user-typed name into a tmux-safe session name (like `fleet tmux new`). */
 export function sanitizeName(raw) {
   const cleaned = String(raw ?? '')
@@ -36,7 +47,7 @@ export function launchCommand({ launcher = 'claude', name, prompt, model }) {
   const parts = [launcher];
   if (model) parts.push('--model', shq(model));
   if (name) parts.push('-n', shq(name));
-  if (prompt && prompt.trim()) parts.push(shq(prompt));
+  if (prompt && prompt.trim()) parts.push(shqTyped(prompt));
   return parts.join(' ');
 }
 
