@@ -79,6 +79,15 @@ describe('matchShortcut', () => {
     expect(act('n', { typing: true }, { altKey: true })).toBeNull() // ⌥N: the ˜ dead key
   })
 
+  it('closes a session with ⌘⌫, but never inside a field (delete to line start)', () => {
+    expect(cmd('Backspace')).toBe('close')
+    expect(cmd('Backspace', {}, { typing: true })).toBeNull()
+    expect(act('Backspace', { mac: false }, { ctrlKey: true })).toBe('close')
+    expect(act('Backspace')).toBeNull()
+    expect(comboLabel(combosFor('close', browser)[0], true)).toBe('⌘⌫')
+    expect(comboLabel(combosFor('close', pc)[0], false)).toBe('Ctrl+Backspace')
+  })
+
   it('fires action combos while typing', () => {
     for (const [k, a] of [['k', 'palette'], ['/', 'help'], ['b', 'view'], ['f', 'search'], ['j', 'mode']] as const)
       expect(cmd(k, {}, { typing: true })).toBe(a)

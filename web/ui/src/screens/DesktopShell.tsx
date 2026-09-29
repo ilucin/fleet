@@ -22,8 +22,10 @@ import {
   SquareTerminalIcon,
   SunIcon,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Redirect, useLocation, useRoute } from 'wouter'
 
+import { api, sessionErrorMessage } from '@/api/client'
 import type { Session } from '@/api/types'
 import { Board } from '@/components/board/Board'
 import { CommandPalette, type PaletteAction } from '@/components/desktop/CommandPalette'
@@ -46,7 +48,7 @@ import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
 import { notesHref, parseNotesLocation } from '@/lib/notes'
 import { PALETTES } from '@/lib/palettes'
-import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel } from '@/lib/sessions'
+import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel, withoutSession } from '@/lib/sessions'
 import {
   clampFlyoutWidth,
   clampSidebarWidth,
@@ -86,7 +88,7 @@ const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false :
 export function DesktopShell() {
   const now = useNow(1000)
   const list = useSessionList(now)
-  const { fleet, refresh } = useFleet()
+  const { fleet, refresh, applyFleet } = useFleet()
   const { setTheme, setPalette } = useTheme()
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
@@ -204,6 +206,32 @@ export function DesktopShell() {
   // --- keyboard ----------------------------------------------------------------
   const dialogOpen = newOpen || paletteOpen || helpOpen
 
+  // ⌘⌫ closes a session in two presses: the first arms it (3 s, with a toast), the second kills
+  // Claude + its terminal — the same confirm-by-repeating as the Details panel's button.
+  const closeArm = useRef<{ key: string; until: number; toast: string | number } | null>(null)
+  const closeSession = (s: Session) => {
+    const key = sessionKey(s)
+    const name = sessionTitle(s)
+    const armed = closeArm.current
+    if (!armed || armed.key !== key || Date.now() > armed.until) {
+      const t = toast(`Press ${shortcutHint('close')} again to close “${name}”`, { duration: 3000 })
+      closeArm.current = { key, until: Date.now() + 3000, toast: t }
+      return
+    }
+    toast.dismiss(armed.toast)
+    closeArm.current = null
+    const pending = toast.loading(`Closing “${name}”…`)
+    api
+      .kill(s.host, s.session_id)
+      .then((res) => {
+        toast.success(`Closed ${res.name || name}`, { id: pending, description: String(res.terminal || 'done').replace(/-/g, ' ') })
+        if (fleet) applyFleet(withoutSession(fleet, s.host, s.session_id))
+        setTimeout(refresh, 2500)
+        if (selectedKey === key) navigate('/', { replace: true })
+      })
+      .catch((err) => toast.error('Close failed', { id: pending, description: sessionErrorMessage(err) }))
+  }
+
   const run = (action: ShortcutAction, target: HTMLElement | null): boolean => {
     const cur = cursorKey ? byKey.get(cursorKey) : null
     // The session list isn't on screen in the notes explorer: its keys do nothing there.
@@ -263,6 +291,12 @@ export function DesktopShell() {
       case 'notes':
         navigate(notesOpen ? '/' : notesHref())
         return true
+      case 'close': {
+        const s = selectedSession ?? cur
+        if (!s) return false
+        closeSession(s)
+        return true
+      }
       case 'rename':
         // The open session's header, else the row / card under the cursor.
         if (selectedSession && selectedKey) openTitleEditor('header', selectedKey)

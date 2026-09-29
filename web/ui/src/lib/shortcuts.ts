@@ -22,6 +22,7 @@ export type ShortcutAction =
   | 'view'
   | 'rename'
   | 'notes'
+  | 'close'
 
 export interface KeyLike {
   key: string
@@ -79,6 +80,7 @@ export const BINDINGS: readonly Binding[] = [
   { action: 'mode', combo: ['mod', 'J'] },
   { action: 'rename', combo: ['mod', 'E'] },
   { action: 'notes', combo: ['mod', 'shift', 'E'] },
+  { action: 'close', combo: ['mod', 'Backspace'] },
 ]
 
 /** The combos an environment offers for an action (the first is the one to show). */
@@ -107,12 +109,12 @@ function normalizedKey(e: KeyLike): { key: string; shift: boolean } {
 function comboParts(combo: Combo): { key: string; shift: boolean; alt: boolean } {
   const last = combo[combo.length - 1]
   const q = last === '?'
-  return { key: q ? '/' : last.toLowerCase(), shift: q || combo.includes('shift'), alt: combo.includes('alt') }
+  return { key: q ? '/' : last.length === 1 ? last.toLowerCase() : last, shift: q || combo.includes('shift'), alt: combo.includes('alt') }
 }
 
 /**
  * Map a keydown to an action. `mod` combos fire everywhere (fields included — none is an
- * editing combo); plain keys (↑/↓, Enter, F2) only outside fields, arrows only when no
+ * editing combo, except ⌘⌫ which only fires outside fields); plain keys (↑/↓, Enter, F2) only outside fields, arrows only when no
  * scrollable pane has focus; ⌥↑/⌥↓ move the cursor from anywhere but a field (where they
  * are the field's own). Esc in a field leaves it.
  */
@@ -129,7 +131,8 @@ export function matchShortcut(e: KeyLike, ctx: ShortcutContext): ShortcutAction 
     for (const b of BINDINGS) {
       if (b.app) continue
       const c = comboParts(b.combo)
-      if (c.key === k.key && c.shift === k.shift && !c.alt) return b.action
+      // ⌘⌫ is a field's own "delete to line start": close only fires outside fields.
+      if (c.key === k.key && c.shift === k.shift && !c.alt) return b.action === 'close' && ctx.typing ? null : b.action
     }
     return null
   }
@@ -215,6 +218,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
       { action: 'rename', label: 'Rename (the open session, else the cursor row)' },
       { keys: [['F2']], label: 'Rename (outside a field)' },
       { action: 'mode', label: 'Switch Chat / Terminal' },
+      { action: 'close', label: 'Close session (press twice; the open one, else the cursor row)' },
       { keys: [['Enter'], ['mod', 'Enter']], label: 'Send (in the composer)' },
       { keys: [['shift', 'Enter']], label: 'New line' },
       { keys: [['Esc']], label: 'Cancel a pending send (back into the composer)' },
@@ -238,8 +242,8 @@ export function helpKeys(item: ShortcutHelp, env: ShortcutEnv): Combo[] {
   return item.action ? combosFor(item.action, env) : (item.keys ?? [])
 }
 
-const MAC_GLYPH: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥' }
-const PC_GLYPH: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt' }
+const MAC_GLYPH: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥', Backspace: '⌫' }
+const PC_GLYPH: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', Backspace: 'Backspace' }
 
 /** One key of a combo as shown: ⌘ ⇧ ⌥ on macOS, Ctrl / Shift / Alt elsewhere. */
 export function keyLabel(token: string, mac: boolean): string {

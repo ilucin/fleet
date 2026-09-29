@@ -336,7 +336,7 @@ session in the pane), so a link opens the same session on either layout.
 ### Shortcuts
 
 Every action is ⌘+key on macOS, Ctrl+key elsewhere (`mod`; on macOS Ctrl stays the fields' own
-Emacs-style editing keys). No action combo is a text-editing one, so they work in the composer and
+Emacs-style editing keys). No action combo but ⌘⌫ is a text-editing one, so they work in the composer and
 the search field too; ⌘A/C/V/X/Z, ⌘ + arrows, ⌥ + arrows, ⌘Enter keep their native meaning there.
 Only navigation is unmodified: ↑/↓ and Enter outside a field, Esc. With a dialog open only ⌘K
 (and ⌘? to close the help) works. One `keydown` listener in `DesktopShell` maps keys through
@@ -358,6 +358,7 @@ New Session** menu item that dispatches a `fleet:command` DOM event into the pag
 | ⌘`N` (Fleet.app), ⌘/Ctrl+⇧`O` | new session |
 | ⌘/Ctrl+`E`, `F2` | rename (the open session, else the cursor row / card) |
 | ⌘/Ctrl+`J` | switch chat / terminal |
+| ⌘/Ctrl+`⌫` | close the session (the open one, else the cursor row): press twice within 3 s; outside a field only (there it deletes to the line start) |
 | `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
 | `Esc` | cancel a pending send (first, while one counts down); leave the field; otherwise close the pane or Settings (`#/`) |
 | ⌘/Ctrl+`Enter` | New session form: start |
