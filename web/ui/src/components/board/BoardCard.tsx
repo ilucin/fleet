@@ -7,7 +7,7 @@ import { EditableTitle } from '@/components/EditableTitle'
 import { HostBadge } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
 import { useLongPress } from '@/hooks/useLongPress'
-import { openTitleEditor, useSessionTitle } from '@/hooks/useTitles'
+import { openTitleEditor, useEditing, useSessionTitle } from '@/hooks/useTitles'
 import { relTime, sessionSubtitle } from '@/lib/format'
 import { sessionHref, statusLabel, statusMeta } from '@/lib/sessions'
 import { sessionKey } from '@/lib/shortcuts'
@@ -30,6 +30,8 @@ export interface BoardCardProps {
 export function BoardCard({ session: s, now, selected, cursor, onOpen, drag }: BoardCardProps) {
   const meta = statusMeta(s.status)
   const { title } = useSessionTitle(s)
+  // Selecting text in the title field must not drag the card.
+  const editing = useEditing('card', sessionKey(s))
   const prompt = sessionSubtitle(s)
   // The first prompt, unless the title is just its slug (no generated title yet).
   const subtitle = echoesTitle(title, prompt) ? '' : prompt
@@ -39,8 +41,8 @@ export function BoardCard({ session: s, now, selected, cursor, onOpen, drag }: B
     <Link
       href={sessionHref(s)}
       {...longPress}
-      draggable={drag ? true : undefined}
-      onDragStart={drag?.onStart}
+      draggable={drag && !editing ? true : undefined}
+      onDragStart={editing ? undefined : drag?.onStart}
       onDragEnd={drag?.onEnd}
       onClick={(e) => {
         if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return

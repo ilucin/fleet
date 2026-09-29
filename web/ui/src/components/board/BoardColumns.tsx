@@ -1,14 +1,17 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useState, type DragEvent } from 'react'
 import { LayersIcon, PlusIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
 import { BoardCard } from '@/components/board/BoardCard'
+import { InlineEdit, InlineField } from '@/components/InlineEdit'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
-import { Input } from '@/components/ui/input'
 import { memberId, type BoardColumn, type GroupEdit } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
+
+/** `fleet group` caps a hand-written label at this many characters. */
+const GROUP_LABEL_MAX = 48
 
 /** Our drags carry this type, so text, links or files dragged over the board are ignored. */
 const DRAG_TYPE = 'application/x-fleet-board'
@@ -187,14 +190,19 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
           )}
         >
           {naming ? (
-            <NameInput
-              placeholder="New group name"
-              onDone={(label) => {
-                const s = naming
-                setNaming(null)
-                if (label) onEdit({ op: 'move', host: s.host, session: memberId(s), label })
-              }}
-            />
+            <span className="flex py-1 text-sm font-semibold text-foreground">
+              <InlineField
+                placeholder="New group name"
+                label="New group name"
+                maxLength={GROUP_LABEL_MAX}
+                onCommit={(label) => {
+                  const s = naming
+                  setNaming(null)
+                  if (label) onEdit({ op: 'move', host: s.host, session: memberId(s), label })
+                }}
+                onCancel={() => setNaming(null)}
+              />
+            </span>
           ) : (
             <span className="flex items-center gap-1.5 py-1">
               <PlusIcon className="size-4" /> Drop here for a new group
@@ -220,67 +228,22 @@ function ColumnTitle({
   onEditing: (on: boolean) => void
   onRename: (label: string) => void
 }) {
-  const text = cn('min-w-0 flex-1 truncate text-sm font-semibold', c.ungrouped && 'text-muted-foreground')
-  if (editing) {
-    return (
-      <NameInput
-        initial={c.label}
-        onDone={(label) => {
+  return (
+    <h2 className="flex min-w-0 flex-1">
+      <InlineEdit
+        value={c.label}
+        editing={editing}
+        onEdit={editable ? () => onEditing(true) : undefined}
+        onCommit={(label) => {
           onEditing(false)
           if (label && label !== c.label) onRename(label)
         }}
+        onCancel={() => onEditing(false)}
+        className={cn('text-sm font-semibold', c.ungrouped && 'text-muted-foreground')}
+        label="Group name"
+        hint="Rename group"
+        maxLength={GROUP_LABEL_MAX}
       />
-    )
-  }
-  if (!editable) return <h2 className={text}>{c.label}</h2>
-  return (
-    <h2 className="flex min-w-0 flex-1">
-      <button
-        type="button"
-        title="Rename group"
-        onClick={() => onEditing(true)}
-        className={cn(text, 'flex-none cursor-text rounded-sm text-left outline-none hover:underline hover:decoration-dotted hover:underline-offset-4 focus-visible:ring-3 focus-visible:ring-ring/50')}
-      >
-        {c.label}
-      </button>
     </h2>
-  )
-}
-
-/** A one-line name field: Enter or blur → `onDone(trimmed)`, Esc → `onDone(null)`. */
-function NameInput({ initial = '', placeholder, onDone }: { initial?: string; placeholder?: string; onDone: (label: string | null) => void }) {
-  const [value, setValue] = useState(initial)
-  const done = useRef(false)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => ref.current?.select(), [])
-  const finish = (label: string | null) => {
-    if (done.current) return
-    done.current = true
-    onDone(label)
-  }
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation()
-    if (e.nativeEvent.isComposing) return
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      finish(value.trim() || null)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      finish(null)
-    }
-  }
-  return (
-    <Input
-      ref={ref}
-      autoFocus
-      value={value}
-      maxLength={48}
-      placeholder={placeholder}
-      aria-label={placeholder ?? 'Group name'}
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={onKeyDown}
-      onBlur={() => finish(value.trim() || null)}
-      className="h-7 min-w-0 flex-1 px-2 text-sm font-semibold"
-    />
   )
 }

@@ -166,11 +166,14 @@ src/
   field) or tap the handle to open, swipe up / tap to close; the list itself scrolls as usual.
   While closed, active filters show on the handle ("Needs you · workstation") with ✕ to clear.
   The List | Board toggle stays next to the search field.
+- **Inline edits** (`InlineEdit`, the one inline editor — session titles and group names): click
+  the text to edit it in place; Enter or clicking away saves, Esc cancels; no edit buttons. The
+  field is laid over the text in exactly its box, so nothing moves when it opens.
 - **Inline rename** (`EditableTitle`): rows, board cards and the session header show the one
   title; the tmux session name is not on rows any more (it follows the title — details panel only).
-  Open the editor with the pencil on row hover (desktop), ⌘E / F2 (the open session's header,
-  else the cursor row/card), ⌘K → Rename session…, a click on the header title, or a long press
-  on a row (touch). Enter / ✓ saves, Esc / ✕ / clicking away cancels. Saving is
+  Open the editor with a click on the title (a tap on a touch screen only in the header — on a
+  row / card the tap opens it), ⌘E / F2 (the open session's header, else the cursor row/card),
+  ⌘K → Rename session…, or a long press on a row (touch). Saving is
   optimistic (spinner) → `POST …/rename`; a 409 (session waiting on a prompt) or an error rolls
   back with a toast; success toasts the new title and the tmux rename.
 - **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by

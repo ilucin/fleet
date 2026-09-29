@@ -473,7 +473,7 @@ export function SessionScreen({
           )}
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 text-[0.9375rem] leading-tight font-bold">
-              {session ? <EditableTitle session={session} scope="header" trigger="click" className="text-[0.9375rem] font-bold" /> : <span className="truncate">{name}</span>}
+              {session ? <EditableTitle session={session} scope="header" tapToEdit className="text-[0.9375rem] font-bold" /> : <span className="truncate">{name}</span>}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap">
               <StatusDot status={status} className="size-2" />
