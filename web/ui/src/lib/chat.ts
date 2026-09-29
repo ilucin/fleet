@@ -62,3 +62,23 @@ export function visibleMessages(messages: Message[] | null | undefined, hideInte
 export function nearBottom(el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack: number): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= slack
 }
+
+export type TextPart = { pasted: false; text: string } | { pasted: true; text: string }
+
+const PASTED_RE = /<pasted_content(?:\s[^>]*)?>([\s\S]*?)<\/pasted_content>/g
+
+/** Split a user prompt into typed text and `<pasted_content>` blocks (tags dropped, blank edges trimmed). */
+export function splitPasted(text: string): TextPart[] {
+  const parts: TextPart[] = []
+  let last = 0
+  for (const m of text.matchAll(PASTED_RE)) {
+    const before = text.slice(last, m.index).trim()
+    if (before) parts.push({ pasted: false, text: before })
+    const body = m[1].replace(/^\n+|\s+$/g, '')
+    if (body) parts.push({ pasted: true, text: body })
+    last = m.index + m[0].length
+  }
+  const rest = text.slice(last).trim()
+  if (rest || !parts.length) parts.push({ pasted: false, text: last ? rest : text })
+  return parts.filter((p) => p.text)
+}

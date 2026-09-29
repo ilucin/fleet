@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react'
-import { ChevronsUpIcon, HandIcon, Loader2Icon, MessageSquareDashedIcon } from 'lucide-react'
+import { ChevronRightIcon, ChevronsUpIcon, ClipboardIcon, HandIcon, Loader2Icon, MessageSquareDashedIcon, SquareSlashIcon, TerminalIcon } from 'lucide-react'
 
 import type { Message } from '@/api/types'
 import { LatestButton } from '@/components/session/LatestButton'
@@ -9,7 +9,7 @@ import { FileLinksContext, type FileStats } from '@/hooks/useFileLinks'
 import { useFollowScroll } from '@/hooks/useFollowScroll'
 import { useNow } from '@/hooks/useNow'
 import { clockTime } from '@/lib/format'
-import { msgKind, sameGroup, visibleMessages } from '@/lib/chat'
+import { msgKind, sameGroup, splitPasted, visibleMessages } from '@/lib/chat'
 import { pathCandidates } from '@/lib/paths'
 import { CHAT_FONT_REM } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
@@ -39,9 +39,62 @@ export interface ChatViewProps {
   outboxKey?: string
 }
 
+/** Longer pastes start collapsed. */
+const PASTE_OPEN_LINES = 6
+
+/** A user prompt: typed text, with `<pasted_content>` blocks shown as collapsible quotes. */
+function UserText({ text }: { text: string }) {
+  const parts = splitPasted(text)
+  if (parts.length === 1 && !parts[0].pasted) return <>{text}</>
+  return (
+    <div className="flex flex-col gap-1.5">
+      {parts.map((part, i) => {
+        if (!part.pasted) return <div key={i}>{part.text}</div>
+        const lines = part.text.split('\n').length
+        return (
+          <details key={i} open={lines <= PASTE_OPEN_LINES} className="group rounded-lg border border-primary/20 bg-background/40 text-[0.9em]">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-[0.8em] text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
+              <ChevronRightIcon className="size-3 transition-transform group-open:rotate-90" />
+              <ClipboardIcon className="size-3" />
+              Pasted · {lines} {lines === 1 ? 'line' : 'lines'}
+            </summary>
+            <div className="max-h-80 overflow-y-auto border-t border-primary/15 px-2 py-1.5">{part.text}</div>
+          </details>
+        )
+      })}
+    </div>
+  )
+}
+
+/** A slash command, skill or `!` shell command, as a chip. */
+function CommandChip({ name, shell }: { name: string; shell: boolean }) {
+  const Icon = shell ? TerminalIcon : SquareSlashIcon
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[0.6875rem] text-status-waiting/90">
+      <Icon className="size-3" />
+      {shell ? 'shell' : name}
+    </span>
+  )
+}
+
 const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: string }) {
   const kind = msgKind(m)
   const text = typeof m.text === 'string' ? m.text : ''
+  if (kind === 'command' && m.name && m.args?.trim()) {
+    // A command with arguments is a prompt in disguise: a user bubble headed by the command.
+    const shell = m.name === '!'
+    return (
+      <div className="flex w-full flex-col items-end">
+        <div className="flex w-full flex-col gap-1.5 rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
+          <div>
+            <CommandChip name={m.name} shell={shell} />
+          </div>
+          <div className={shell ? 'font-mono text-[0.9em]' : undefined}>{shell ? m.args.trim() : <UserText text={m.args.trim()} />}</div>
+        </div>
+        {caption ? <div className="px-1 pt-0.5 text-[0.625rem] text-dimmer tabular-nums">{caption}</div> : null}
+      </div>
+    )
+  }
   if (kind === 'command') {
     return (
       <div className="self-center text-center">
@@ -59,7 +112,7 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
     return (
       <div className="flex w-full flex-col items-end">
         <div className="w-full rounded-2xl rounded-br-md border border-primary/25 bg-accent px-3 py-2 whitespace-pre-wrap text-accent-foreground [overflow-wrap:anywhere]">
-          {text}
+          <UserText text={text} />
         </div>
         {cap}
       </div>

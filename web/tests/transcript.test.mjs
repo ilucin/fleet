@@ -51,7 +51,16 @@ test('parseTranscript glues streamed blocks of one API message and skips sidecha
 });
 
 test('classifyUserText handles commands, task notifications, local-command noise and reminders', () => {
-  assert.deepEqual(classifyUserText('<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>'), { kind: 'command', text: '/model opus' });
+  assert.deepEqual(classifyUserText('<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>'), { kind: 'command', text: '/model opus', name: '/model', args: 'opus' });
+  assert.deepEqual(classifyUserText('<command-message>p-dev:overview</command-message>\n<command-name>/p-dev:overview</command-name>\n<command-args>onboard me https://example.com/pull/1</command-args>'), {
+    kind: 'command',
+    text: '/p-dev:overview onboard me https://example.com/pull/1',
+    name: '/p-dev:overview',
+    args: 'onboard me https://example.com/pull/1',
+  });
+  assert.deepEqual(classifyUserText('<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>'), { kind: 'command', text: '/clear', name: '/clear' });
+  assert.deepEqual(classifyUserText('<bash-input> git status</bash-input>'), { kind: 'command', text: '! git status', name: '!', args: 'git status' });
+  assert.equal(classifyUserText('<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>'), null);
   assert.deepEqual(classifyUserText('<task-notification>\n<task-id>x</task-id>\n<summary>Agent "Build" finished</summary>\n</task-notification>'), { kind: 'system', text: 'Agent "Build" finished' });
   assert.equal(classifyUserText('<local-command-caveat>Caveat: ...</local-command-caveat>'), null);
   assert.equal(classifyUserText('<local-command-stdout>ok</local-command-stdout>'), null);

@@ -91,12 +91,19 @@ function tag(text, name) {
 export function classifyUserText(raw) {
   const text = raw.replace(SYSTEM_REMINDER_RE, '').trim();
   if (!text) return null;
-  if (text.startsWith('<local-command-caveat>') || text.startsWith('<local-command-stdout>')) return null;
-  if (text.startsWith('<command-name>')) {
-    const name = tag(text, 'command-name') ?? '';
+  if (/^<(local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr)>/.test(text)) return null;
+  // Slash commands and skills: `<command-name>` / `<command-message>` / `<command-args>` in either order.
+  if (/^<command-(name|message)>/.test(text)) {
+    const name = tag(text, 'command-name') ?? (tag(text, 'command-message') ? `/${tag(text, 'command-message')}` : '');
     const args = tag(text, 'command-args') ?? '';
     const shown = `${name}${args ? ` ${args}` : ''}`.trim();
-    return shown ? { kind: 'command', text: shown } : null;
+    if (!shown) return null;
+    return args ? { kind: 'command', text: shown, name, args } : { kind: 'command', text: shown, name };
+  }
+  // `! cmd` typed into Claude Code (its output is dropped like local-command stdout).
+  if (text.startsWith('<bash-input>')) {
+    const cmd = tag(text, 'bash-input') ?? '';
+    return cmd ? { kind: 'command', text: `! ${cmd}`, name: '!', args: cmd } : null;
   }
   if (text.startsWith('<task-notification>')) {
     const summary = tag(text, 'summary') ?? 'Background task finished';
@@ -133,7 +140,8 @@ export function parseTranscript(text) {
       if (!raw.trim()) continue; // pure tool_result
       const classified = classifyUserText(raw);
       if (!classified) continue;
-      out.push({ role: classified.kind === 'user' ? 'user' : 'system', kind: classified.kind, text: classified.text, ts });
+      const { kind, ...rest } = classified;
+      out.push({ role: kind === 'user' ? 'user' : 'system', kind, ...rest, ts });
       lastAssistantId = null;
       continue;
     }

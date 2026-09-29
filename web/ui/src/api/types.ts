@@ -37,6 +37,17 @@ export interface Session {
   context?: ContextUsage | null
   /** "Open in editor" link for the cwd (like Brief.editorUrl, without the git-root lookup). Older servers omit it. */
   editorUrl?: string | null
+  /**
+   * The session stack this session belongs to (`fleet list --json` → `stack`); null = in none.
+   * Older CLIs omit the field entirely (undefined = this host knows no stacks).
+   */
+  stack?: StackRef | null
+}
+
+/** `stack` on a session row. */
+export interface StackRef {
+  id: string
+  label: string
 }
 
 /** `context` on a session row — see docs/architecture.md → "Context usage". */
@@ -230,6 +241,10 @@ export interface Message {
   ts?: number | null
   /** Assistant text that ends a turn; `false` = narration between tool calls. */
   final?: boolean
+  /** kind 'command': the slash command / skill (`/p-dev:review`), or `!` for a shell command. */
+  name?: string
+  /** kind 'command': what was typed after the command, when anything was. */
+  args?: string
 }
 
 /** GET /api/hosts/:host/sessions/:id/messages */
@@ -356,6 +371,74 @@ export interface BriefResource {
   branch?: string | null
   /** `Git` only: true = a linked worktree, false = the main checkout (null: unknown / not Git). */
   linked?: boolean | null
+}
+
+// --- Session stacks (GET/PUT/DELETE /api/hosts/:host/stacks/…) ------------------------------
+
+/** One member of a stack (StackBrief frontmatter `members[]` + live data from discovery). */
+export interface StackMember {
+  session: string
+  host: string
+  /** The display title at the last sync (informational). */
+  name: string | null
+  /** ISO 8601. */
+  added: string | null
+  /** ISO 8601 once the session is gone; null while live. */
+  closed: string | null
+  /** Live right now (discovery at render time). */
+  live?: boolean
+  status?: SessionStatus | string | null
+  briefPath?: string | null
+  briefExists?: boolean
+}
+
+/** `fleet stack show --json` (+ the server's `editorUrl`). */
+export interface StackView {
+  host: string
+  id: string
+  label: string
+  /** Absolute path of the StackBrief on `host`. */
+  path: string
+  cwd: string | null
+  absCwd: string | null
+  created: string | null
+  updated: string | null
+  generatedAt: string | null
+  editedAt: string | null
+  /** The sentence every sibling's first prompt starts with. */
+  contextLine: string
+  members: StackMember[]
+  /** The whole file, frontmatter included (what the editor edits). */
+  markdown: string
+  /** Without frontmatter. */
+  body: string
+  parsed: { summary: string; resources: BriefResource[]; notes: string }
+  /** Open the stack's directory in the editor; null / absent = hide the button. */
+  editorUrl?: string | null
+}
+
+/** GET /api/hosts/:host/stacks */
+export interface StacksResponse {
+  host: string
+  stacks: StackView[]
+}
+
+/** The body of both stack spawn routes. */
+export interface StackSpawnRequest {
+  prompt?: string
+  name?: string
+  model?: string
+}
+
+/** POST …/sessions/:id/stack/spawn and …/stacks/:id/spawn. */
+export interface StackSpawnResponse {
+  host: string
+  stack: StackView
+  /** A new stack was created around the source session. */
+  created: boolean
+  /** The StackBrief came from the model (false: the skeleton fallback). */
+  generated: boolean
+  spawn: Omit<SpawnResponse, 'host' | 'ok'> & { host?: string; ok?: boolean; model?: string | null }
 }
 
 /** A `## Todos` checkbox line. */

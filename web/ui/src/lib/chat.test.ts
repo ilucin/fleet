@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 
 import type { Message } from '@/api/types'
 
-import { CHAT_FONT_SIZES, nearBottom, nextChatLimit, parseMode, parseSize, sameGroup, stepSize, visibleMessages } from './chat'
+import { CHAT_FONT_SIZES, nearBottom, nextChatLimit, parseMode, parseSize, sameGroup, splitPasted, stepSize, visibleMessages } from './chat'
 
 const m = (over: Partial<Message>): Message => ({ role: 'assistant', kind: 'assistant', text: 'x', ts: 1_000_000, ...over })
 
@@ -45,4 +45,14 @@ test('visibleMessages hides interim notes on demand', () => {
 test('nearBottom', () => {
   expect(nearBottom({ scrollHeight: 1000, scrollTop: 560, clientHeight: 400 }, 60)).toBe(true)
   expect(nearBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 400 }, 60)).toBe(false)
+})
+
+test('splitPasted pulls <pasted_content> blocks out of a prompt', () => {
+  expect(splitPasted('plain text')).toEqual([{ pasted: false, text: 'plain text' }])
+  expect(splitPasted('Look at this:\n<pasted_content id="ab12">\nline 1\nline 2\n</pasted_content>\nthoughts?')).toEqual([
+    { pasted: false, text: 'Look at this:' },
+    { pasted: true, text: 'line 1\nline 2' },
+    { pasted: false, text: 'thoughts?' },
+  ])
+  expect(splitPasted('<pasted_content id="x">only</pasted_content>')).toEqual([{ pasted: true, text: 'only' }])
 })
