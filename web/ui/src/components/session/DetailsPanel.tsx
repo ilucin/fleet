@@ -4,9 +4,7 @@ import {
   CopyIcon,
   Loader2Icon,
   MessageSquareTextIcon,
-  PencilIcon,
   PowerIcon,
-  Settings2Icon,
   SparklesIcon,
   SquareTerminalIcon,
   XIcon,
@@ -46,8 +44,6 @@ export interface DetailsPanelProps {
   onTermLines: (n: number) => void
   /** Called after a successful close (navigate away). */
   onClosed: () => void
-  /** Open the inline title editor in the header (absent: no session to rename). */
-  onRename?: () => void
   /** The brief at the top of the panel. */
   brief: Omit<BriefSectionProps, 'desktop' | 'cancelEditRef'>
   /** "Open in VS Code / Cursor" for the session's checkout (Brief.editorUrl, else the fleet row's). */
@@ -102,8 +98,8 @@ export function DetailsDrawer(p: DetailsPanelProps) {
 
 /**
  * Details: header (name, host · cwd, context, open in editor), the Brief (summary, todos,
- * resources, continue), View (chat / terminal, scrollback, → Settings), Session (rename,
- * attach, auto-name, ids, close). `drawer` = inside the mobile drawer; `panel` = the desktop
+ * resources, continue), View (chat / terminal, scrollback), Session (attach,
+ * auto-name, ids, close). `drawer` = inside the mobile drawer; `panel` = the desktop
  * details column (click-to-confirm wording, ✕ to close, no drawer chrome).
  */
 export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel'; cancelEditRef?: React.RefObject<(() => void) | null> }) {
@@ -272,25 +268,9 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
                 </ToggleGroup>
               </Row>
             ) : null}
-            <Row label="Settings" hint="Text size, theme, progress notes">
-              <Button asChild variant="outline" className="h-9 px-3">
-                <a href="#/settings">
-                  <Settings2Icon />
-                  Open
-                </a>
-              </Button>
-            </Row>
           </Section>
 
           <Section title="Session">
-            {p.onRename ? (
-              <Row label="Title" hint={s?.backend === 'tmux' ? 'Renames Claude; its tmux session follows' : 'Renames the Claude session'}>
-                <Button variant="outline" className="h-9 px-3" onClick={p.onRename}>
-                  <PencilIcon />
-                  Rename…
-                </Button>
-              </Row>
-            ) : null}
             {s ? (
               <div className="py-1.5">
                 <Row label="Attach command" hint={attachCmd ? 'Run in a terminal on any fleet host' : 'Only for tmux sessions — this one is an iTerm tab'}>

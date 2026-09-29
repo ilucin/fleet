@@ -160,8 +160,8 @@ src/
 - **Inline rename** (`EditableTitle`): rows, board cards and the session header show the one
   title; the tmux session name is not on rows any more (it follows the title — details panel only).
   Open the editor with the pencil on row hover (desktop), ⌘E / F2 (the open session's header,
-  else the cursor row/card), ⌘K → Rename session…, a click on the header title, a long press on
-  a row (touch), or ⋯ → Rename…. Enter / ✓ saves, Esc / ✕ / clicking away cancels. Saving is
+  else the cursor row/card), ⌘K → Rename session…, a click on the header title, or a long press
+  on a row (touch). Enter / ✓ saves, Esc / ✕ / clicking away cancels. Saving is
   optimistic (spinner) → `POST …/rename`; a 409 (session waiting on a prompt) or an error rolls
   back with a toast; success toasts the new title and the tmux rename.
 - **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by
@@ -270,8 +270,8 @@ src/
   nodes exist only with `parseMarkdown(text, { files: true })` and render as buttons.
 - **⋯ → Details** (drawer, the same content as the desktop details column): name, host · cwd,
   context, **Open in VS Code / Cursor** (`editorUrl`, a plain `vscode://` / `cursor://` link; hidden
-  on touch screens), the **brief** (below), Chat/Terminal, scrollback (`fleet.termLines`), a link
-  to Settings, Title → Rename…, Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
+  on touch screens), the **brief** (below), Chat/Terminal, scrollback (`fleet.termLines`),
+  Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
   session details (tmux, backend, pid, id), Close session (two taps within 5s → `api.kill`, back
   to the list, row dropped optimistically).
 - **Brief** (top of Details; web/ARCHITECTURE.md → Session briefs): "updated 3m ago · edited",
@@ -285,7 +285,7 @@ src/
   host, the session's cwd and `continuePrompt`, caret at the end). GET while Details is open,
   every 30s, every 2.5s while generating.
 - **Settings** (`#/settings`: the gear in the list header on mobile, the sidebar footer / rail and
-  the board header on desktop, ⌘K → Settings…, Details → Settings): Text size (Small / Default /
+  the board header on desktop, ⌘K → Settings…): Text size (Small / Default /
   Large = chat at 13 / 15 / 17px, `fleet.chatFont`) scales the **whole** UI via the `<html>`
   font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
   it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`); Send

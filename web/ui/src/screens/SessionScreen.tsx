@@ -39,7 +39,7 @@ import { usePoller } from '@/hooks/usePoller'
 import { usePrefs } from '@/hooks/usePrefs'
 import { useSettings } from '@/hooks/useSettings'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
-import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
+import { useSessionTitle } from '@/hooks/useTitles'
 import { CHAT_LIMITS, CHAT_POLL_MS, PEEK_POLL_MS, TERM_LINES, nextChatLimit, parseMode, parseSize, type DetailMode } from '@/lib/chat'
 import { continueDraft } from '@/lib/brief'
 import { modelLabel, relTime, shortCwd } from '@/lib/format'
@@ -411,14 +411,6 @@ export function SessionScreen({
     onMode: setMode,
     termLines,
     onTermLines: setTermLines,
-    onRename: session
-      ? () => {
-          // Mobile: the drawer closes first, then the header turns into the editor.
-          setMenuOpen(false)
-          if (pane) openTitleEditor('header', titleKey)
-          else setTimeout(() => startEditing('header', titleKey), 350)
-        }
-      : undefined,
     brief: { host, brief, fileLinks, onContinue: continueInNew },
     editor: { url: brief.brief?.editorUrl ?? session?.editorUrl, kind: brief.brief?.editor },
     onClose: pane ? onToggleInspector : undefined,
