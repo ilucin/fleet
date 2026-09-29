@@ -3,7 +3,7 @@ import { ChevronRightIcon } from 'lucide-react'
 
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { SessionRow } from '@/components/SessionRow'
-import { parseCollapsed, type BoardColumn } from '@/lib/groups'
+import { parseIdList, type BoardColumn } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
 import { storage } from '@/lib/storage'
 import { cn } from '@/lib/utils'
@@ -12,7 +12,7 @@ const COLLAPSED_KEY = 'fleet.groupsCollapsed'
 
 /** Mobile board: one collapsible section per group (collapsed ids persist in `fleet.groupsCollapsed`). */
 export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: number }) {
-  const [collapsed, setCollapsed] = useState<string[]>(() => parseCollapsed(storage.getJSON(COLLAPSED_KEY)))
+  const [collapsed, setCollapsed] = useState<string[]>(() => parseIdList(storage.getJSON(COLLAPSED_KEY)))
   const toggle = (id: string) => {
     const next = collapsed.includes(id) ? collapsed.filter((x) => x !== id) : [...collapsed, id]
     setCollapsed(next)

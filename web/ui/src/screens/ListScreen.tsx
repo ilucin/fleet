@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type TouchEvent } from 'react'
+import { useRef, useState, type TouchEvent } from 'react'
 import { NotebookTextIcon, PlusIcon, SearchIcon, Settings2Icon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
@@ -15,11 +15,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ViewToggle } from '@/components/ViewToggle'
-import { useGroups, useViewMode } from '@/hooks/useGroups'
+import { useBoardColumns, useGroups, useViewMode } from '@/hooks/useGroups'
 import { useNotesHosts } from '@/hooks/useNotes'
 import { useNow } from '@/hooks/useNow'
 import { ALL_HOSTS, useSessionList } from '@/hooks/useSessionList'
-import { boardColumns, effectiveGroups } from '@/lib/groups'
 import { pullIntent } from '@/lib/gestures'
 import { STATUS_FILTERS, allSessions, findStatusFilter, type StatusFilterId } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
@@ -39,10 +38,7 @@ export function ListScreen() {
   const notesHosts = useNotesHosts()
   const board = mode === 'board'
   const groups = useGroups(board)
-  const columns = useMemo(
-    () => (board ? boardColumns(view.sessions, effectiveGroups(groups.groups, allSessions(fleet)).groups) : []),
-    [board, view.sessions, groups.groups, fleet],
-  )
+  const columns = useBoardColumns(board, view.sessions, groups.groups, fleet)
   // The filter rows live in a drawer under the search field, closed by default: swipe down on
   // the header (or tap the handle) opens it, swipe up closes it. Active filters show on the handle.
   const [filtersOpen, setFiltersOpen] = useState(false)

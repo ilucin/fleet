@@ -1,11 +1,13 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ApiError, api, isAbortError } from '@/api/client'
-import type { GroupsResponse } from '@/api/types'
+import type { FleetResponse, GroupsResponse, Session } from '@/api/types'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
-import { parseViewMode, regroupToast, type ViewMode } from '@/lib/groups'
+import { boardColumns, effectiveGroups, parseIdList, parseViewMode, regroupToast, stickyColumns, type BoardColumn, type ViewMode } from '@/lib/groups'
+import { allSessions } from '@/lib/sessions'
+import { storage } from '@/lib/storage'
 
 export const GROUPS_POLL_MS = 30_000
 /** While the server says a pass is running: check back sooner. */
@@ -70,3 +72,22 @@ export function useGroups(enabled: boolean) {
 }
 
 export type GroupsState = ReturnType<typeof useGroups>
+
+const ORDER_KEY = 'fleet.boardOrder'
+
+/**
+ * The board's columns for `sessions` (already filtered), in a sticky order remembered in
+ * `fleet.boardOrder`: a column keeps its place while statuses change; new ones are appended.
+ */
+export function useBoardColumns(enabled: boolean, sessions: Session[], groups: GroupsResponse | null, fleet: FleetResponse | null): BoardColumn[] {
+  const [order, setOrder] = useState<string[]>(() => parseIdList(storage.getJSON(ORDER_KEY)))
+  const sticky = useMemo(
+    () => (enabled ? stickyColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups), order) : null),
+    [enabled, sessions, groups, fleet, order],
+  )
+  if (sticky && (sticky.order.length !== order.length || sticky.order.some((id, i) => id !== order[i]))) setOrder(sticky.order)
+  useEffect(() => {
+    storage.set(ORDER_KEY, JSON.stringify(order))
+  }, [order])
+  return sticky?.columns ?? []
+}

@@ -35,7 +35,7 @@ import { NewSessionDialog } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
 import { Kbd } from '@/components/ui/kbd'
 import { useFleet } from '@/hooks/useFleet'
-import { useGroups, useViewMode } from '@/hooks/useGroups'
+import { useBoardColumns, useGroups, useViewMode } from '@/hooks/useGroups'
 import { useNotesHosts, useNotesTree } from '@/hooks/useNotes'
 import { WIDE_QUERY } from '@/hooks/useMediaQuery'
 import { useNow } from '@/hooks/useNow'
@@ -45,7 +45,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
 import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
-import { boardColumns, boardOrder, effectiveGroups } from '@/lib/groups'
+import { boardOrder } from '@/lib/groups'
 import { notesHref, parseNotesLocation } from '@/lib/notes'
 import { PALETTES } from '@/lib/palettes'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel, withoutSession } from '@/lib/sessions'
@@ -121,10 +121,7 @@ export function DesktopShell() {
   const board = mode === 'board'
   const toggleView = () => setMode(board ? 'list' : 'board')
   const groups = useGroups(board)
-  const columns = useMemo(
-    () => (board ? boardColumns(list.view.sessions, effectiveGroups(groups.groups, allSessions(fleet)).groups) : []),
-    [board, list.view.sessions, groups.groups, fleet],
-  )
+  const columns = useBoardColumns(board, list.view.sessions, groups.groups, fleet)
   // The cursor walks the sessions in on-screen order: the list, or the board column by column.
   const ordered = useMemo(() => (board ? boardOrder(columns) : list.view.sessions), [board, columns, list.view.sessions])
 

@@ -57,11 +57,26 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
   const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view: lv, hostCounts, summary, unreachable, note } = list
   const boardRef = useRef<HTMLDivElement>(null)
 
+  // The cursor card scrolls into view, clear of the flyout (↑/↓, ⌘K). A click moves the cursor
+  // too, but the clicked card is on screen already: it stays put even if the flyout covers it.
+  const clickedRef = useRef<string | null>(null)
+  const openCard = (s: Session) => {
+    clickedRef.current = sessionKey(s)
+    onOpen(s)
+  }
   useEffect(() => {
-    if (!cursorKey) return
-    boardRef.current
-      ?.querySelector<HTMLElement>(`[data-session-key="${CSS.escape(cursorKey)}"]`)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const board = boardRef.current
+    const el = cursorKey ? board?.querySelector<HTMLElement>(`[data-session-key="${CSS.escape(cursorKey)}"]`) : null
+    const clicked = clickedRef.current === cursorKey
+    clickedRef.current = null
+    if (!board || !el) return
+    if (clicked) {
+      const r = el.getBoundingClientRect()
+      const b = board.getBoundingClientRect()
+      const col = (el.parentElement ?? board).getBoundingClientRect()
+      if (r.left >= b.left && r.right <= b.right && r.top >= col.top && r.bottom <= col.bottom) return
+    }
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [cursorKey])
 
   const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -237,7 +252,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
                       now={now}
                       selected={key === selectedKey}
                       cursor={key === cursorKey && key !== selectedKey}
-                      onOpen={onOpen}
+                      onOpen={openCard}
                     />
                   )
                 })}

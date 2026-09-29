@@ -168,9 +168,11 @@ src/
   go in **Ungrouped** (last), members that are no longer live are dropped, empty groups vanish.
   When grouping is off (`enabled: false`), or the endpoint is missing / failing, the UI groups
   by repo itself (cwd basename; `<repo>/.worktrees/<x>`, `<repo>/worktrees/<x>` and
-  `<repo>/.claude/worktrees/<x>` count as `<repo>`) and says "fallback: by repo". Columns with
-  sessions that need you come first, then busy ones, then by size and label; cards within a
-  column put waiting sessions first, then most recent. The list's search / status / host
+  `<repo>/.claude/worktrees/<x>` count as `<repo>`) and says "fallback: by repo". Column order is
+  sticky (`fleet.boardOrder`): a column keeps its place as statuses change; a new one is
+  appended (ordered by needs-you, busy, size, label) and one that comes back returns to its
+  slot. Cards within a column put waiting sessions first, then most recent. Opening a card
+  never scrolls the board (the flyout may cover it); the ↑/↓ cursor is scrolled clear of it. The list's search / status / host
   filters apply. "Regroup now" (`POST /api/groups/run`, toast with the result) and the last run
   ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
   sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)

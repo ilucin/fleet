@@ -2,17 +2,20 @@ import { describe, expect, test } from 'vitest'
 
 import type { GroupsResponse, Session, SessionGroup } from '@/api/types'
 import {
+  BOARD_ORDER_MAX,
   UNGROUPED_ID,
+  type BoardColumn,
   boardColumns,
   boardOrder,
   effectiveGroups,
   fallbackGroups,
   groupsStatusText,
-  parseCollapsed,
+  parseIdList,
   parseViewMode,
   regroupToast,
   repoOf,
   statusSummary,
+  stickyColumns,
 } from './groups'
 
 const s = (over: Partial<Session>): Session => ({ host: 'laptop', session_id: 'id', status: 'idle', ...over })
@@ -163,9 +166,51 @@ test('regroupToast', () => {
   ).toBe('Grouped 3 sessions into 2 groups · 2 model calls')
 })
 
-test('parseCollapsed / parseViewMode', () => {
-  expect(parseCollapsed(['a', 1, 'b'])).toEqual(['a', 'b'])
-  expect(parseCollapsed('nope')).toEqual([])
+test('parseIdList / parseViewMode', () => {
+  expect(parseIdList(['a', 1, 'b'])).toEqual(['a', 'b'])
+  expect(parseIdList('nope')).toEqual([])
   expect(parseViewMode('board')).toBe('board')
   expect(parseViewMode('grid')).toBeUndefined()
+})
+
+describe('stickyColumns', () => {
+  const col = (id: string, over: Partial<BoardColumn> = {}): BoardColumn => ({
+    id,
+    label: id,
+    description: null,
+    source: 'llm',
+    ungrouped: id === UNGROUPED_ID,
+    sessions: [],
+    summary: { waiting: 0, busy: 0, idle: 0, unknown: 0 },
+    ...over,
+  })
+  const ids = (cols: BoardColumn[]) => cols.map((c) => c.id)
+
+  test('first run keeps the incoming order and remembers it (Ungrouped not remembered, always last)', () => {
+    const r = stickyColumns([col('b'), col('a'), col(UNGROUPED_ID)], [])
+    expect(ids(r.columns)).toEqual(['b', 'a', UNGROUPED_ID])
+    expect(r.order).toEqual(['b', 'a'])
+  })
+
+  test('known columns keep their place when the incoming order changes; new ones are appended', () => {
+    const r = stickyColumns([col(UNGROUPED_ID), col('new'), col('a'), col('b')], ['b', 'a'])
+    expect(ids(r.columns)).toEqual(['b', 'a', 'new', UNGROUPED_ID])
+    expect(r.order).toEqual(['b', 'a', 'new'])
+  })
+
+  test('a column that disappears keeps its slot for when it comes back', () => {
+    const gone = stickyColumns([col('c'), col('a')], ['a', 'b', 'c'])
+    expect(ids(gone.columns)).toEqual(['a', 'c'])
+    expect(gone.order).toEqual(['a', 'b', 'c'])
+    expect(ids(stickyColumns([col('c'), col('b'), col('a')], gone.order).columns)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('over the cap, absent ids are forgotten first', () => {
+    const prev = Array.from({ length: BOARD_ORDER_MAX }, (_, i) => `old${i}`)
+    const r = stickyColumns([col('old50'), col('new')], prev)
+    expect(r.order).toHaveLength(BOARD_ORDER_MAX)
+    expect(r.order).toContain('old50')
+    expect(r.order).not.toContain('old0')
+    expect(r.order.at(-1)).toBe('new')
+  })
 })

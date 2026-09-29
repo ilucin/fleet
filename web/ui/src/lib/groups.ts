@@ -139,6 +139,32 @@ export function boardColumns(sessions: Session[], groups: SessionGroup[]): Board
   return cols.sort(compareColumns)
 }
 
+/** How many column ids `fleet.boardOrder` remembers (absent ones are forgotten first). */
+export const BOARD_ORDER_MAX = 100
+
+/**
+ * Sticky column order: columns already in `prev` keep their place (live status changes never
+ * reshuffle the board), new ones are appended in `compareColumns` order, Ungrouped stays last.
+ * Returns the columns in that order and the updated order to remember — ids of columns that
+ * are gone for now (filtered out, no live sessions) keep their slot so they come back in place.
+ */
+export function stickyColumns(columns: BoardColumn[], prev: readonly string[]): { columns: BoardColumn[]; order: string[] } {
+  const known = new Set(prev)
+  const fresh = columns.filter((c) => !c.ungrouped && !known.has(c.id)).map((c) => c.id)
+  let order = [...prev.filter((id) => id !== UNGROUPED_ID), ...fresh]
+  if (order.length > BOARD_ORDER_MAX) {
+    const present = new Set(columns.map((c) => c.id))
+    let drop = order.length - BOARD_ORDER_MAX
+    order = order.filter((id) => present.has(id) || drop-- <= 0)
+  }
+  const rank = new Map(order.map((id, i) => [id, i]))
+  const sorted = [...columns].sort((a, b) => {
+    if (a.ungrouped !== b.ungrouped) return a.ungrouped ? 1 : -1
+    return (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)
+  })
+  return { columns: sorted, order }
+}
+
 /** Sessions in board order (columns left→right, cards top→bottom) — the j/k cursor order. */
 export function boardOrder(columns: BoardColumn[]): Session[] {
   return columns.flatMap((c) => c.sessions)
@@ -170,8 +196,8 @@ export function regroupToast(resp: GroupsResponse): string {
   return `Grouped ${classified} session${classified === 1 ? '' : 's'} into ${n} group${n === 1 ? '' : 's'} · ${calls} model call${calls === 1 ? '' : 's'}`
 }
 
-/** `fleet.groupsCollapsed`: collapsed group ids (mobile board). */
-export function parseCollapsed(raw: unknown): string[] {
+/** `fleet.groupsCollapsed` (collapsed group ids, mobile board) and `fleet.boardOrder`: a list of ids. */
+export function parseIdList(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
 }
 
