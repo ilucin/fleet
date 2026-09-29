@@ -128,6 +128,19 @@ export async function resolveAllowedDir(dir, roots, { home = os.homedir() } = {}
  * `promptDir`: where prompts too long to type are written (like `fleet handoff` briefs,
  * they are kept — the record of what the session was started with).
  */
+const SHELLS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash', 'ksh', 'tcsh', 'csh', 'nu']);
+
+/** The last few non-empty lines of a pane, each capped, for an error message. */
+export function paneTail(text, { lines = 4, width = 200 } = {}) {
+  return String(text)
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter(Boolean)
+    .slice(-lines)
+    .map((l) => (l.length > width ? `${l.slice(0, width)}…` : l))
+    .join('\n');
+}
+
 export function createSpawner({
   run,
   tmux = 'tmux',
@@ -177,6 +190,7 @@ export function createSpawner({
     await wait(150);
     await run(tmux, ['send-keys', '-t', `${name}:`, 'Enter'], { timeout: 8000 });
     const trusted = await acceptTrustPrompt(name);
+    if (!trusted) await ensureStarted(name);
     return { name, dir, tmuxSession: name, command, trusted, model: model || null };
   }
 
@@ -184,9 +198,9 @@ export function createSpawner({
    * A directory Claude has never run in stops at "Is this a project you trust?" with
    * "No, exit" preselected; `fleet list` does not show the session until that is answered.
    * The user picked the directory explicitly, so answer "Yes" (Down, Enter) for them.
-   * Polls the pane for up to ~8s; returns true when the prompt was seen and accepted.
+   * Polls the pane for up to ~10s; returns true when the prompt was seen and accepted.
    */
-  async function acceptTrustPrompt(name, { tries = 16, intervalMs = 500, settleMs = 1200 } = {}) {
+  async function acceptTrustPrompt(name, { tries = 20, intervalMs = 500, settleMs = 1200 } = {}) {
     for (let i = 0; i < tries; i += 1) {
       await wait(intervalMs);
       let text = '';
@@ -216,5 +230,30 @@ export function createSpawner({
     return false;
   }
 
-  return { spawn, tmuxHasSession, acceptTrustPrompt };
+  /**
+   * After the trust-prompt wait: if the pane is still (or again) just a shell, Claude never
+   * started — a mangled launch line, `command not found`, a bad flag. Kill the leftover tmux
+   * session and fail with the pane's last lines, so the caller sees why (and keeps the prompt).
+   * Anything else in the foreground (Claude shows as its version, e.g. `2.1.285`) counts as started.
+   */
+  async function ensureStarted(name) {
+    let current = '';
+    try {
+      ({ stdout: current } = await run(tmux, ['display-message', '-p', '-t', `${name}:`, '#{pane_current_command}'], { timeout: 5000 }));
+    } catch {
+      throw Object.assign(new Error(`Claude did not start: tmux session "${name}" is gone`), { status: 502 });
+    }
+    if (!SHELLS.has(current.trim().replace(/^-/, ''))) return;
+    let tail = '';
+    try {
+      const { stdout } = await run(tmux, ['capture-pane', '-p', '-J', '-t', `${name}:`], { timeout: 5000 });
+      tail = paneTail(stdout);
+    } catch {
+      /* best effort */
+    }
+    await run(tmux, ['kill-session', '-t', `=${name}`], { timeout: 5000 }).catch(() => {});
+    throw Object.assign(new Error(`Claude did not start${tail ? `:\n${tail}` : ''}`), { status: 502 });
+  }
+
+  return { spawn, tmuxHasSession, acceptTrustPrompt, ensureStarted };
 }

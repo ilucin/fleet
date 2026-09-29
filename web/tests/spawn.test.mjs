@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createSpawner, isWithin, launchCommand, resolveAllowedDir, sanitizeName, shq, shqTyped, validateSpawnRequest } from '../lib/spawn.mjs';
+import { createSpawner, isWithin, launchCommand, paneTail, resolveAllowedDir, sanitizeName, shq, shqTyped, validateSpawnRequest } from '../lib/spawn.mjs';
 
 test('shq quotes like the fleet CLI', () => {
   assert.equal(shq('a b'), "'a b'");
@@ -132,6 +132,42 @@ test('spawner accepts the folder-trust prompt when it appears', async () => {
   assert.equal(res.trusted, true);
   const keys = calls.filter((a) => a[0] === 'send-keys').map((a) => a[a.length - 1]);
   assert.deepEqual(keys, ["claude -n 'job'", 'Enter', 'Down', 'Enter']);
+});
+
+test('spawner fails with the pane tail and kills the session when Claude never starts', async () => {
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (args[0] === 'has-session') throw new Error('no such session');
+    if (args[0] === 'display-message') return { stdout: '-zsh\n', stderr: '' };
+    if (args[0] === 'capture-pane') return { stdout: "➜  work claude 'go\nquote> \n\n", stderr: '' };
+    return { stdout: '', stderr: '' };
+  };
+  const sp = createSpawner({ run, sleep: async () => {} });
+  await assert.rejects(sp.spawn({ name: 'job', dir: '/tmp', prompt: 'go' }), (e) => {
+    assert.equal(e.status, 502);
+    assert.equal(e.message, "Claude did not start:\n➜  work claude 'go\nquote>");
+    return true;
+  });
+  assert.deepEqual(calls.at(-1), ['kill-session', '-t', '=job']);
+});
+
+test('spawner leaves a session alone once something other than the shell runs in it', async () => {
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (args[0] === 'has-session') throw new Error('no such session');
+    if (args[0] === 'display-message') return { stdout: '2.1.285\n', stderr: '' };
+    return { stdout: 'loading…', stderr: '' };
+  };
+  const sp = createSpawner({ run, sleep: async () => {} });
+  await sp.spawn({ name: 'job', dir: '/tmp', prompt: 'go' });
+  assert.equal(calls.some((a) => a[0] === 'kill-session'), false);
+});
+
+test('paneTail keeps the last non-empty lines, capped', () => {
+  assert.equal(paneTail('a\n\nb\nc\nd\ne\n\n'), 'b\nc\nd\ne');
+  assert.equal(paneTail('x'.repeat(250), { width: 10 }), `${'x'.repeat(10)}…`);
 });
 
 test('spawner refuses an existing tmux session and a missing dir', async () => {

@@ -18,6 +18,7 @@ import { useAttach, useFileDrop } from '@/hooks/useAttach'
 import { useFleet } from '@/hooks/useFleet'
 import { useSettings } from '@/hooks/useSettings'
 import type { SiblingTarget } from '@/hooks/useStackUi'
+import { copyText } from '@/lib/clipboard'
 import { shortCwd } from '@/lib/format'
 import { pickModel } from '@/lib/models'
 import { storage } from '@/lib/storage'
@@ -30,7 +31,7 @@ const HOST_KEY = 'fleet.spawnHost'
 const dirKey = (host: string) => `fleet.spawnDirLabel.${host}`
 const MODEL_KEY = 'fleet.spawnModel'
 // The unsent first prompt of a plain New session (not a prefilled "continue"), so closing the form,
-// a reload or a crash never loses it; cleared once a session starts. Stale after a week.
+// a reload, a crash or a failed spawn never loses it; cleared once the started session registers. Stale after a week.
 const DRAFT_KEY = 'fleet.spawnDraft'
 const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -44,6 +45,25 @@ function saveDraft(prompt: string) {
   if (prompt.trim()) storage.setJSON(DRAFT_KEY, { prompt, at: Date.now() })
   else storage.remove(DRAFT_KEY)
 }
+/** A started session registered: drop the draft it came from (not a newer one typed since). */
+function clearDraftIf(sent: string) {
+  if (loadDraft() === sent) storage.remove(DRAFT_KEY)
+}
+
+/**
+ * A spawn that never showed up: its prompt becomes the draft (a "continue" / sibling one too,
+ * unless a newer draft exists) and the toast offers to copy it.
+ */
+function notShownUp(name: string, id: string | number, sent: string) {
+  const kept = sent.trim() !== ''
+  if (kept && !loadDraft().trim()) saveDraft(sent)
+  toast.error(`${name} has not shown up yet`, {
+    id,
+    description: kept ? 'Check the list in a moment. Your prompt is kept in New session.' : 'Check the list in a moment',
+    ...(kept ? { action: { label: 'Copy prompt', onClick: () => void copyText(sent) } } : {}),
+  })
+}
+
 // Radix ToggleGroup treats '' as "nothing selected": the default model ('' = no --model) needs a stand-in.
 const DEFAULT_MODEL_VALUE = '__default'
 
@@ -189,7 +209,8 @@ function NewSessionForm({
     setBusy(true)
     setError(null)
     try {
-      const body = { prompt: prompt.trim() ? prompt : undefined, model: model || undefined }
+      const sent = prompt
+      const body = { prompt: sent.trim() ? sent : undefined, model: model || undefined }
       const res = sib.sessionId ? await api.spawnSibling(sib.host, sib.sessionId, body) : await api.spawnInStack(sib.host, sib.stackId ?? '', body)
       onDone()
       const label = res.stack?.label || sib.label || 'the stack'
@@ -208,7 +229,7 @@ function NewSessionForm({
             toast.success(`${name} is up`, { id, description: undefined })
             onOpenSession(sessionHref(s))
           },
-          onTimeout: () => toast.error(`${name} has not shown up yet`, { id, description: 'Check the list in a moment' }),
+          onTimeout: () => notShownUp(name, id, sent),
         },
       )
     } catch (err) {
@@ -225,8 +246,9 @@ function NewSessionForm({
     setBusy(true)
     setError(null)
     try {
-      const res = await api.spawn(host, { dir: dir.path, prompt: prompt.trim() ? prompt : undefined, model: model || undefined })
-      if (draftable) storage.remove(DRAFT_KEY)
+      const sent = prompt
+      const res = await api.spawn(host, { dir: dir.path, prompt: sent.trim() ? sent : undefined, model: model || undefined })
+      // The draft stays until the session registers: a spawn that never shows up must not lose the prompt.
       onDone()
       const id = toast.loading(`Starting ${res.name} on ${host}…`, { description: 'Waiting for Claude to register' })
       watchForSpawned(
@@ -234,11 +256,11 @@ function NewSessionForm({
         {
           onFleet: applyFleet,
           onFound: (s) => {
+            clearDraftIf(sent)
             toast.success(`${res.name} is up`, { id, description: undefined })
             onOpenSession(sessionHref(s))
           },
-          onTimeout: () =>
-            toast.error(`${res.name} has not shown up yet`, { id, description: 'Check the list in a moment' }),
+          onTimeout: () => notShownUp(res.name, id, sent),
         },
       )
     } catch (err) {
@@ -320,7 +342,7 @@ function NewSessionForm({
   const errorBox =
     error ? (
       <Alert variant="destructive">
-        <AlertDescription className="break-words">{error}</AlertDescription>
+        <AlertDescription className="break-words whitespace-pre-line">{error}</AlertDescription>
       </Alert>
     ) : null
   const submitButton = (
