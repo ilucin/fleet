@@ -207,6 +207,11 @@ tmux new -d -s fleet-web 'while true; do fleet web serve; sleep 2; done'
 Neither launchd nor tmux survives a FileVault reboot without the unlock — restart the service
 after one.
 
+**Updating** a machine that runs from a repo checkout: `scripts/deploy.sh` there (over ssh:
+`ssh workstation '~/Code/project/scripts/deploy.sh'`) — pulls `main` (refuses uncommitted
+changes), builds the CLI into `~/.local/bin/fleet`, runs `fleet web build`, restarts the
+`fleet.web` launchd agent (else the `fleet-web` tmux session) and waits for `/api/health`.
+
 ## 7. Phone
 
 1. Install the **Tailscale** app, log in to the same tailnet, turn the VPN on.
