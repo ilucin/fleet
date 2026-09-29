@@ -37,8 +37,9 @@ const MEMBER_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const MAX_GROUP_LABEL = 200;
 
 /**
- * The body of POST /api/groups/edit, validated: `{ op: "rename", id, label }` or
- * `{ op: "move", host, session, to }` / `{ op: "move", host, session, label }` (a new group).
+ * The body of POST /api/groups/edit, validated: `{ op: "rename", id, label }`,
+ * `{ op: "move", host, session, to }` / `{ op: "move", host, session, label }` (a new group),
+ * `{ op: "create", label }` (an empty group) or `{ op: "delete", id }` (an empty group).
  */
 export function groupEditOp(body) {
   const b = body && typeof body === 'object' ? body : {};
@@ -58,7 +59,9 @@ export function groupEditOp(body) {
     const op = { op: 'move', host: b.host, session: b.session };
     return b.to != null ? { ...op, to: groupId(b.to, 'target group id') } : { ...op, label: label() };
   }
-  throw new HttpError('op must be "rename" or "move"', 400);
+  if (b.op === 'create') return { op: 'create', label: label() };
+  if (b.op === 'delete') return { op: 'delete', id: groupId(b.id, 'group id') };
+  throw new HttpError('op must be "rename", "move", "create" or "delete"', 400);
 }
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;

@@ -159,8 +159,9 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   }
 
   /**
-   * A change made on the board: `fleet group --rename <id> --label <l> --json` or
-   * `fleet group --move <host/id> (--to <group id> | --label <new group>) --json`. Edits the
+   * A change made on the board: `fleet group --rename <id> --label <l> --json`,
+   * `fleet group --move <host/id> (--to <group id> | --label <new group>) --json`,
+   * `fleet group --create --label <l> --json` or `fleet group --delete <id> --json`. Edits the
    * stored groups only (no discovery, no model call); resolves the report like `--cached`.
    */
   async function groupEdit({ op, id, label, host, session, to, timeoutMs: t = 10 * 1000 } = {}) {
@@ -168,6 +169,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     // `--flag=value`: a label starting with "-" must not read as a flag.
     if (op === 'rename') args.push(`--rename=${id}`, `--label=${label}`);
     else if (op === 'move') args.push(`--move=${host}/${session}`, to ? `--to=${to}` : `--label=${label}`);
+    else if (op === 'create') args.push('--create', `--label=${label}`);
+    else if (op === 'delete') args.push(`--delete=${id}`);
     else throw new FleetCliError(`unknown group edit "${op}"`);
     args.push('--json');
     let stdout;

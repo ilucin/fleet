@@ -37,6 +37,12 @@ pub enum Edit {
         id: String,
         label: String,
     },
+    Create {
+        label: String,
+    },
+    Delete {
+        id: String,
+    },
     /// `session` is `host/sessionId` (or `host/pid`).
     Move {
         session: String,
@@ -112,6 +118,8 @@ pub fn run(o: GroupOpts) -> Result<()> {
         let now = chrono::Utc::now().timestamp_millis();
         match edit {
             Edit::Rename { id, label } => grouping::rename_group(&mut state, id, label, now),
+            Edit::Create { label } => grouping::create_group(&mut state, label, now).map(drop),
+            Edit::Delete { id } => grouping::delete_group(&mut state, id, now),
             Edit::Move { session, to } => match session.split_once('/') {
                 Some((host, id)) if !host.is_empty() && !id.is_empty() => {
                     grouping::move_session(&mut state, host, id, to, now).map(drop)

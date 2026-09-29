@@ -95,7 +95,9 @@ export function compareColumns(a: BoardColumn, b: BoardColumn): number {
 /**
  * Join `sessions` (already filtered by search/host/status) with `groups`: every session
  * lands in exactly one column (the first group that claims it), sessions no group claims
- * go to "Ungrouped", members that are not live are dropped, and empty groups disappear.
+ * go to "Ungrouped", members that are not live are dropped, and empty groups disappear —
+ * except a group of the user's with no members at all (`manual`, just made on the board):
+ * an empty column to drop sessions into.
  */
 export function boardColumns(sessions: Session[], groups: SessionGroup[]): BoardColumn[] {
   const owner = new Map<string, number>()
@@ -116,7 +118,7 @@ export function boardColumns(sessions: Session[], groups: SessionGroup[]): Board
   }
   const cols: BoardColumn[] = []
   groups.forEach((g, i) => {
-    if (!buckets[i].length) return
+    if (!buckets[i].length && !isEmptyOwnGroup(g)) return
     const list = buckets[i].sort(byUrgency)
     cols.push({
       id: g.id,
@@ -234,8 +236,15 @@ export function reorderColumns(order: readonly string[], id: string, before: str
 }
 
 /** A change made on the board — the body of POST /api/groups/edit. */
+/** A group the user made on the board that nobody is in yet — shown as an empty column. */
+export const isEmptyOwnGroup = (g: SessionGroup) => g.source === 'manual' && !(g.members?.length ?? 0)
+
 export type GroupEdit =
   | { op: 'rename'; id: string; label: string }
+  /** An empty group of the user's (it stays until deleted). */
+  | { op: 'create'; label: string }
+  /** An empty group. */
+  | { op: 'delete'; id: string }
   /** Into group `to`, or (with `label`) a new group of that name — an existing one of that name is reused. */
   | { op: 'move'; host: string; session: string; to: string; label?: undefined }
   | { op: 'move'; host: string; session: string; label: string; to?: undefined }
@@ -254,6 +263,11 @@ export function applyGroupEdit(resp: GroupsResponse, edit: GroupEdit): GroupsRes
   if (edit.op === 'rename') {
     return { ...resp, groups: resp.groups.map((g) => (g.id === edit.id ? { ...g, label: edit.label } : g)) }
   }
+  if (edit.op === 'create') {
+    const g: SessionGroup = { id: `${PENDING_PREFIX}${edit.label}`, label: edit.label, description: null, source: 'manual', members: [] }
+    return { ...resp, groups: [...resp.groups, g] }
+  }
+  if (edit.op === 'delete') return { ...resp, groups: resp.groups.filter((g) => g.id !== edit.id) }
   const member = { host: edit.host, id: edit.session }
   const same = (m: { host: string; id: string }) => m.host === member.host && m.id === member.id
   let groups = resp.groups.map((g) => ({ ...g, members: (g.members ?? []).filter((m) => !same(m)) }))
@@ -263,7 +277,9 @@ export function applyGroupEdit(resp: GroupsResponse, edit: GroupEdit): GroupsRes
     target = `${PENDING_PREFIX}${label}`
     groups.push({ id: target, label, description: null, source: 'manual', members: [] })
   }
-  groups = groups.map((g) => (g.id === target ? { ...g, members: [...g.members, member] } : g)).filter((g) => g.members.length > 0)
+  groups = groups
+    .map((g) => (g.id === target ? { ...g, members: [...g.members, member] } : g))
+    .filter((g) => g.members.length > 0 || g.source === 'manual')
   return { ...resp, groups }
 }
 

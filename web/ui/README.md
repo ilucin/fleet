@@ -194,7 +194,9 @@ src/
   Desktop editing (server groups only — not the repo fallback, not Ungrouped or stack columns):
   click a column's name to rename it (Enter / clicking away saves, Esc cancels); drag a card onto
   another column to move the session there, or onto "Drop here for a new group" (shown while
-  dragging) and name it; drag a column's header to reorder the columns (`fleet.boardOrder`).
+  dragging) and name it; "+ New group" at the end of the board makes an empty column (a group of
+  yours: it stays, empty or not, until its "Delete group"); drag a column's header to reorder
+  the columns (`fleet.boardOrder`).
   Rename and move are optimistic (`POST /api/groups/edit`) and stick: the grouping pass never
   undoes them.
 - **New session** (drawer): host, directory (radio from that host's `spawnDirs`), model (chips

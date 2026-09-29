@@ -1006,13 +1006,16 @@ where
     sum
 }
 
+/// Drop groups nobody is in — except the user's own (`manual`): those stay until deleted.
 fn drop_empty(state: &mut State) {
     let used: HashSet<String> = state
         .assignments
         .values()
         .map(|a| a.group.clone())
         .collect();
-    state.groups.retain(|g| used.contains(&g.id));
+    state
+        .groups
+        .retain(|g| g.source == MANUAL || used.contains(&g.id));
 }
 
 fn apply_consolidation(state: &mut State, c: &Consolidation, sum: &mut RunSummary) {
@@ -1113,6 +1116,44 @@ pub fn rename_group(
         g.source = MANUAL.into();
         g.description = None;
     }
+    state.updated_at = Some(now);
+    Ok(())
+}
+
+/// A new, empty group of the user's (`manual`, locked): it stays, empty or not, until deleted.
+pub fn create_group(
+    state: &mut State,
+    label: &str,
+    now: i64,
+) -> std::result::Result<String, String> {
+    let label = clean_user_label(label).ok_or("the label is empty")?;
+    if label_taken(state, &label, None) {
+        return Err(format!("a group is already called \"{label}\""));
+    }
+    let taken: HashSet<String> = state.groups.iter().map(|g| g.id.clone()).collect();
+    let id = new_group_id(&label, now, &taken);
+    state.groups.push(Group {
+        id: id.clone(),
+        label,
+        description: None,
+        source: MANUAL.into(),
+        created_at: now,
+        locked: true,
+    });
+    state.updated_at = Some(now);
+    Ok(id)
+}
+
+/// Delete an empty group (one with sessions is refused: move them out first).
+pub fn delete_group(state: &mut State, id: &str, now: i64) -> std::result::Result<(), String> {
+    state.group(id).ok_or_else(|| format!("no group {id}"))?;
+    let n = state.members_of(id).len();
+    if n > 0 {
+        return Err(format!(
+            "the group still has {n} session(s) — move them out first"
+        ));
+    }
+    state.groups.retain(|g| g.id != id);
     state.updated_at = Some(now);
     Ok(())
 }
@@ -1252,7 +1293,7 @@ pub fn view(state: &State, obs: Option<&Observed>) -> (Vec<GroupView>, Vec<Membe
                 members,
             }
         })
-        .filter(|g| !g.members.is_empty())
+        .filter(|g| !g.members.is_empty() || g.source == MANUAL)
         .collect();
     groups.sort_by(|a, b| {
         b.members
@@ -2025,5 +2066,40 @@ mod tests {
         assert_eq!(sum.model_calls, 1);
         assert_eq!(sum.merged, 0);
         assert!(state.group(&g).is_some());
+    }
+
+    #[test]
+    fn a_created_group_stays_empty_until_deleted() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let g = create_group(&mut state, " Spikes ", NOW).unwrap();
+        assert!(create_group(&mut state, "spikes", NOW).is_err());
+        assert!(create_group(&mut state, "  ", NOW).is_err());
+        // Empty, it survives passes and is in the view (a drop target on the board).
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| panic!());
+        let (groups, _) = view(&state, None);
+        let v = groups.iter().find(|x| x.id == g).unwrap();
+        assert_eq!((v.label.as_str(), v.members.len()), ("Spikes", 0));
+        // Its last session leaving doesn't drop it either.
+        move_session(&mut state, "laptop", "a1", &MoveTo::Group(g.clone()), NOW).unwrap();
+        let board = state.assignments["laptop/a2"].group.clone();
+        move_session(&mut state, "laptop", "a1", &MoveTo::Group(board), NOW).unwrap();
+        assert!(state.group(&g).is_some());
+        // Deleting: refused while it has sessions, fine once empty.
+        move_session(&mut state, "laptop", "a1", &MoveTo::Group(g.clone()), NOW).unwrap();
+        assert!(delete_group(&mut state, &g, NOW).is_err());
+        move_session(
+            &mut state,
+            "laptop",
+            "a1",
+            &MoveTo::New("Fleet Board".into()),
+            NOW,
+        )
+        .unwrap();
+        delete_group(&mut state, &g, NOW).unwrap();
+        assert!(state.group(&g).is_none());
+        assert!(delete_group(&mut state, &g, NOW).is_err());
     }
 }

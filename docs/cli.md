@@ -46,7 +46,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet rename <target> <title> [--no-tmux-sync] [--force] [--json]` | rename the session's one title: Claude's `/rename` (the source of truth), then its tmux session follows as a slug of it (`Fix Login` → `fix-login`, `-2` on a collision) when the tmux session is that Claude session's own (one window, one pane). A session **waiting on a prompt** is held (exit 1; `--json`: exit 3) — typed keys would be its answer; busy sessions are fine (Claude runs `/rename` mid-turn without disturbing the turn). `--force` overrides the hold. `--json` prints `{ ok, result: renamed\|sent\|held, session_id, pid, host, from, title, held, tmux: { renamed, from, to, note }, message }` |
 | `fleet name [<target> \| --all] [--apply] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing; only `--apply` sends it (through the same path as `rename`, tmux included). `--all` = every session with a derived (cwd+hash) name. A derived-name session alone in a tmux session somebody named (`fleet new fix-login`) adopts that name (`(tmux)`, no model call) instead of getting a generated one. `--refresh` ignores the cache |
 | `fleet group [-a, --all-hosts] [--json] [--apply] [--refresh] [--consolidate] [--input <file\|->] [--cached]` | sort sessions into work-stream groups (the web Board view) — see [Grouping](#grouping). Reads sessions and asks `claude -p`; never sends anything to a session |
-| `fleet group --rename <group id> --label <l>` / `--move <host/id> (--to <group id> \| --label <l>)` | edit the stored groups by hand (the Board's rename / drag'n'drop) — see [Grouping](#grouping) |
+| `fleet group --rename <group id> --label <l>` / `--move <host/id> (--to <group id> \| --label <l>)` / `--create --label <l>` / `--delete <group id>` | edit the stored groups by hand (the Board's rename / drag'n'drop) — see [Grouping](#grouping) |
 | `fleet spawn [prompt] --dir <path> [--name <n>] [--model <id>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new Claude session in a new tab/pane. `--model <id>` runs `claude --model '<id>'` (letters, digits and `._[]-` only; blank = Claude's default). Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing) |
 | `fleet spawn --from <target> [prompt] [--name <n>] [--model <id>] [--backend …]` | continue a session's work in a new one: same host (with `-H`, the host the session is on) and its cwd (`--dir` overrides), first prompt = its [brief](#briefs)'s continue prompt, then a blank line and `prompt`. The prompt goes through a file under `~/.claude/fleet-handoffs/`, like a handoff. Errors when the session has no brief yet. `-n` prints the launch command and the prompt and writes nothing |
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--name <n>] [--model <id>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
@@ -166,7 +166,11 @@ and keeps them stable across runs. State: `$FLEET_GROUPS_STATE`, else
   - `--move <host/id> --to <group id>` — the session stays in that group for good (`manual`
     assignment: never reclassified, whatever changes about the session; its group is never
     merged away). `--label <l>` instead of `--to` moves it to a new group of that name
-    (`source: "manual"`), or to the existing group that has it. A group left empty goes.
+    (`source: "manual"`), or to the existing group that has it. A group left empty goes —
+    unless it is `manual`.
+  - `--create --label <l>` — a new, empty group (`source: "manual"`, the label not another
+    group's). A `manual` group stays, empty or not, until `--delete <group id>`, which refuses
+    a group that still has sessions.
 
 `--json` (stable contract):
 
@@ -182,7 +186,7 @@ and keeps them stable across runs. State: `$FLEET_GROUPS_STATE`, else
 ```
 
 Group ids never change once created (a merge keeps the target's id); empty groups are dropped.
-`source` is `llm`, `fallback` or `manual` (made on the board).
+`source` is `llm`, `fallback` or `manual` (made on the board); a `manual` group may have no members.
 
 ### Dashboard keys (`watch`)
 

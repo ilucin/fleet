@@ -251,6 +251,19 @@ describe('applyGroupEdit', () => {
     expect(reused.groups.find((x) => x.id === 'g-2')?.members.map((m) => m.id)).toEqual(['c', 'a'])
   })
 
+  test('create adds an empty own group; delete removes it; an own group left empty stays', () => {
+    const made = applyGroupEdit(base, { op: 'create', label: 'Spikes' })
+    expect(made.groups.at(-1)).toMatchObject({ id: 'pending:Spikes', source: 'manual', members: [] })
+    expect(applyGroupEdit(made, { op: 'delete', id: 'pending:Spikes' }).groups).toHaveLength(2)
+    const own = resp({ groups: [g('m', [['laptop', 'a']], { source: 'manual' }), g('g-2', [])] })
+    expect(applyGroupEdit(own, { op: 'move', host: 'laptop', session: 'a', to: 'g-2' }).groups.map((x) => x.id)).toEqual(['m', 'g-2'])
+  })
+
+  test('boardColumns shows an own group with no members as an empty column, not other empty ones', () => {
+    const cols = boardColumns([s({ session_id: 'a' })], [g('own', [], { source: 'manual' }), g('llm', []), g('gone', [['laptop', 'x']], { source: 'manual' })])
+    expect(cols.map((c) => [c.id, c.sessions.length])).toEqual([['own', 0], [UNGROUPED_ID, 1]])
+  })
+
   test('memberId: the session id, else the pid', () => {
     expect(memberId(s({ session_id: 'x' }))).toBe('x')
     expect(memberId(s({ session_id: '', pid: 42 }))).toBe('42')

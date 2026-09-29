@@ -6,7 +6,7 @@ import { BoardCard } from '@/components/board/BoardCard'
 import { InlineEdit, InlineField } from '@/components/InlineEdit'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
-import { memberId, type BoardColumn, type GroupEdit } from '@/lib/groups'
+import { PENDING_PREFIX, memberId, type BoardColumn, type GroupEdit } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
@@ -39,13 +39,14 @@ export interface BoardColumnsProps {
 /**
  * The board's Kanban columns. Drag a card onto another column to move the session there (or
  * onto "New group" to start one), drag a column's header to reorder the columns, click a
- * column's name to rename it. Ungrouped takes no drops and stays last.
+ * column's name to rename it. "+ New group" at the end makes an empty column (a group of the
+ * user's: it stays until "Delete group"). Ungrouped takes no drops and stays last.
  */
 export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, editable, onEdit, onMoveColumn }: BoardColumnsProps) {
   const [drag, setDrag] = useState<Drag | null>(null)
   const [over, setOver] = useState<Over | null>(null)
   /** A session dropped on "New group", waiting for the group's name. */
-  const [naming, setNaming] = useState<Session | null>(null)
+  const [naming, setNaming] = useState<{ session: Session | null } | null>(null)
   /** The column whose name is being edited (its header stops being draggable meanwhile). */
   const [renaming, setRenaming] = useState<string | null>(null)
 
@@ -97,7 +98,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
     end()
   }
 
-  const showNew = editable && (drag?.kind === 'session' || naming)
+  const showNew = editable && drag?.kind !== 'column'
 
   return (
     <>
@@ -146,6 +147,20 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
               {c.description ? <p className="mt-0.5 line-clamp-2 text-[0.6875rem] text-dimmer">{c.description}</p> : null}
             </header>
             <div className="flex min-h-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2">
+              {c.sessions.length === 0 ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-3 text-xs text-dimmer">
+                  <span>Drag sessions here</span>
+                  {!c.id.startsWith(PENDING_PREFIX) ? (
+                    <button
+                      type="button"
+                      onClick={() => onEdit({ op: 'delete', id: c.id })}
+                      className="rounded-sm outline-none hover:text-destructive focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      Delete group
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {c.sessions.map((s) => {
                 const key = sessionKey(s)
                 return (
@@ -181,7 +196,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
           onDrop={(e) => {
             if (drag?.kind !== 'session' || !ours(e)) return
             e.preventDefault()
-            setNaming(drag.session)
+            setNaming({ session: drag.session })
             end()
           }}
           className={cn(
@@ -196,17 +211,26 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
                 label="New group name"
                 maxLength={GROUP_LABEL_MAX}
                 onCommit={(label) => {
-                  const s = naming
+                  const s = naming.session
                   setNaming(null)
-                  if (label) onEdit({ op: 'move', host: s.host, session: memberId(s), label })
+                  if (!label) return
+                  onEdit(s ? { op: 'move', host: s.host, session: memberId(s), label } : { op: 'create', label })
                 }}
                 onCancel={() => setNaming(null)}
               />
             </span>
-          ) : (
+          ) : drag?.kind === 'session' ? (
             <span className="flex items-center gap-1.5 py-1">
               <PlusIcon className="size-4" /> Drop here for a new group
             </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNaming({ session: null })}
+              className="-m-3 flex items-center gap-1.5 rounded-xl p-3 py-4 text-left outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <PlusIcon className="size-4" /> New group
+            </button>
           )}
         </section>
       ) : null}

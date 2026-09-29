@@ -286,10 +286,14 @@ test('fleet-cli groupEdit: flags as --k=v, the CLI error surfaces as refused', a
   await cli.groupEdit({ op: 'rename', id: 'g-1', label: '-dash' });
   await cli.groupEdit({ op: 'move', host: 'laptop', session: 'a1', to: 'g-2' });
   await cli.groupEdit({ op: 'move', host: 'laptop', session: 'a1', label: 'New One' });
+  await cli.groupEdit({ op: 'create', label: 'Spikes' });
+  await cli.groupEdit({ op: 'delete', id: 'g-3' });
   assert.deepEqual(seen, [
     ['group', '--rename=g-1', '--label=-dash', '--json'],
     ['group', '--move=laptop/a1', '--to=g-2', '--json'],
     ['group', '--move=laptop/a1', '--label=New One', '--json'],
+    ['group', '--create', '--label=Spikes', '--json'],
+    ['group', '--delete=g-3', '--json'],
   ]);
   const failing = createFleetCli({
     run: async () => {
@@ -303,6 +307,8 @@ test('groupEditOp validates the body', () => {
   assert.deepEqual(groupEditOp({ op: 'rename', id: 'g-1', label: '  X  ' }), { op: 'rename', id: 'g-1', label: 'X' });
   assert.deepEqual(groupEditOp({ op: 'move', host: 'laptop', session: 'a1', to: 'repo-app' }), { op: 'move', host: 'laptop', session: 'a1', to: 'repo-app' });
   assert.deepEqual(groupEditOp({ op: 'move', host: 'laptop', session: '123', label: 'New' }), { op: 'move', host: 'laptop', session: '123', label: 'New' });
+  assert.deepEqual(groupEditOp({ op: 'create', label: ' Spikes ', id: 'ignored' }), { op: 'create', label: 'Spikes' });
+  assert.deepEqual(groupEditOp({ op: 'delete', id: 'g-3' }), { op: 'delete', id: 'g-3' });
   for (const bad of [
     null,
     { op: 'nuke' },
@@ -311,6 +317,8 @@ test('groupEditOp validates the body', () => {
     { op: 'move', host: 'a/b', session: 'a1', to: 'g-1' },
     { op: 'move', host: 'laptop', session: '../x', to: 'g-1' },
     { op: 'move', host: 'laptop', session: 'a1' },
+    { op: 'create' },
+    { op: 'delete', id: '' },
   ]) {
     assert.throws(() => groupEditOp(bad), (e) => e.status === 400, JSON.stringify(bad));
   }

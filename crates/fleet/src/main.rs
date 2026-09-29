@@ -186,9 +186,16 @@ enum Commands {
             conflicts_with = "label"
         )]
         to: Option<String>,
-        /// With --rename: the new label; with --move: the label of a new group (reused when one has it)
+        /// With --rename: the new label; with --move: the label of a new group (reused when one has it);
+        /// with --create: the new group's label
         #[arg(long)]
         label: Option<String>,
+        /// Create an empty group named --label (yours: it stays, empty or not, until --delete)
+        #[arg(long, requires = "label", conflicts_with_all = ["apply", "refresh", "consolidate", "all_hosts", "input", "cached", "rename", "move_session", "delete"])]
+        create: bool,
+        /// Delete an empty group (by id)
+        #[arg(long, value_name = "GROUP_ID", conflicts_with_all = ["apply", "refresh", "consolidate", "all_hosts", "input", "cached", "rename", "move_session", "label"])]
+        delete: Option<String>,
     },
 
     /// A session's brief: what it is doing, what it produced, its todos (read, edit, regenerate, open)
@@ -757,8 +764,16 @@ fn run(cli: Cli) -> Result<i32> {
             move_session,
             to,
             label,
+            create,
+            delete,
         } => {
             let edit = match (rename, move_session) {
+                _ if create => Some(group::Edit::Create {
+                    label: label.unwrap_or_default(),
+                }),
+                _ if delete.is_some() => Some(group::Edit::Delete {
+                    id: delete.unwrap_or_default(),
+                }),
                 (Some(id), _) => Some(group::Edit::Rename {
                     id,
                     label: label.unwrap_or_default(),
