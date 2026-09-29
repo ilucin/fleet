@@ -58,7 +58,17 @@ import {
   SIDEBAR_MAX_W,
   SIDEBAR_MIN_W,
 } from '@/lib/layout'
-import { isMacPlatform, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutAction } from '@/lib/shortcuts'
+import {
+  APP_COMMAND_EVENT,
+  APP_COMMANDS,
+  isMacPlatform,
+  isTypingTarget,
+  matchShortcut,
+  sessionKey,
+  shortcutHint,
+  stepCursor,
+  type ShortcutAction,
+} from '@/lib/shortcuts'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
 import { NotesScreen } from '@/screens/NotesScreen'
@@ -66,7 +76,6 @@ import { SessionScreen, type PaneApi } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 
 const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false : undefined)
-const CHORD_MS = 1200
 
 /**
  * ≥ lg: master–detail. Resizable / collapsible sidebar (the session list) + the selected
@@ -98,13 +107,13 @@ export function DesktopShell() {
     typeof window !== 'undefined' && window.matchMedia?.(WIDE_QUERY).matches ? '1' : '0',
     (r) => (parseBool01(r) === undefined ? undefined : r),
   )
-  // The Details column: the brief first, then the session's details (`i`).
+  // The Details column: the brief first, then the session's details (⌘I).
   const inspector = inspectorRaw === '1'
   const toggleSidebar = () => setSidebarRaw(sidebarOpen ? '0' : '1')
   const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
 
   // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
-  // session is a flyout over its right edge (the board never relayouts), so j/k, Enter and
+  // session is a flyout over its right edge (the board never relayouts), so ↑/↓, Enter and
   // Esc work the same way.
   const [mode, setMode] = useViewMode()
   const board = mode === 'board'
@@ -120,9 +129,8 @@ export function DesktopShell() {
   const [newOpen, setNewOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
-  const modKey = isMacPlatform() ? '⌘' : 'Ctrl'
 
-  // --- cursor (j/k) — follows the selection when it changes ------------------
+  // --- cursor (↑/↓) — follows the selection when it changes ------------------
   const [cursor, setCursor] = useState<string | null>(selectedKey)
   const [prevSelected, setPrevSelected] = useState(selectedKey)
   if (prevSelected !== selectedKey) {
@@ -180,7 +188,7 @@ export function DesktopShell() {
   const moveCursor = (delta: number) => {
     const next = stepCursor(keys, cursorKey ?? selectedKey, delta)
     setCursor(next)
-    // Keyboard focus on a row follows the cursor (Tab-then-j/k stays coherent).
+    // Keyboard focus on a row follows the cursor (Tab-then-↑/↓ stays coherent).
     if (next && document.activeElement?.closest('[data-session-list]')) setFocusReq((r) => ({ to: 'row', key: next, n: (r?.n ?? 0) + 1 }))
   }
 
@@ -194,13 +202,12 @@ export function DesktopShell() {
   useEffect(() => () => void (document.title = 'Fleet'), [])
 
   // --- keyboard ----------------------------------------------------------------
-  const pending = useRef<{ key: string; at: number } | null>(null)
   const dialogOpen = newOpen || paletteOpen || helpOpen
 
   const run = (action: ShortcutAction, target: HTMLElement | null): boolean => {
     const cur = cursorKey ? byKey.get(cursorKey) : null
     // The session list isn't on screen in the notes explorer: its keys do nothing there.
-    if (notesOpen && !['search', 'new', 'back', 'blur', 'palette', 'help', 'refresh', 'notes'].includes(action)) return false
+    if (notesOpen && !['search', 'new', 'back', 'blur', 'palette', 'help', 'notes'].includes(action)) return false
     switch (action) {
       case 'next':
         moveCursor(1)
@@ -208,26 +215,17 @@ export function DesktopShell() {
       case 'prev':
         moveCursor(-1)
         return true
-      case 'first':
-        setCursor(keys[0] ?? null)
-        return true
-      case 'last':
-        setCursor(keys[keys.length - 1] ?? null)
-        return true
-      case 'open':
       case 'openAndReply': {
         // A focused link / button handles Enter itself.
-        if (action === 'openAndReply' && target?.closest('a, button, [role="button"], [role="radio"], [role="option"], [role="switch"]'))
-          return false
+        if (target?.closest('a, button, [role="button"], [role="radio"], [role="option"], [role="switch"]')) return false
         const s = cur ?? (selectedKey ? null : ordered[0])
-        if (s) openSession(s, action === 'openAndReply')
-        else if (selectedKey && action === 'openAndReply') paneRef.current?.focusComposer()
+        if (s) openSession(s, true)
+        else if (selectedKey) paneRef.current?.focusComposer()
         return true
       }
-      case 'reply':
-        paneRef.current?.focusComposer()
-        return !!paneRef.current
       case 'search':
+        // Again from the search field: the browser's own find in page.
+        if (target && (target === searchRef.current || target === notesSearchRef.current)) return false
         focusSearch()
         return true
       case 'new':
@@ -242,9 +240,8 @@ export function DesktopShell() {
       case 'blur':
         target?.blur()
         return true
-      case 'chat':
-      case 'term':
-        paneRef.current?.setMode(action)
+      case 'mode':
+        paneRef.current?.toggleMode()
         return !!paneRef.current
       case 'sidebar':
         if (board) return false
@@ -261,10 +258,7 @@ export function DesktopShell() {
         setPaletteOpen((o) => !o)
         return true
       case 'help':
-        setHelpOpen(true)
-        return true
-      case 'refresh':
-        refresh()
+        setHelpOpen((o) => !o)
         return true
       case 'notes':
         navigate(notesOpen ? '/' : notesHref())
@@ -281,28 +275,38 @@ export function DesktopShell() {
   useEffect(() => {
     runRef.current = run
   })
-  const dialogOpenRef = useRef(dialogOpen)
+  const dialogRef = useRef({ any: dialogOpen, help: helpOpen, others: newOpen || paletteOpen })
   useEffect(() => {
-    dialogOpenRef.current = dialogOpen
-  }, [dialogOpen])
+    dialogRef.current = { any: dialogOpen, help: helpOpen, others: newOpen || paletteOpen }
+  }, [dialogOpen, helpOpen, newOpen, paletteOpen])
 
   useEffect(() => {
+    const mac = isMacPlatform()
+    const anyDialog = () => dialogRef.current.any || !!document.querySelector('[role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
       const target = (e.target instanceof HTMLElement ? e.target : null) as HTMLElement | null
-      const anyDialog = dialogOpenRef.current || !!document.querySelector('[role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')
       const typing = isTypingTarget(target)
       const arrowsFree = !target || target === document.body || !!target.closest('[data-session-list]')
-      const p = pending.current && Date.now() - pending.current.at < CHORD_MS ? pending.current.key : null
-      const res = matchShortcut(e, { typing, arrowsFree, pending: p })
-      pending.current = res.pending ? { key: res.pending, at: Date.now() } : null
-      if (!res.action) return
-      // With a dialog open only ⌘K toggles the palette; the dialog owns every other key.
-      if (anyDialog && res.action !== 'palette') return
-      if (runRef.current(res.action, target)) e.preventDefault()
+      const action = matchShortcut(e, { mac, typing, arrowsFree })
+      if (!action) return
+      // With a dialog open only ⌘K toggles the palette (and ⌘? closes the help); the dialog owns
+      // every other key.
+      if (anyDialog() && action !== 'palette' && !(action === 'help' && dialogRef.current.help && !dialogRef.current.others)) return
+      if (runRef.current(action, target)) e.preventDefault()
+    }
+    // Fleet.app's native menu (New Session ⌘N — a combo browsers keep for themselves).
+    const onCommand = (e: Event) => {
+      const action = (e as CustomEvent<unknown>).detail as ShortcutAction
+      if (!APP_COMMANDS.includes(action) || anyDialog()) return
+      runRef.current(action, null)
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener(APP_COMMAND_EVENT, onCommand)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener(APP_COMMAND_EVENT, onCommand)
+    }
   }, [])
 
   // --- sidebar resize ------------------------------------------------------------
@@ -379,32 +383,32 @@ export function DesktopShell() {
     {
       heading: 'Actions',
       items: [
-        { id: 'new', label: 'New session…', icon: <PlusIcon />, shortcut: 'C', keywords: ['spawn', 'start'], run: () => setNewOpen(true) },
+        { id: 'new', label: 'New session…', icon: <PlusIcon />, shortcut: shortcutHint('new'), keywords: ['spawn', 'start'], run: () => setNewOpen(true) },
         ...(selectedKey
           ? [
-              { id: 'chat', label: 'Chat view', icon: <MessageSquareTextIcon />, shortcut: 'G C', run: () => paneRef.current?.setMode('chat') },
-              { id: 'term', label: 'Terminal view', icon: <SquareTerminalIcon />, shortcut: 'G T', run: () => paneRef.current?.setMode('term') },
+              { id: 'chat', label: 'Chat view', icon: <MessageSquareTextIcon />, shortcut: shortcutHint('mode'), run: () => paneRef.current?.setMode('chat') },
+              { id: 'term', label: 'Terminal view', icon: <SquareTerminalIcon />, shortcut: shortcutHint('mode'), run: () => paneRef.current?.setMode('term') },
               {
                 id: 'inspector',
                 label: inspector ? 'Hide details (brief)' : 'Show details (brief: summary, todos, resources)',
                 icon: <PanelRightIcon />,
-                shortcut: 'I',
+                shortcut: shortcutHint('inspector'),
                 keywords: ['details', 'brief', 'todos', 'summary', 'resources', 'continue', 'inspector'],
                 run: toggleInspector,
               },
             ]
           : []),
         board
-          ? { id: 'view', label: 'List view', icon: <ListIcon />, shortcut: 'B', keywords: ['list', 'sidebar'], run: toggleView }
-          : { id: 'view', label: 'Board view (grouped)', icon: <KanbanIcon />, shortcut: 'B', keywords: ['board', 'kanban', 'groups'], run: toggleView },
+          ? { id: 'view', label: 'List view', icon: <ListIcon />, shortcut: shortcutHint('view'), keywords: ['list', 'sidebar'], run: toggleView }
+          : { id: 'view', label: 'Board view (grouped)', icon: <KanbanIcon />, shortcut: shortcutHint('view'), keywords: ['board', 'kanban', 'groups'], run: toggleView },
         ...(board && groups.groups?.enabled
           ? [{ id: 'regroup', label: 'Regroup now', icon: <SparklesIcon />, keywords: ['group', 'board'], run: () => void groups.run() }]
           : []),
         ...(board
           ? []
-          : [{ id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: '[', run: toggleSidebar }]),
+          : [{ id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: shortcutHint('sidebar'), run: toggleSidebar }]),
         ...(selectedSession && selectedKey
-          ? [{ id: 'rename', label: 'Rename session…', icon: <PencilIcon />, shortcut: 'E', keywords: ['title', 'name'], run: () => startEditing('header', selectedKey) }]
+          ? [{ id: 'rename', label: 'Rename session…', icon: <PencilIcon />, shortcut: shortcutHint('rename'), keywords: ['title', 'name'], run: () => startEditing('header', selectedKey) }]
           : []),
         ...(attachCmd
           ? [{ id: 'copy-attach', label: 'Copy attach command', icon: <CopyIcon />, keywords: ['tmux', 'terminal', 'enter', attachCmd], run: () => void copyWithToast(attachCmd) }]
@@ -413,7 +417,7 @@ export function DesktopShell() {
           ? [{ id: 'editor', label: editorText, icon: <CodeXmlIcon />, keywords: ['editor', 'vscode', 'cursor', 'code'], run: () => window.location.assign(editorUrl) }]
           : []),
         ...(notesHosts.length
-          ? [{ id: 'notes', label: 'Notes…', icon: <NotebookTextIcon />, shortcut: 'G N', keywords: ['notes', 'markdown', 'knowledge', 'wiki', 'search'], run: () => navigate(notesHref()) }]
+          ? [{ id: 'notes', label: 'Notes…', icon: <NotebookTextIcon />, shortcut: shortcutHint('notes'), keywords: ['notes', 'markdown', 'knowledge', 'wiki', 'search'], run: () => navigate(notesHref()) }]
           : []),
         {
           id: 'settings',
@@ -422,8 +426,8 @@ export function DesktopShell() {
           keywords: ['preferences', 'text size', 'font', 'zoom', 'theme', 'progress notes'],
           run: () => navigate('/settings'),
         },
-        { id: 'refresh', label: 'Refresh now', icon: <RefreshCwIcon />, shortcut: 'G R', run: refresh },
-        { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: '?', run: () => setHelpOpen(true) },
+        { id: 'refresh', label: 'Refresh now', icon: <RefreshCwIcon />, keywords: ['reload', 'poll'], run: refresh },
+        { id: 'help', label: 'Keyboard shortcuts', icon: <KeyboardIcon />, shortcut: shortcutHint('help'), run: () => setHelpOpen(true) },
       ],
     },
     { heading: paletteNotes ? `Notes · ${paletteNotes.name} (${paletteNotesHost})` : 'Notes', items: noteItems },
@@ -561,7 +565,6 @@ export function DesktopShell() {
             now={now}
             cursorKey={cursorKey}
             selectedKey={selectedKey}
-            modKey={modKey}
             searchRef={searchRef}
             onSearchNav={onSearchNav}
             onNew={() => setNewOpen(true)}
@@ -613,7 +616,6 @@ export function DesktopShell() {
           {pane ?? (
             <EmptyPane
               waitingSessions={paletteSessions.filter((s) => s.status === 'waiting').slice(0, 6)}
-              modKey={modKey}
               onOpen={(s) => openSession(s, true)}
             />
           )}
@@ -629,7 +631,7 @@ export function DesktopShell() {
         onOpenSession={(s) => openSession(s, false)}
         actions={actions}
       />
-      <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} modKey={modKey} />
+      <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </div>
   )
 }
@@ -640,14 +642,14 @@ function titlebarOffset(left: number | string): CSSProperties {
   return { '--titlebar-offset': typeof left === 'number' ? `${left}px` : left } as CSSProperties
 }
 
-function EmptyPane({ waitingSessions, modKey, onOpen }: { waitingSessions: Session[]; modKey: string; onOpen: (s: Session) => void }) {
+function EmptyPane({ waitingSessions, onOpen }: { waitingSessions: Session[]; onOpen: (s: Session) => void }) {
   const hints: [string[], string][] = [
-    [['j', 'k'], 'move'],
+    [['↑', '↓'], 'move'],
     [['Enter'], 'open'],
-    [['/'], 'search'],
-    [['c'], 'new session'],
-    [[`${modKey}K`], 'jump'],
-    [['?'], 'all shortcuts'],
+    [[shortcutHint('search')], 'search'],
+    [[shortcutHint('new')], 'new session'],
+    [[shortcutHint('palette')], 'jump'],
+    [[shortcutHint('help')], 'all shortcuts'],
   ]
   return (
     <div data-tauri-drag-region className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">

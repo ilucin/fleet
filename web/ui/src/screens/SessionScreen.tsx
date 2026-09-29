@@ -45,7 +45,7 @@ import { continueDraft } from '@/lib/brief'
 import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { tailAnchor } from '@/lib/outbox'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
-import { isPlainEscape } from '@/lib/shortcuts'
+import { isPlainEscape, withHint } from '@/lib/shortcuts'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
 
@@ -66,6 +66,8 @@ interface PeekState {
 /** What the desktop shell's shortcuts can ask of the open pane. */
 export interface PaneApi {
   setMode: (m: DetailMode) => void
+  /** Chat ⇄ Terminal (⌘J). */
+  toggleMode: () => void
   focusComposer: () => void
 }
 
@@ -133,9 +135,17 @@ export function SessionScreen({
   const [continueWith, setContinueWith] = useState<SpawnPrefill | null>(null)
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const modeRef = useRef(mode)
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
   useEffect(() => {
     if (!paneRef) return
-    paneRef.current = { setMode, focusComposer: () => composerRef.current?.focus() }
+    paneRef.current = {
+      setMode,
+      toggleMode: () => setMode(modeRef.current === 'chat' ? 'term' : 'chat'),
+      focusComposer: () => composerRef.current?.focus(),
+    }
     return () => {
       paneRef.current = null
     }
@@ -292,10 +302,6 @@ export function SessionScreen({
   useEffect(() => {
     chatRef.current = chat
   }, [chat])
-  const modeRef = useRef(mode)
-  useEffect(() => {
-    modeRef.current = mode
-  }, [mode])
   const { box, items: outbox } = useOutbox({
     host,
     id,
@@ -486,10 +492,10 @@ export function SessionScreen({
               aria-label="View mode"
               className="shrink-0 rounded-xl bg-muted p-0.5"
             >
-              <ToggleGroupItem value="chat" aria-label="Chat view" title={pane ? 'Chat (g c)' : undefined} className={modeItem}>
+              <ToggleGroupItem value="chat" aria-label="Chat view" title={pane ? withHint('Chat', 'mode') : undefined} className={modeItem}>
                 <MessageSquareTextIcon />
               </ToggleGroupItem>
-              <ToggleGroupItem value="term" aria-label="Terminal view" title={pane ? 'Terminal (g t)' : undefined} className={modeItem}>
+              <ToggleGroupItem value="term" aria-label="Terminal view" title={pane ? withHint('Terminal', 'mode') : undefined} className={modeItem}>
                 <SquareTerminalIcon />
               </ToggleGroupItem>
             </ToggleGroup>
@@ -499,7 +505,7 @@ export function SessionScreen({
               variant="ghost"
               size="icon"
               aria-label="Details panel"
-              title="Details (i)"
+              title={withHint('Details', 'inspector')}
               aria-pressed={inspector}
               onClick={onToggleInspector}
               className={cn('size-11 shrink-0 rounded-xl', inspector && 'bg-muted text-foreground')}

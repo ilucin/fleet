@@ -4,7 +4,7 @@ import { CheckIcon, Loader2Icon, PencilIcon, XIcon } from 'lucide-react'
 import type { Session } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { openTitleEditor, stopEditing, useEditing, useRename, useSessionTitle, type TitleScope } from '@/hooks/useTitles'
-import { sessionKey } from '@/lib/shortcuts'
+import { sessionKey, withHint } from '@/lib/shortcuts'
 import { MAX_TITLE, titleChanged } from '@/lib/title'
 import { cn } from '@/lib/utils'
 
@@ -47,7 +47,7 @@ export function EditableTitle({ session, scope, fallbackKey, className, trigger 
         <button
           type="button"
           onClick={open}
-          title="Rename (e)"
+          title={withHint('Rename', 'rename')}
           className={cn('min-w-0 cursor-text truncate rounded-sm text-left outline-none hover:underline hover:decoration-dotted hover:underline-offset-4 focus-visible:ring-3 focus-visible:ring-ring/50', saving && 'opacity-70', className)}
         >
           {title}

@@ -25,6 +25,7 @@ import { editorLabel } from '@/lib/brief'
 import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
 import type { DetailMode } from '@/lib/chat'
 import { ctxLevel, ctxSummary, relTime, shortCwd } from '@/lib/format'
+import { withHint } from '@/lib/shortcuts'
 import { CTX_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
 
@@ -218,7 +219,7 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
               ) : null}
             </div>
             {panel && p.onClose ? (
-              <Button variant="ghost" size="icon" aria-label="Close details" title="Close (i)" onClick={p.onClose} className="-mr-2 size-10 shrink-0 rounded-xl">
+              <Button variant="ghost" size="icon" aria-label="Close details" title={withHint('Close', 'inspector')} onClick={p.onClose} className="-mr-2 size-10 shrink-0 rounded-xl">
                 <XIcon className="size-[1.125rem]" />
               </Button>
             ) : null}

@@ -1,31 +1,31 @@
 // Desktop keyboard shortcuts — pure key → action mapping (unit-tested in shortcuts.test.ts).
 // The desktop shell owns the single window keydown listener and dispatches these actions.
+//
+// Every action is `mod`+key: ⌘ on macOS, Ctrl elsewhere (never both, so macOS keeps Ctrl's
+// Emacs-style editing keys in fields). Only navigation stays unmodified: ↑/↓ and Enter in
+// the list, Esc. None of the combos is a text-editing one (⌘A/C/V/X/Z, ⌘ + arrows, ⌘Enter),
+// so they may fire while typing without taking anything away from the field.
 
 export type ShortcutAction =
   | 'next'
   | 'prev'
-  | 'first'
-  | 'last'
-  | 'open'
   | 'openAndReply'
-  | 'reply'
   | 'search'
   | 'new'
   | 'back'
   | 'blur'
-  | 'chat'
-  | 'term'
+  | 'mode'
   | 'sidebar'
   | 'inspector'
   | 'palette'
   | 'help'
-  | 'refresh'
   | 'view'
   | 'rename'
   | 'notes'
 
 export interface KeyLike {
   key: string
+  code?: string
   metaKey?: boolean
   ctrlKey?: boolean
   altKey?: boolean
@@ -34,73 +34,119 @@ export interface KeyLike {
 }
 
 export interface ShortcutContext {
+  /** macOS: `mod` is ⌘ (metaKey), elsewhere Ctrl. */
+  mac: boolean
   /** Focus is in a text field (input / textarea / select / contenteditable). */
   typing: boolean
   /** Arrow keys are free to move the list cursor (focus is not in a scrollable pane). */
   arrowsFree: boolean
-  /** The first key of a chord (`g`) pressed just before, or null. */
-  pending: string | null
 }
 
-export interface ShortcutResult {
-  action: ShortcutAction | null
-  /** Chord state to carry to the next keydown. */
-  pending: string | null
+/** Where the page runs: the OS (glyphs, which key is `mod`) and browser tab vs Fleet.app. */
+export interface ShortcutEnv {
+  mac: boolean
+  /** Inside Fleet.app (its initialization script sets `data-shell="desktop"`). */
+  app: boolean
 }
 
-const NONE: ShortcutResult = { action: null, pending: null }
+/** A key combination: `mod` / `shift` / `alt` tokens, then the key (letters upper-case). */
+export type Combo = readonly string[]
 
-/** Second key of a `g …` chord. */
-const G_CHORDS: Record<string, ShortcutAction> = {
-  c: 'chat',
-  t: 'term',
-  g: 'first',
-  r: 'refresh',
-  n: 'notes',
-}
-
-const PLAIN: Record<string, ShortcutAction> = {
-  j: 'next',
-  k: 'prev',
-  G: 'last',
-  Enter: 'openAndReply',
-  o: 'open',
-  r: 'reply',
-  '/': 'search',
-  c: 'new',
-  n: 'new',
-  Escape: 'back',
-  '[': 'sidebar',
-  i: 'inspector',
-  b: 'view',
-  e: 'rename',
-  F2: 'rename',
-  '?': 'help',
+interface Binding {
+  action: ShortcutAction
+  combo: Combo
+  /** Fleet.app only: its native menu owns the combo (browsers reserve it) and dispatches a
+   *  `fleet:command` event; the page's keydown never matches it (no double fire). */
+  app?: true
 }
 
 /**
- * Map a keydown to an action. Never steals keys while typing, except ⌘K / Ctrl+K
- * (palette) and Esc (blur the field). Other modifier combos are left to the browser,
- * except ⌘B / Ctrl+B (sidebar).
+ * The `mod` bindings, in display order (the first one an environment has is the hint).
+ * Browser-reserved combos are avoided: ⌘N/⌘T/⌘W/⌘Q/⌘⇧N/⌘⇧T cannot be caught by a page,
+ * ⌘L/⌘R/⌘1–9/⌘[/⌘] are the address bar, reload, tabs and history (Fleet.app's menu keeps
+ * ⌘R, ⌘⇧R, ⌘W, ⌘[, ⌘]). New session is ⌘N in Fleet.app, ⌘⇧O (ChatGPT's "new chat") anywhere.
  */
-export function matchShortcut(e: KeyLike, ctx: ShortcutContext): ShortcutResult {
-  if (e.isComposing) return NONE
-  const mod = !!(e.metaKey || e.ctrlKey)
+export const BINDINGS: readonly Binding[] = [
+  { action: 'palette', combo: ['mod', 'K'] },
+  { action: 'help', combo: ['mod', '?'] },
+  { action: 'help', combo: ['mod', '/'] },
+  { action: 'new', combo: ['mod', 'N'], app: true },
+  { action: 'new', combo: ['mod', 'shift', 'O'] },
+  { action: 'search', combo: ['mod', 'F'] },
+  { action: 'view', combo: ['mod', 'B'] },
+  { action: 'sidebar', combo: ['mod', '\\'] },
+  { action: 'inspector', combo: ['mod', 'I'] },
+  { action: 'mode', combo: ['mod', 'J'] },
+  { action: 'rename', combo: ['mod', 'E'] },
+  { action: 'notes', combo: ['mod', 'shift', 'E'] },
+]
+
+/** The combos an environment offers for an action (the first is the one to show). */
+export function combosFor(action: ShortcutAction, env: ShortcutEnv): Combo[] {
+  return BINDINGS.filter((b) => b.action === action && (!b.app || env.app)).map((b) => b.combo)
+}
+
+/** The key a combo compares: lower-case letters, `?` as shift + `/`, and — for layouts whose
+ *  key does not print the Latin letter / `/` / `\` — the physical key (`e.code`). */
+function normalizedKey(e: KeyLike): { key: string; shift: boolean } {
+  let key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+  let shift = !!e.shiftKey
+  if (key === '?') {
+    key = '/'
+    shift = true
+  }
+  if (key.length === 1 && !/[a-z0-9/\\]/.test(key) && e.code) {
+    const letter = /^Key([A-Z])$/.exec(e.code)
+    if (letter) key = letter[1].toLowerCase()
+    else if (e.code === 'Slash') key = '/'
+    else if (e.code === 'Backslash') key = '\\'
+  }
+  return { key, shift }
+}
+
+function comboParts(combo: Combo): { key: string; shift: boolean; alt: boolean } {
+  const last = combo[combo.length - 1]
+  const q = last === '?'
+  return { key: q ? '/' : last.toLowerCase(), shift: q || combo.includes('shift'), alt: combo.includes('alt') }
+}
+
+/**
+ * Map a keydown to an action. `mod` combos fire everywhere (fields included — none is an
+ * editing combo); plain keys (↑/↓, Enter, F2) only outside fields, arrows only when no
+ * scrollable pane has focus; ⌥↑/⌥↓ move the cursor from anywhere but a field (where they
+ * are the field's own). Esc in a field leaves it.
+ */
+export function matchShortcut(e: KeyLike, ctx: ShortcutContext): ShortcutAction | null {
+  if (e.isComposing) return null
+  const meta = !!e.metaKey
+  const ctrl = !!e.ctrlKey
+  const mod = ctx.mac ? meta && !ctrl : ctrl && !meta
   const key = e.key
 
-  if (mod && !e.altKey && !e.shiftKey && key.toLowerCase() === 'k') return { action: 'palette', pending: null }
-  if (ctx.typing) return key === 'Escape' && !mod && !e.altKey ? { action: 'blur', pending: null } : NONE
-  if (mod && !e.altKey && !e.shiftKey && key.toLowerCase() === 'b') return { action: 'sidebar', pending: null }
-  if (mod || e.altKey) return NONE
+  if (mod) {
+    if (e.altKey) return null
+    const k = normalizedKey(e)
+    for (const b of BINDINGS) {
+      if (b.app) continue
+      const c = comboParts(b.combo)
+      if (c.key === k.key && c.shift === k.shift && !c.alt) return b.action
+    }
+    return null
+  }
+  if (meta || ctrl) return null
 
-  if (ctx.pending === 'g') return { action: G_CHORDS[key] ?? null, pending: null }
-  if (key === 'g') return { action: null, pending: 'g' }
+  if (ctx.typing) return key === 'Escape' && !e.altKey && !e.shiftKey ? 'blur' : null
 
   if (key === 'ArrowDown' || key === 'ArrowUp') {
-    if (!ctx.arrowsFree) return NONE
-    return { action: key === 'ArrowDown' ? 'next' : 'prev', pending: null }
+    if (e.shiftKey) return null
+    if (!e.altKey && !ctx.arrowsFree) return null
+    return key === 'ArrowDown' ? 'next' : 'prev'
   }
-  return { action: PLAIN[key] ?? null, pending: null }
+  if (e.altKey || e.shiftKey) return null
+  if (key === 'Enter') return 'openAndReply'
+  if (key === 'Escape') return 'back'
+  if (key === 'F2') return 'rename'
+  return null
 }
 
 /** Is this element a text-entry control (where single-key shortcuts must not fire)? */
@@ -144,34 +190,33 @@ export function isPlainEscape(e: KeyLike): boolean {
 }
 
 export interface ShortcutHelp {
-  keys: string[][]
+  /** The keys (alternatives); or `action`: its combos for the environment. */
+  keys?: Combo[]
+  action?: ShortcutAction
   label: string
 }
 
-/** What the `?` dialog shows. `mod` is rendered as ⌘ on macOS, Ctrl elsewhere. */
+/** What the ⌘? dialog shows, by area. */
 export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
   {
     title: 'Sessions',
     items: [
-      { keys: [['j'], ['↓']], label: 'Next session' },
-      { keys: [['k'], ['↑']], label: 'Previous session' },
-      { keys: [['g', 'g'], ['G']], label: 'First / last session' },
+      { keys: [['↓'], ['alt', '↓']], label: 'Next session (⌥ also from the chat)' },
+      { keys: [['↑'], ['alt', '↑']], label: 'Previous session' },
       { keys: [['Enter']], label: 'Open and focus the composer' },
-      { keys: [['o']], label: 'Open' },
-      { keys: [['/']], label: 'Search (↑ ↓ Enter work in the field)' },
-      { keys: [['c'], ['n']], label: 'New session (mod+Enter starts it)' },
-      { keys: [['mod', 'K']], label: 'Command palette: jump to a session, run an action' },
+      { action: 'search', label: 'Search (↑ ↓ Enter work in the field; again: find in page)' },
+      { action: 'new', label: 'New session (mod+Enter starts it)' },
+      { action: 'palette', label: 'Command palette: jump to a session, run an action' },
     ],
   },
   {
     title: 'Session',
     items: [
-      { keys: [['r']], label: 'Reply (focus the composer)' },
-      { keys: [['e'], ['F2']], label: 'Rename (the open session, else the cursor row)' },
-      { keys: [['g', 'c']], label: 'Chat view' },
-      { keys: [['g', 't']], label: 'Terminal view' },
-      { keys: [['Enter']], label: 'Send (in the composer; also mod+Enter)' },
-      { keys: [['Shift', 'Enter']], label: 'New line' },
+      { action: 'rename', label: 'Rename (the open session, else the cursor row)' },
+      { keys: [['F2']], label: 'Rename (outside a field)' },
+      { action: 'mode', label: 'Switch Chat / Terminal' },
+      { keys: [['Enter'], ['mod', 'Enter']], label: 'Send (in the composer)' },
+      { keys: [['shift', 'Enter']], label: 'New line' },
       { keys: [['Esc']], label: 'Cancel a pending send (back into the composer)' },
       { keys: [['Esc']], label: 'Leave the field / close the session pane' },
     ],
@@ -179,12 +224,62 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
   {
     title: 'Layout',
     items: [
-      { keys: [['['], ['mod', 'B']], label: 'Toggle the sidebar' },
-      { keys: [['b']], label: 'Switch List / Board (sessions grouped by work)' },
-      { keys: [['g', 'n']], label: 'Notes explorer (Esc back to the sessions)' },
-      { keys: [['i']], label: 'Toggle the details panel (brief: summary, todos, resources)' },
-      { keys: [['g', 'r']], label: 'Refresh now' },
-      { keys: [['?']], label: 'This help' },
+      { action: 'view', label: 'Switch List / Board (sessions grouped by work)' },
+      { action: 'sidebar', label: 'Toggle the sidebar' },
+      { action: 'inspector', label: 'Toggle the details panel (brief: summary, todos, resources)' },
+      { action: 'notes', label: 'Notes explorer (Esc back to the sessions)' },
+      { action: 'help', label: 'This help' },
     ],
   },
 ]
+
+/** The keys a help row shows in this environment. */
+export function helpKeys(item: ShortcutHelp, env: ShortcutEnv): Combo[] {
+  return item.action ? combosFor(item.action, env) : (item.keys ?? [])
+}
+
+const MAC_GLYPH: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥' }
+const PC_GLYPH: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt' }
+
+/** One key of a combo as shown: ⌘ ⇧ ⌥ on macOS, Ctrl / Shift / Alt elsewhere. */
+export function keyLabel(token: string, mac: boolean): string {
+  return (mac ? MAC_GLYPH : PC_GLYPH)[token] ?? token
+}
+
+/** A combo as one string: `⌘⇧O` (macOS), `Ctrl+Shift+O`. */
+export function comboLabel(combo: Combo, mac: boolean): string {
+  return combo.map((t) => keyLabel(t, mac)).join(mac ? '' : '+')
+}
+
+/** The hint for an action here (`⌘N` in Fleet.app, `⌘⇧O` in a browser), or '' if it has none. */
+export function shortcutHint(action: ShortcutAction, env: ShortcutEnv = shortcutEnv()): string {
+  const c = combosFor(action, env)[0]
+  return c ? comboLabel(c, env.mac) : ''
+}
+
+/** `title` text with the hint: `New session (⌘⇧O)`. */
+export const withHint = (label: string, action: ShortcutAction) => {
+  const h = shortcutHint(action)
+  return h ? `${label} (${h})` : label
+}
+
+/** The hint as an `aria-keyshortcuts` value (`Meta+Shift+O`, `Control+F`). */
+export function ariaShortcut(action: ShortcutAction, env: ShortcutEnv = shortcutEnv()): string {
+  const c = combosFor(action, env)[0]
+  if (!c) return ''
+  const names: Record<string, string> = { mod: env.mac ? 'Meta' : 'Control', shift: 'Shift', alt: 'Alt' }
+  return c.map((t) => names[t] ?? t).join('+')
+}
+
+export function isDesktopApp(doc: { documentElement?: { dataset?: Record<string, string | undefined> } | null } | undefined = globalThis.document): boolean {
+  return doc?.documentElement?.dataset?.shell === 'desktop'
+}
+
+export function shortcutEnv(): ShortcutEnv {
+  return { mac: isMacPlatform(), app: isDesktopApp() }
+}
+
+/** Fleet.app's native menu → the page: `window.dispatchEvent(new CustomEvent(…, { detail: action }))`. */
+export const APP_COMMAND_EVENT = 'fleet:command'
+/** Actions the app's menu may ask for. */
+export const APP_COMMANDS: readonly ShortcutAction[] = ['new']

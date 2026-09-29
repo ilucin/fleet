@@ -19,7 +19,7 @@ import type { GroupsState } from '@/hooks/useGroups'
 import { ALL_HOSTS, type SessionListState } from '@/hooks/useSessionList'
 import type { BoardColumn, ViewMode } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
-import { sessionKey } from '@/lib/shortcuts'
+import { ariaShortcut, sessionKey, shortcutHint, withHint } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
 const chip = cn(
@@ -117,7 +117,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
             spellCheck={false}
             placeholder="Search name, title, cwd…"
             aria-label="Search sessions"
-            aria-keyshortcuts="/"
+            aria-keyshortcuts={ariaShortcut('search')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onSearchKeyDown}
@@ -133,7 +133,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
               <XIcon className="size-4" />
             </button>
           ) : (
-            <Kbd className="absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>
+            <Kbd className="absolute top-1/2 right-2 -translate-y-1/2">{shortcutHint('search')}</Kbd>
           )}
         </div>
 
@@ -172,7 +172,7 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
               <Settings2Icon />
             </a>
           </Button>
-          <Button size="icon" aria-label="New session" title="New session (c)" onClick={onNew} className="shrink-0 rounded-full">
+          <Button size="icon" aria-label="New session" title={withHint('New session', 'new')} onClick={onNew} className="shrink-0 rounded-full">
             <PlusIcon />
           </Button>
         </div>

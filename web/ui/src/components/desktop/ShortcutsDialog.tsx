@@ -2,17 +2,21 @@ import { Fragment } from 'react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
-import { SHORTCUT_HELP } from '@/lib/shortcuts'
+import { comboLabel, helpKeys, keyLabel, SHORTCUT_HELP, shortcutEnv } from '@/lib/shortcuts'
 
-/** `?`: every desktop shortcut, from the same table the key handler documents. */
-export function ShortcutsDialog({ open, onOpenChange, modKey }: { open: boolean; onOpenChange: (o: boolean) => void; modKey: string }) {
-  const label = (k: string) => (k === 'mod' ? modKey : k)
+/** ⌘? / ⌘/: every desktop shortcut, from the same table the key handler uses — the combos of
+ *  this environment (Fleet.app's ⌘N only in the app; ⌘ ⇧ ⌥ on macOS, Ctrl / Shift / Alt elsewhere). */
+export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const env = shortcutEnv()
+  const mod = keyLabel('mod', env.mac)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>Single keys work whenever you are not typing in a field; Esc leaves a field.</DialogDescription>
+          <DialogDescription>
+            {mod} shortcuts work everywhere, the composer and search included; ↑ ↓ Enter work outside a field; Esc leaves one.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
           {SHORTCUT_HELP.map((section) => (
@@ -22,20 +26,20 @@ export function ShortcutsDialog({ open, onOpenChange, modKey }: { open: boolean;
                 {section.items.map((item) => (
                   <Fragment key={item.label}>
                     <dt className="flex items-center gap-1 whitespace-nowrap">
-                      {item.keys.map((combo, i) => (
+                      {helpKeys(item, env).map((combo, i) => (
                         <Fragment key={i}>
                           {i > 0 ? <span className="text-[0.6875rem] text-dimmer">or</span> : null}
-                          <KbdGroup>
+                          <KbdGroup aria-label={comboLabel(combo, env.mac)}>
                             {combo.map((k, j) => (
                               <Kbd key={j} className="border border-border">
-                                {label(k)}
+                                {keyLabel(k, env.mac)}
                               </Kbd>
                             ))}
                           </KbdGroup>
                         </Fragment>
                       ))}
                     </dt>
-                    <dd className="text-sm text-muted-foreground">{item.label.replace('mod+', `${modKey}+`)}</dd>
+                    <dd className="text-sm text-muted-foreground">{item.label.replace('mod+', `${mod}+`)}</dd>
                   </Fragment>
                 ))}
               </dl>

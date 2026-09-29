@@ -15,7 +15,7 @@ import { useNotesHosts } from '@/hooks/useNotes'
 import { ALL_HOSTS, type SessionListState } from '@/hooks/useSessionList'
 import type { ViewMode } from '@/lib/groups'
 import { STATUS_FILTERS, allSessions, type StatusFilterId } from '@/lib/sessions'
-import { sessionKey } from '@/lib/shortcuts'
+import { ariaShortcut, sessionKey, shortcutHint, withHint } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
 const chip = cn(
@@ -28,7 +28,6 @@ export interface SidebarProps {
   now: number
   cursorKey: string | null
   selectedKey: string | null
-  modKey: string
   searchRef: Ref<HTMLInputElement>
   /** ↑ / ↓ / Enter inside the search field drive the list cursor. */
   onSearchNav: (action: 'next' | 'prev' | 'open') => void
@@ -42,7 +41,7 @@ export interface SidebarProps {
 }
 
 /** Desktop left column: header + summary, search, status/host filters, the session list. */
-export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, onSearchNav, onNew, onCollapse, onPalette, onHelp, viewMode, onViewMode }: SidebarProps) {
+export function Sidebar({ list, now, cursorKey, selectedKey, searchRef, onSearchNav, onNew, onCollapse, onPalette, onHelp, viewMode, onViewMode }: SidebarProps) {
   const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view, hostCounts, summary, unreachable, note } = list
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -99,10 +98,10 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
           >
             {note.text}
           </span>
-          <Button size="icon" aria-label="New session" title="New session (c)" onClick={onNew} className="shrink-0 rounded-full">
+          <Button size="icon" aria-label="New session" title={withHint('New session', 'new')} onClick={onNew} className="shrink-0 rounded-full">
             <PlusIcon />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Collapse sidebar" title="Collapse sidebar ([)" onClick={onCollapse} className="shrink-0">
+          <Button variant="ghost" size="icon" aria-label="Collapse sidebar" title={withHint('Collapse sidebar', 'sidebar')} onClick={onCollapse} className="shrink-0">
             <PanelLeftCloseIcon />
           </Button>
         </div>
@@ -119,7 +118,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
             spellCheck={false}
             placeholder="Search name, title, cwd…"
             aria-label="Search sessions"
-            aria-keyshortcuts="/"
+            aria-keyshortcuts={ariaShortcut('search')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onSearchKeyDown}
@@ -135,7 +134,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
               <XIcon className="size-4" />
             </button>
           ) : (
-            <Kbd className="absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>
+            <Kbd className="absolute top-1/2 right-2 -translate-y-1/2">{shortcutHint('search')}</Kbd>
           )}
         </div>
           {viewMode && onViewMode ? <ViewToggle value={viewMode} onChange={onViewMode} labels={false} className="p-px" /> : null}
@@ -214,11 +213,11 @@ export function Sidebar({ list, now, cursorKey, selectedKey, modKey, searchRef, 
       <div className="flex shrink-0 items-center gap-1 border-t px-2 py-1.5 text-xs text-dimmer">
         <Button variant="ghost" size="sm" onClick={onPalette} className="text-dimmer hover:text-foreground">
           <CommandIcon /> Jump
-          <Kbd className="ml-1">{modKey}K</Kbd>
+          <Kbd className="ml-1">{shortcutHint('palette')}</Kbd>
         </Button>
         <Button variant="ghost" size="sm" onClick={onHelp} className="ml-auto text-dimmer hover:text-foreground">
           <KeyboardIcon /> Shortcuts
-          <Kbd className="ml-1">?</Kbd>
+          <Kbd className="ml-1">{shortcutHint('help')}</Kbd>
         </Button>
         <NotesLink size="icon-sm" />
         <Button asChild variant="ghost" size="icon-sm" className="text-dimmer hover:text-foreground">
@@ -247,13 +246,13 @@ export function SidebarRail({
 }) {
   return (
     <div data-tauri-drag-region className="titlebar-rail flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r py-3">
-      <Button variant="ghost" size="icon" aria-label="Expand sidebar" title="Expand sidebar ([)" onClick={onExpand}>
+      <Button variant="ghost" size="icon" aria-label="Expand sidebar" title={withHint('Expand sidebar', 'sidebar')} onClick={onExpand}>
         <PanelLeftOpenIcon />
       </Button>
-      <Button size="icon" aria-label="New session" title="New session (c)" onClick={onNew} className="rounded-full">
+      <Button size="icon" aria-label="New session" title={withHint('New session', 'new')} onClick={onNew} className="rounded-full">
         <PlusIcon />
       </Button>
-      <Button variant="ghost" size="icon" aria-label="Jump to a session" title="Jump to a session (⌘K)" onClick={onPalette}>
+      <Button variant="ghost" size="icon" aria-label="Jump to a session" title={withHint('Jump to a session', 'palette')} onClick={onPalette}>
         <SearchIcon />
       </Button>
       {waiting > 0 ? (
@@ -266,7 +265,7 @@ export function SidebarRail({
           {waiting}
         </span>
       ) : null}
-      <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={onHelp} className="mt-auto">
+      <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" title={withHint('Keyboard shortcuts', 'help')} onClick={onHelp} className="mt-auto">
         <KeyboardIcon />
       </Button>
       <NotesLink />
@@ -285,7 +284,7 @@ export function NotesLink({ className, size = 'icon' }: { className?: string; si
   if (!hosts.length) return null
   return (
     <Button asChild variant="ghost" size={size} className={cn('text-dimmer hover:text-foreground', className)}>
-      <a href="#/notes" aria-label="Notes" title="Notes (g n)">
+      <a href="#/notes" aria-label="Notes" title={withHint('Notes', 'notes')}>
         <NotebookTextIcon />
       </a>
     </Button>

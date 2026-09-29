@@ -64,6 +64,7 @@ within 30 s — shows "Fleet server is not running" with the error, the log tail
 
 | | |
 | --- | --- |
+| ⌘N | File → New Session: the web UI's New session dialog (the menu dispatches a `fleet:command` DOM event; browsers keep ⌘N, so in a browser tab it is ⌘⇧O) — the other shortcuts are the web UI's own ([web/ui/README.md](../web/ui/README.md#shortcuts)) |
 | ⌘R | reload (back to the start page when the server is gone) |
 | ⌘⇧R | reconnect: the start page again (re-checks, restarts a server the app owns) |
 | ⌘[ / ⌘] | back / forward (the app's hash routes) |
@@ -78,7 +79,8 @@ within 30 s — shows "Fleet server is not running" with the error, the log tail
 | single instance | opening the app again focuses the running one |
 
 The server's page gets no app commands: only the bundled start page may call the app's two
-commands (`connect`, `open_log`). The web app has no notifications today, so the app asks for no
+commands (`connect`, `open_log`); the other way, a menu item only evaluates a fixed
+`window.dispatchEvent(new CustomEvent('fleet:command', …))` in the page (`shell::command`). The web app has no notifications today, so the app asks for no
 notification permission.
 
 ### Window chrome and the one IPC grant

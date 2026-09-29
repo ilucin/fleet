@@ -28,6 +28,16 @@ d.style.setProperty('--titlebar-height','{TITLEBAR_HEIGHT_PX}px');}})();"
     )
 }
 
+/// The script a native menu item runs to ask the web UI for an action (`fleet:command`, the
+/// UI's `APP_COMMAND_EVENT`); the page decides whether it applies (not over a dialog, …).
+pub fn command(action: &'static str) -> String {
+    assert!(
+        action.bytes().all(|b| b.is_ascii_alphanumeric()),
+        "action {action:?}"
+    );
+    format!("window.dispatchEvent(new CustomEvent('fleet:command',{{detail:'{action}'}}));")
+}
+
 /// The `remote.urls` pattern granting window dragging to the server's pages:
 /// the server's origin, any path. `None` for an opaque origin.
 pub fn drag_pattern(server: &Url) -> Option<String> {
@@ -56,6 +66,20 @@ mod tests {
         let s = script(true);
         assert!(s.contains("'--titlebar-inset-left','0px'"));
         assert!(s.contains("fullscreen='true'"));
+    }
+
+    #[test]
+    fn command_dispatches_a_dom_event() {
+        assert_eq!(
+            command("new"),
+            "window.dispatchEvent(new CustomEvent('fleet:command',{detail:'new'}));"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "action")]
+    fn command_rejects_script_text() {
+        command("new');alert(1);('");
     }
 
     #[test]

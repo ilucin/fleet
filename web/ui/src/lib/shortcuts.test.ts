@@ -1,69 +1,166 @@
 import { describe, expect, it, test } from 'vitest'
 
-import { isMacPlatform, isPlainEscape, isSubmitChord, isTypingTarget, matchShortcut, sessionKey, stepCursor, type ShortcutContext } from '@/lib/shortcuts'
+import {
+  ariaShortcut,
+  BINDINGS,
+  comboLabel,
+  combosFor,
+  helpKeys,
+  isDesktopApp,
+  isMacPlatform,
+  isPlainEscape,
+  isSubmitChord,
+  isTypingTarget,
+  keyLabel,
+  matchShortcut,
+  sessionKey,
+  SHORTCUT_HELP,
+  shortcutHint,
+  stepCursor,
+  type KeyLike,
+  type ShortcutContext,
+  type ShortcutEnv,
+} from '@/lib/shortcuts'
 
-const idle: ShortcutContext = { typing: false, arrowsFree: true, pending: null }
-const act = (key: string, ctx: Partial<ShortcutContext> = {}, mods: Record<string, boolean> = {}) =>
-  matchShortcut({ key, ...mods }, { ...idle, ...ctx })
+const idle: ShortcutContext = { mac: true, typing: false, arrowsFree: true }
+const act = (key: string, ctx: Partial<ShortcutContext> = {}, mods: Partial<KeyLike> = {}) => matchShortcut({ key, ...mods }, { ...idle, ...ctx })
+const cmd = (key: string, mods: Partial<KeyLike> = {}, ctx: Partial<ShortcutContext> = {}) => act(key, ctx, { metaKey: true, ...mods })
+const browser: ShortcutEnv = { mac: true, app: false }
+const app: ShortcutEnv = { mac: true, app: true }
+const pc: ShortcutEnv = { mac: false, app: false }
 
 describe('matchShortcut', () => {
-  it('maps single keys', () => {
-    expect(act('j').action).toBe('next')
-    expect(act('k').action).toBe('prev')
-    expect(act('ArrowDown').action).toBe('next')
-    expect(act('ArrowUp').action).toBe('prev')
-    expect(act('Enter').action).toBe('openAndReply')
-    expect(act('o').action).toBe('open')
-    expect(act('/').action).toBe('search')
-    expect(act('c').action).toBe('new')
-    expect(act('n').action).toBe('new')
-    expect(act('Escape').action).toBe('back')
-    expect(act('e').action).toBe('rename')
-    expect(act('F2').action).toBe('rename')
-    expect(act('?', {}, { shiftKey: true }).action).toBe('help')
-    expect(act('G', {}, { shiftKey: true }).action).toBe('last')
-    expect(act('[').action).toBe('sidebar')
-    expect(act('i').action).toBe('inspector')
-    expect(act('p').action).toBeNull()
-    expect(act('b').action).toBe('view')
-    expect(act('r').action).toBe('reply')
-    expect(act('x').action).toBeNull()
+  it('maps ⌘ combos', () => {
+    expect(cmd('k')).toBe('palette')
+    expect(cmd('/')).toBe('help')
+    expect(cmd('?', { shiftKey: true })).toBe('help')
+    expect(cmd('/', { shiftKey: true })).toBe('help')
+    expect(cmd('O', { shiftKey: true })).toBe('new')
+    expect(cmd('o', { shiftKey: true })).toBe('new')
+    expect(cmd('f')).toBe('search')
+    expect(cmd('b')).toBe('view')
+    expect(cmd('\\')).toBe('sidebar')
+    expect(cmd('i')).toBe('inspector')
+    expect(cmd('j')).toBe('mode')
+    expect(cmd('e')).toBe('rename')
+    expect(cmd('E', { shiftKey: true })).toBe('notes')
   })
 
-  it('handles g chords', () => {
-    const first = act('g')
-    expect(first).toEqual({ action: null, pending: 'g' })
-    expect(act('t', { pending: 'g' })).toEqual({ action: 'term', pending: null })
-    expect(act('c', { pending: 'g' })).toEqual({ action: 'chat', pending: null })
-    expect(act('g', { pending: 'g' })).toEqual({ action: 'first', pending: null })
-    expect(act('r', { pending: 'g' })).toEqual({ action: 'refresh', pending: null })
-    // An unknown second key cancels the chord instead of firing its own shortcut.
-    expect(act('j', { pending: 'g' })).toEqual({ action: null, pending: null })
+  it('uses ⌘ on macOS and Ctrl elsewhere, never both', () => {
+    expect(act('k', { mac: false }, { ctrlKey: true })).toBe('palette')
+    expect(act('k', { mac: false }, { metaKey: true })).toBeNull()
+    // macOS Ctrl keeps its Emacs-style field bindings (Ctrl+K kills to the end of the line).
+    expect(act('k', { mac: true }, { ctrlKey: true })).toBeNull()
+    expect(act('k', { typing: true }, { ctrlKey: true })).toBeNull()
+    expect(cmd('k', { ctrlKey: true })).toBeNull()
+    expect(act('b', { mac: false }, { ctrlKey: true })).toBe('view')
   })
 
-  it('never steals keys while typing, except the palette and Esc', () => {
-    for (const k of ['j', 'k', '/', 'c', 'Enter', 'g', '?', 'ArrowDown']) expect(act(k, { typing: true }).action).toBeNull()
-    expect(act('Escape', { typing: true }).action).toBe('blur')
-    expect(act('k', { typing: true }, { metaKey: true }).action).toBe('palette')
-    expect(act('K', { typing: true }, { ctrlKey: true }).action).toBe('palette')
-    expect(act('b', { typing: true }, { metaKey: true }).action).toBeNull()
+  it('needs the exact modifiers', () => {
+    expect(cmd('k', { shiftKey: true })).toBeNull()
+    expect(cmd('k', { altKey: true })).toBeNull()
+    expect(cmd('o')).toBeNull() // ⌘O: the browser's open file
+    expect(cmd('e', { altKey: true })).toBeNull()
   })
 
-  it('leaves other modifier combos to the browser', () => {
-    expect(act('j', {}, { metaKey: true }).action).toBeNull()
-    expect(act('c', {}, { ctrlKey: true }).action).toBeNull() // copy
-    expect(act('k', {}, { altKey: true }).action).toBeNull()
-    expect(act('b', {}, { metaKey: true }).action).toBe('sidebar')
-    expect(act('k', {}, { metaKey: true, shiftKey: true }).action).toBeNull()
+  it('never matches browser-reserved or Fleet.app menu combos', () => {
+    // ⌘N is Fleet.app's native menu item (it dispatches fleet:command), never the page's keydown.
+    for (const k of ['n', 't', 'w', 'q', 'l', 'r', '1', '9', '[', ']']) expect(cmd(k)).toBeNull()
+    expect(cmd('N', { shiftKey: true })).toBeNull()
+    expect(cmd('T', { shiftKey: true })).toBeNull()
+    expect(cmd('R', { shiftKey: true })).toBeNull()
   })
 
-  it('leaves arrows alone when focus is in a scrollable pane', () => {
-    expect(act('ArrowDown', { arrowsFree: false }).action).toBeNull()
-    expect(act('j', { arrowsFree: false }).action).toBe('next')
+  it('leaves editing combos to the field', () => {
+    for (const k of ['a', 'c', 'v', 'x', 'z', 'y', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Backspace', 'Enter'])
+      expect(cmd(k, {}, { typing: true })).toBeNull()
+    expect(cmd('Z', { shiftKey: true }, { typing: true })).toBeNull()
+    for (const k of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace']) expect(act(k, { typing: true }, { altKey: true })).toBeNull()
+    expect(act('n', { typing: true }, { altKey: true })).toBeNull() // ⌥N: the ˜ dead key
+  })
+
+  it('fires action combos while typing', () => {
+    for (const [k, a] of [['k', 'palette'], ['/', 'help'], ['b', 'view'], ['f', 'search'], ['j', 'mode']] as const)
+      expect(cmd(k, {}, { typing: true })).toBe(a)
+    expect(cmd('O', { shiftKey: true }, { typing: true })).toBe('new')
+  })
+
+  it('maps plain navigation keys outside fields only', () => {
+    expect(act('ArrowDown')).toBe('next')
+    expect(act('ArrowUp')).toBe('prev')
+    expect(act('Enter')).toBe('openAndReply')
+    expect(act('Escape')).toBe('back')
+    expect(act('F2')).toBe('rename')
+    for (const k of ['ArrowDown', 'Enter', 'F2']) expect(act(k, { typing: true })).toBeNull()
+    expect(act('Escape', { typing: true })).toBe('blur')
+    expect(act('ArrowDown', {}, { shiftKey: true })).toBeNull()
+  })
+
+  it('no single-letter bindings', () => {
+    for (const k of 'abcdefghijklmnopqrstuvwxyz/?[G') expect(act(k)).toBeNull()
+  })
+
+  it('arrows move the cursor only outside a scrollable pane; ⌥ + arrows from anywhere but a field', () => {
+    expect(act('ArrowDown', { arrowsFree: false })).toBeNull()
+    expect(act('ArrowDown', { arrowsFree: false }, { altKey: true })).toBe('next')
+    expect(act('ArrowUp', { arrowsFree: false }, { altKey: true })).toBe('prev')
+  })
+
+  it('falls back to the physical key on other layouts', () => {
+    expect(cmd('л', { code: 'KeyK' })).toBe('palette') // Cyrillic
+    expect(cmd('ž', { code: 'Backslash' })).toBe('sidebar') // Croatian
+    expect(cmd('-', { code: 'Slash' })).toBe('help') // German: the Slash position types '-'
+    expect(cmd('k', { code: 'KeyL' })).toBe('palette') // Dvorak and co. follow the printed letter
   })
 
   it('ignores IME composition', () => {
-    expect(act('j', {}, { isComposing: true }).action).toBeNull()
+    expect(cmd('k', { isComposing: true })).toBeNull()
+    expect(act('Enter', {}, { isComposing: true })).toBeNull()
+  })
+})
+
+describe('hints', () => {
+  it('shows the environment\'s combo', () => {
+    expect(shortcutHint('new', browser)).toBe('⌘⇧O')
+    expect(shortcutHint('new', app)).toBe('⌘N')
+    expect(shortcutHint('new', pc)).toBe('Ctrl+Shift+O')
+    expect(shortcutHint('help', browser)).toBe('⌘?')
+    expect(shortcutHint('palette', pc)).toBe('Ctrl+K')
+    expect(shortcutHint('sidebar', browser)).toBe('⌘\\')
+    expect(shortcutHint('back', browser)).toBe('')
+  })
+  it('lists the app-only combo only in the app', () => {
+    expect(combosFor('new', browser)).toEqual([['mod', 'shift', 'O']])
+    expect(combosFor('new', app)).toEqual([
+      ['mod', 'N'],
+      ['mod', 'shift', 'O'],
+    ])
+    expect(combosFor('help', browser)).toHaveLength(2)
+  })
+  it('labels keys per platform', () => {
+    expect(comboLabel(['mod', 'alt', '↓'], true)).toBe('⌘⌥↓')
+    expect(comboLabel(['mod', 'alt', '↓'], false)).toBe('Ctrl+Alt+↓')
+    expect(keyLabel('shift', true)).toBe('⇧')
+    expect(keyLabel('shift', false)).toBe('Shift')
+  })
+  it('aria-keyshortcuts', () => {
+    expect(ariaShortcut('new', browser)).toBe('Meta+Shift+O')
+    expect(ariaShortcut('search', pc)).toBe('Control+F')
+  })
+  it('every help row has keys, and every action combo is reachable', () => {
+    for (const env of [browser, app, pc])
+      for (const sec of SHORTCUT_HELP) for (const item of sec.items) expect(helpKeys(item, env).length).toBeGreaterThan(0)
+    // Each non-app binding matches its own combo.
+    for (const b of BINDINGS.filter((x) => !x.app)) {
+      const key = b.combo[b.combo.length - 1]
+      const shiftKey = b.combo.includes('shift') || key === '?'
+      expect(matchShortcut({ key: shiftKey && key.length === 1 ? key.toUpperCase() : key, metaKey: true, shiftKey }, idle)).toBe(b.action)
+    }
+  })
+  it('isDesktopApp reads data-shell', () => {
+    expect(isDesktopApp({ documentElement: { dataset: { shell: 'desktop' } } })).toBe(true)
+    expect(isDesktopApp({ documentElement: { dataset: {} } })).toBe(false)
+    expect(isDesktopApp(undefined)).toBe(false)
   })
 })
 

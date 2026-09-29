@@ -43,10 +43,11 @@ src/
   lib/models.ts       New session model picker: DEFAULT_MODELS (mirrors lib/config.mjs), normalizeModels(), pickModel()
   lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
                       fallbackGroups()/repoOf() (client-side group-by-repo, worktree-aware),
-                      statusSummary(), boardOrder() (j/k order), groupsStatusText(), regroupToast()
+                      statusSummary(), boardOrder() (↑/↓ order), groupsStatusText(), regroupToast()
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
-  lib/shortcuts.ts    desktop keyboard map: matchShortcut() (key + typing/chord context → action),
-                      isTypingTarget(), stepCursor(), sessionKey(), SHORTCUT_HELP (the `?` dialog)
+  lib/shortcuts.ts    desktop keyboard map: BINDINGS (⌘/Ctrl combos), matchShortcut() (key + platform /
+                      typing context → action), shortcutHint() (per browser / Fleet.app), isTypingTarget(),
+                      stepCursor(), sessionKey(), SHORTCUT_HELP (the ⌘? dialog)
   lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
   lib/paths.ts        chat file paths: isPathLike(), pathTokens(), splitPaths(), pathCandidates() (per message, cached),
                       parsePathRef() (`:line[:col]` / `#L12`), POSIX helpers normalizePath() / dirname() / resolveFrom()
@@ -102,7 +103,7 @@ src/
   components/session/ detail screen parts: ChatView, TermView, Composer, OutboxBubbles (pending / sending / sent /
                       failed user bubbles; the terminal view's strip), FilePreview, DetailsPanel (the desktop
                       details column) / DetailsDrawer (mobile ⋯), BriefSection (its top), LatestButton
-  components/desktop/ Sidebar (+ SidebarRail when collapsed, NotesLink), CommandPalette (⌘K), ShortcutsDialog (?)
+  components/desktop/ Sidebar (+ SidebarRail when collapsed, NotesLink), CommandPalette (⌘K), ShortcutsDialog (⌘?)
   components/notes/   NoteTree, NoteResults / RecentNotes, NoteView (frontmatter, body, actions), SendNoteDialog
   screens/            ListScreen (`#/`), SessionScreen (`#/s/:host/:id`; `layout="pane"` on desktop),
                       SettingsScreen (`#/settings`; `layout="pane"` on desktop),
@@ -153,7 +154,7 @@ src/
   The List | Board toggle stays next to the search field.
 - **Inline rename** (`EditableTitle`): rows, board cards and the session header show the one
   title; the tmux session name is not on rows any more (it follows the title — details panel only).
-  Open the editor with the pencil on row hover (desktop), `e` / F2 (the open session's header,
+  Open the editor with the pencil on row hover (desktop), ⌘E / F2 (the open session's header,
   else the cursor row/card), ⌘K → Rename session…, a click on the header title, a long press on
   a row (touch), or ⋯ → Rename…. Enter / ✓ saves, Esc / ✕ / clicking away cancels. Saving is
   optimistic (spinner) → `POST …/rename`; a 409 (session waiting on a prompt) or an error rolls
@@ -279,7 +280,7 @@ src/
   markdown notes of any host with `web.notes.root` (hosts come from `/api/fleet` entries carrying
   `notes`; the last one used is `fleet.notesHost`). Reached from the notes button in the mobile
   list header, the sidebar footer / rail and the board header, ⌘K → Notes… (the palette also
-  lists the first notes host's 300 most recent notes) and `g n`. Folder tree (expanded folders
+  lists the first notes host's 300 most recent notes) and ⌘⇧E. Folder tree (expanded folders
   per host in `fleet.notesOpen.<host>`, the open note's folders expand), search (180 ms debounce,
   previous request aborted; words AND-ed, `"phrases"`, `#tag`; Enter opens the first hit, Esc
   clears) with snippets and the matches marked, "Recently changed" when there is no query. A
@@ -291,7 +292,7 @@ src/
   resolve against the tree and open inside the explorer (a missing target is dashed text);
   words of the active search are marked and a note opened from a hit scrolls to the first mark.
   Encrypted blocks show a notice. Desktop: the explorer replaces the sidebar / board — header
-  (← Sessions, name, host picker, search `/`, root, editor link), then tree | results or recent |
+  (← Sessions, name, host picker, search ⌘F, root, editor link), then tree | results or recent |
   note. Mobile: the browse/search screen (recent + tree, or results), a note is its own screen;
   swipe right = back on both.
 - **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;
@@ -304,26 +305,26 @@ src/
 Master–detail on the same hash routes as mobile (`#/` = nothing open, `#/s/<host>/<id>` = that
 session in the pane), so a link opens the same session on either layout.
 
-- **Sidebar** (left): Fleet summary, "updated Xs ago", `+`, search (`/`), compact status + host
+- **Sidebar** (left): Fleet summary, "updated Xs ago", `+`, search (⌘F), compact status + host
   filter chips, the session list (the open row is highlighted, the keyboard cursor has a ring),
   footer buttons for the palette and the shortcuts. Resizable by dragging its edge (280–560px,
   double-click resets, ←/→ on the focused handle; `fleet.sidebarWidth`), collapsible to a rail
-  with `[` / ⌘B (`fleet.sidebar`).
+  with ⌘\ (`fleet.sidebar`).
 - **Pane**: the session screen without the back button; header adds the cwd; chat is a wider
   (max-w-4xl) readable column, the terminal uses the full width; the composer sends on Enter (also
   ⌘/Ctrl+Enter, touch-capable laptops included), Shift+Enter is a newline. Nothing open → an empty
   state with key hints and the sessions that need you.
-- **Board** (`b`, the toggle in the sidebar / board header, or ⌘K): the Kanban replaces the
+- **Board** (⌘B, the toggle in the sidebar / board header, or ⌘K): the Kanban replaces the
   sidebar — full width, one column per group (label, status dots, count, description), cards
   with status, name, host, subtitle, status / `waiting_for`, context meter and age. Clicking a
-  card (or j/k + Enter / o, walking the columns left to right) opens the session as a non-modal
+  card (or ↑/↓ + Enter, walking the columns left to right) opens the session as a non-modal
   flyout over the board's right edge (`#/s/<host>/<id>`, same route as the list): the board keeps
   its width and layout, stays scrollable (the last columns scroll out from under the flyout) and
   clickable — another card switches the flyout. Its left edge resizes it (drag, or focus it and
   ←/→, Shift for bigger steps; double-click resets to 55% of the board; min 420px, max the board
   minus 240px; `fleet.flyoutWidth`). Esc (outside a field) or ✕ closes it. A flyout narrower than
-  54rem lays the Details panel over the chat instead of beside it. `[` does nothing on the board.
-- **Details panel** (right, `i`, the header button or ⌘K; ✕ top-right closes it; `fleet.inspector`,
+  54rem lays the Details panel over the chat instead of beside it. ⌘\ does nothing on the board.
+- **Details panel** (right, ⌘I, the header button or ⌘K; ✕ top-right closes it; `fleet.inspector`,
   open by default from 1440px): the mobile ⋯ drawer's content (`DetailsPanel`) — the brief first
   (summary, todos, resources, continue), then chat/terminal, scrollback, auto-name,
   tmux/backend/pid/id, Close session (click twice).
@@ -334,26 +335,35 @@ session in the pane), so a link opens the same session on either layout.
 
 ### Shortcuts
 
-Single keys never fire while typing in a field (input, textarea, contenteditable); with a dialog
-open only ⌘K works. One `keydown` listener in `DesktopShell` maps keys through `matchShortcut()`.
+Every action is ⌘+key on macOS, Ctrl+key elsewhere (`mod`; on macOS Ctrl stays the fields' own
+Emacs-style editing keys). No action combo is a text-editing one, so they work in the composer and
+the search field too; ⌘A/C/V/X/Z, ⌘ + arrows, ⌥ + arrows, ⌘Enter keep their native meaning there.
+Only navigation is unmodified: ↑/↓ and Enter outside a field, Esc. With a dialog open only ⌘K
+(and ⌘? to close the help) works. One `keydown` listener in `DesktopShell` maps keys through
+`matchShortcut()`; the help dialog, the ⌘K palette hints and the button tooltips come from the same
+`BINDINGS` table, so they show this environment's combo.
+
+Browsers keep some combos for themselves (⌘N/T/W/Q, ⌘⇧N/T cannot be caught; ⌘L, ⌘R, ⌘1–9, ⌘[ ⌘]
+are the address bar, reload, tabs, history — Fleet.app's menu uses ⌘R, ⌘⇧R, ⌘W, ⌘[, ⌘] the same
+way), so the scheme avoids them. New session is the exception: ⌘N in Fleet.app — a native **File →
+New Session** menu item that dispatches a `fleet:command` DOM event into the page — and ⌘⇧O (the
+"new chat" combo of chat apps) in a browser tab and in the app. Everything is also in ⌘K.
 
 | Keys | Action |
 | --- | --- |
-| `j` / `↓`, `k` / `↑` | move the list cursor (arrows only when focus is not in the chat/terminal) |
-| `g g`, `G` | cursor to first / last |
-| `Enter` | open the cursor's session and focus the composer |
-| `o` | open the cursor's session |
-| `r` | focus the composer |
-| `/` | search (in the field: ↑/↓ move, Enter opens, Esc clears then leaves) |
-| `c`, `n` | new session |
-| `g c`, `g t` | chat / terminal view |
+| `↓` / `↑` | move the list cursor (only when focus is not in the chat/terminal) |
+| ⌥`↓` / ⌥`↑` | move the list cursor from the chat/terminal too (not in a field) |
+| `Enter` | open the cursor's session and focus the composer (the open one: focus the composer) |
+| ⌘/Ctrl+`F` | search (in the field: ↑/↓ move, Enter opens, Esc clears then leaves; ⌘F again: the browser's find) |
+| ⌘`N` (Fleet.app), ⌘/Ctrl+⇧`O` | new session |
+| ⌘/Ctrl+`E`, `F2` | rename (the open session, else the cursor row / card) |
+| ⌘/Ctrl+`J` | switch chat / terminal |
 | `Enter`, ⌘/Ctrl+`Enter` · `Shift+Enter` | send · newline (composer) |
 | `Esc` | cancel a pending send (first, while one counts down); leave the field; otherwise close the pane or Settings (`#/`) |
 | ⌘/Ctrl+`Enter` | New session form: start |
-| `[`, ⌘/Ctrl+`B` | toggle the sidebar |
-| `b` | switch List / Board |
-| `g n` | notes explorer (again, or `Esc`: back to the sessions) |
-| `i` | toggle the details panel (brief + session details) |
-| `g r` | refresh now |
-| ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions (Settings…, Open in VS Code), filters, theme |
-| `?` | shortcuts help |
+| ⌘/Ctrl+`B` | switch List / Board |
+| ⌘/Ctrl+`\` | toggle the sidebar |
+| ⌘/Ctrl+`I` | toggle the details panel (brief + session details) |
+| ⌘/Ctrl+⇧`E` | notes explorer (again, or `Esc`: back to the sessions) |
+| ⌘/Ctrl+`K` | command palette: jump to any session (all hosts, ignores filters), actions (Settings…, Refresh now, Open in VS Code), filters, theme |
+| ⌘/Ctrl+`?`, ⌘/Ctrl+`/` | shortcuts help |

@@ -14,6 +14,7 @@ import { useNotesHosts, useNotesSearch, useNotesTree } from '@/hooks/useNotes'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { ancestorDirs, buildTree, highlightTerms, notesHref, parseNotesLocation, recentNotes } from '@/lib/notes'
+import { shortcutHint } from '@/lib/shortcuts'
 import { storage } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -165,7 +166,7 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
           <XIcon className="size-4" />
         </button>
       ) : pane ? (
-        <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>
+        <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">{shortcutHint('search')}</Kbd>
       ) : null}
     </div>
   )

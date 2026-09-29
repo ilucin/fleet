@@ -179,6 +179,12 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             )?,
             &Submenu::with_items(
                 app,
+                "File",
+                true,
+                &[&item("new-session", "New Session", "CmdOrCtrl+N")?],
+            )?,
+            &Submenu::with_items(
+                app,
                 "Edit",
                 true,
                 &[
@@ -229,6 +235,8 @@ fn on_menu(app: &AppHandle, id: &str) {
         return;
     };
     match id {
+        // Browsers keep ⌘N for themselves, so the page binds it only through this menu.
+        "new-session" => drop(w.eval(shell::command("new"))),
         "back" => drop(w.eval("history.back()")),
         "forward" => drop(w.eval("history.forward()")),
         "reconnect" => drop(w.navigate(start_page())),

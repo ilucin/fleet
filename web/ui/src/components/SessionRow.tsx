@@ -21,14 +21,14 @@ export interface SessionRowProps {
   now: number
   /** Desktop sidebar: this row is the session open in the detail pane. */
   selected?: boolean
-  /** Desktop sidebar: the keyboard cursor (j/k) is on this row. */
+  /** Desktop sidebar: the keyboard cursor (↑/↓) is on this row. */
   cursor?: boolean
 }
 
 /**
  * One session in the list: status, title, host, status label / waiting_for, first prompt,
  * cwd, backend, context, age. The title is editable in place: the pencil on hover
- * (desktop), `e` / F2 on the cursor row, or a long press (touch). Clicking the row opens it.
+ * (desktop), ⌘E / F2 on the cursor row, or a long press (touch). Clicking the row opens it.
  */
 export function SessionRow({ session: s, now, selected, cursor }: SessionRowProps) {
   const meta = statusMeta(s.status)
