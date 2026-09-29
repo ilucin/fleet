@@ -28,6 +28,7 @@ import type {
   StacksResponse,
   StackView,
   UploadResponse,
+  UsageResponse,
 } from './types'
 import type { GroupEdit } from '@/lib/groups'
 
@@ -183,6 +184,9 @@ export const api = {
     request<StackSpawnResponse>(`${hostPath(host)}/stacks/${enc(stackId)}/spawn`, { ...o, method: 'POST', body }),
   syncStacks: (host: string, o: Opts = {}) =>
     request<{ host?: string; changed: string[]; stacks: StackView[] }>(`${hostPath(host)}/stacks/sync`, { ...o, method: 'POST', body: {} }),
+  /** The Claude subscription limits of the account logged in on that host (`refresh` skips its 60s cache). */
+  usage: (host: string, { refresh = false, ...o }: Opts & { refresh?: boolean } = {}) =>
+    request<UsageResponse>(`${hostPath(host)}/usage${refresh ? '?refresh=1' : ''}`, o),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),

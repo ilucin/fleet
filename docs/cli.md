@@ -55,6 +55,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet stack list\|show\|new\|ensure\|spawn\|add\|remove\|edit\|set\|sync\|rm …` | [session stacks](#stacks): sessions that share one context file (the StackBrief) |
 | `fleet stack spawn <target> [prompt] [--name <n>] [--model <id>] [--dir <path>] [--no-wait]` | spawn a **sibling** of `<target>`: a new session in its cwd, in its stack (created around it first when it has none), told where the StackBrief is — see [Stacks](#stacks) |
 | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` | live dashboard + notifications on finished/stuck sessions |
+| `fleet usage [--json] [--refresh]` | the Claude subscription's usage limits on this host's login — current session (5h), weekly all models, weekly per model (e.g. Fable), extra usage — as bars with reset times; the numbers Claude Code's `/usage` shows. Cached 60s (`--refresh` skips it); a failed read serves the last one marked stale and backs off 2 minutes. `--json`: see [architecture](architecture.md#subscription-usage). `-H <host>` reads another machine's login |
 | `fleet skill install [--force]\|show` | install / print the Claude Code skill (`~/.claude/skills/fleet/SKILL.md`; `--force` overwrites a different one) |
 
 `send`, `rename --force`, `name --apply` and `spawn` change a live agent's state — scripts and agents

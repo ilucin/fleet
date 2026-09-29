@@ -17,6 +17,7 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
+  GaugeIcon,
   Settings2Icon,
   SparklesIcon,
   SquareTerminalIcon,
@@ -76,6 +77,7 @@ import { cn } from '@/lib/utils'
 import { NotesScreen } from '@/screens/NotesScreen'
 import { SessionScreen, type PaneApi } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
+import { UsageScreen } from '@/screens/UsageScreen'
 
 const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false : undefined)
 
@@ -93,6 +95,7 @@ export function DesktopShell() {
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
   const [settingsOpen] = useRoute('/settings')
+  const [usageOpen] = useRoute('/usage')
   // `#/notes…`: the notes explorer takes the whole window (no sidebar / board).
   const notesLoc = parseNotesLocation(location)
   const notesOpen = notesLoc !== null
@@ -257,7 +260,7 @@ export function DesktopShell() {
         setNewOpen(true)
         return true
       case 'back':
-        if (selectedKey || settingsOpen || notesOpen) {
+        if (selectedKey || settingsOpen || usageOpen || notesOpen) {
           navigate('/')
           return true
         }
@@ -451,6 +454,13 @@ export function DesktopShell() {
           ? [{ id: 'notes', label: 'Notes…', icon: <NotebookTextIcon />, shortcut: shortcutHint('notes'), keywords: ['notes', 'markdown', 'knowledge', 'wiki', 'search'], run: () => navigate(notesHref()) }]
           : []),
         {
+          id: 'usage',
+          label: 'Usage limits…',
+          icon: <GaugeIcon />,
+          keywords: ['usage', 'limits', 'quota', 'subscription', 'plan', 'weekly', 'session', 'rate limit'],
+          run: () => navigate('/usage'),
+        },
+        {
           id: 'settings',
           label: 'Settings…',
           icon: <Settings2Icon />,
@@ -489,8 +499,8 @@ export function DesktopShell() {
     },
   ]
 
-  // Anything but `/`, `/settings` and `/s/:host/:id` → the list (same as mobile).
-  if (!match && !settingsOpen && !notesOpen && location !== '/') return <Redirect to="/" replace />
+  // Anything but `/`, `/settings`, `/usage` and `/s/:host/:id` → the list (same as mobile).
+  if (!match && !settingsOpen && !usageOpen && !notesOpen && location !== '/') return <Redirect to="/" replace />
 
   const onSearchNav = (a: 'next' | 'prev' | 'open') => {
     if (a === 'open') {
@@ -514,6 +524,8 @@ export function DesktopShell() {
     />
   ) : settingsOpen ? (
     <SettingsScreen layout="pane" />
+  ) : usageOpen ? (
+    <UsageScreen layout="pane" />
   ) : null
 
   return (

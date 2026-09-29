@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use fleet::cli::{
     brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, skill,
-    stack as stack_cmds, tmux as tmux_cmds, web,
+    stack as stack_cmds, tmux as tmux_cmds, usage as usage_cmd, web,
 };
 use fleet::core::config;
 use fleet::core::discovery::Backend;
@@ -251,6 +251,16 @@ enum Commands {
     Stack {
         #[command(subcommand)]
         cmd: StackCmd,
+    },
+
+    /// Claude subscription usage limits: session (5h), weekly, per-model weekly, extra usage
+    Usage {
+        /// Machine-readable output (the web API's shape)
+        #[arg(long)]
+        json: bool,
+        /// Skip the 60s cache (a failed read still backs off for 2 minutes)
+        #[arg(long)]
+        refresh: bool,
     },
 
     /// Hand the current work off to a fresh session in another window
@@ -710,6 +720,7 @@ fn run(cli: Cli) -> Result<i32> {
             }
         }
         Commands::Peek { target, lines } => commands::peek(&target, lines)?,
+        Commands::Usage { json, refresh } => usage_cmd::run(json, refresh)?,
         Commands::Send { target, text } => commands::send(&target, &text)?,
         Commands::Rename {
             target,

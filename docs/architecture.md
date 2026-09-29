@@ -245,13 +245,52 @@ back to a scan of the project dirs when the session's cwd changed):
   counted (the same sum Claude Code's statusline context percentage uses); the reply is counted as
   input on the next turn.
 - **`window`** (number): `200000` or `1000000`, inferred — transcripts don't record it. 1M when the
-  model id ends in `[1m]`, when `used` already exceeds 200k, when `settings.json` pins a `[1m]`
+  model id ends in `[1m]`, when the model is natively 1M in Claude Code without a suffix (every
+  Fable and Mythos, Opus / Sonnet 5.5 and later), when `used` already exceeds 200k, when `settings.json` pins a `[1m]`
   model of that family, when Claude Code's `~/.claude.json` has recorded that exact model id as
   `<id>[1m]`, or when another live session on the same model id is past 200k without a suffix
   (the model is natively 1M). Otherwise 200k — so a 1M session under 200k with none of these
   signals over-reports its percentage.
 - **`pct`** (number): `round(used / window * 100)`; can exceed 100.
 - **`model`** (string \| null): `message.model` of that entry.
+
+### Subscription usage
+
+`fleet usage --json` (and the web's `GET /api/hosts/:host/usage`, which adds `host`) reports the
+Claude subscription limits of the account logged in to Claude Code on that machine, from
+`core::usage`:
+
+```json
+{
+  "account": { "uuid": "…", "email": "…", "organization": "…", "plan": "max", "tier": "default_claude_max_5x", "plan_label": "Max 5x" },
+  "limits": [
+    { "kind": "session", "group": "session", "label": "Current session", "model": null, "percent": 18.0, "severity": "normal", "resets_at": "2026-09-29T22:20:00+00:00", "active": false },
+    { "kind": "weekly_all", "group": "weekly", "label": "Weekly · all models", "model": null, "percent": 38.0, "severity": "normal", "resets_at": "…", "active": true },
+    { "kind": "weekly_scoped", "group": "weekly", "label": "Weekly · Fable", "model": "Fable", "percent": 37.0, "severity": "normal", "resets_at": "…", "active": false }
+  ],
+  "extra_usage": { "enabled": false, "used": 0.0, "limit": null, "currency": "USD", "percent": 0.0 },
+  "fetched_at": "2026-09-29T20:00:00+00:00",
+  "stale": false,
+  "error": null
+}
+```
+
+- **Source**: the plan-usage endpoint Claude Code's `/usage` calls (`GET
+  https://api.anthropic.com/api/oauth/usage`), authenticated with Claude Code's OAuth access
+  token — the macOS keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`.
+  The endpoint is undocumented: its generic `limits` list is used when present, the named windows
+  (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`) otherwise. `curl` makes the
+  request, with the token on stdin (never in argv). The token is never refreshed (that would
+  rewrite Claude Code's credentials): an expired one is an error until Claude Code runs again.
+- **`account`**: from `~/.claude.json` (`oauthAccount`) and the credentials' `subscriptionType` /
+  `rateLimitTier`; `null` when unknown. The web groups hosts by `account.uuid`, so machines on one
+  subscription share one card.
+- **`limits[].active`**: the limit currently binding. `severity` is the endpoint's (open set:
+  `normal`, `warning`, …); `percent` may exceed 100.
+- **Caching**: `~/.claude/fleet-usage.json` holds the last good read and the last failure. A read
+  younger than 60s is served from it; after a failure the last good read comes back with
+  `stale: true` and `error`, and the endpoint isn't asked again for 2 minutes. With no good read
+  at all, the command fails (exit 1) with the reason.
 
 Only the tail is read (256 KiB, widened to 2 MiB then 8 MiB if no usable entry is in it), and the
 result is cached in-process per `(path, size, mtime)`, so the `watch` dashboard re-reads a
@@ -281,6 +320,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/keys` | `{ key }` (Enter, Escape, …) |
 | POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (1–64 chars, one line) → `fleet rename <session_id> <title> --json`; 200 with the report, **409** when held (waiting on a prompt, nothing typed), 400 bad title, 502 CLI failure |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt? }` → new tmux session running claude; `dir` must resolve inside one of the host's `spawnDirs` (else 400); a prompt too long to type (the launch line over ~900 bytes) is written to `~/.claude/fleet-prompts/` and passed as `"$(cat <file>)"`; when Claude never starts (the pane is still just a shell after ~10s) the tmux session is killed and the answer is 502 with the pane's last lines |
+| GET | `/api/hosts/:host/usage[?refresh=1]` | that host's Claude subscription limits: `fleet usage --json` + `host` (see [Subscription usage](#subscription-usage)); 502 with the CLI's reason (no login, endpoint down with nothing cached) |
 | GET | `/api/hosts/:host/spawn-dirs` | that host's stored `spawnDirs` (canonical `{ label, paths }`), whether each of its own paths is a directory there, and what it offers now |
 | PUT | `/api/hosts/:host/spawn-dirs` | `{ spawnDirs, dryRun? }` → validated on that host (its own paths must exist), written with `fleet --local config set spawnDirs`, used at once (no restart); 400 with per-entry `errors`. As powerful as spawn (it widens the spawn allow-list); no auth, like spawn |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` → SIGTERM (then SIGKILL) Claude, then kill its tmux session (or just its window when the session has others) / close its iTerm tab |

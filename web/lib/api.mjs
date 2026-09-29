@@ -72,6 +72,7 @@ const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn)?$/;
 const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/stack\/spawn$/;
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
+const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -89,7 +90,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   transcripts lib/transcript.mjs reader
  *   spawner     lib/spawn.mjs spawner
  *   killer      lib/kill.mjs killer (kill action; absent → 501)
- *   cli         lib/fleet-cli.mjs instance — `rename` (absent → 501)
+ *   cli         lib/fleet-cli.mjs instance — `rename`, `usage` (absent → 501)
  *   autoNamer   lib/autoname.mjs instance (autoname route + health; absent → 501)
  *   spawnNamer  lib/autoname.mjs#createSpawnNamer — a targeted naming pass after an unnamed
  *               spawn with a first prompt (only when web.autoName is enabled; absent → none)
@@ -522,6 +523,12 @@ export function createApi({
       return r;
     }
 
+    const us = USAGE_ROUTE.exec(url.pathname);
+    if (us) {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return forHost({ req, url, host: decodeURIComponent(us[1]), local: () => localUsage(url) });
+    }
+
     const u = UPLOAD_ROUTE.exec(url.pathname);
     if (u) {
       if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
@@ -637,6 +644,17 @@ export function createApi({
     }
     if (action === 'file') return { status: 200, body: { host: config.self, ...(await notes.file(url.searchParams.get('path'))) } };
     return notes.raw(url.searchParams.get('path'));
+  }
+
+  /** GET usage: this host's Claude subscription limits (`fleet usage --json`). */
+  async function localUsage(url) {
+    if (typeof cli?.usage !== 'function') throw new HttpError('usage is not available on this server', 501);
+    try {
+      const usage = await cli.usage({ refresh: url.searchParams.get('refresh') === '1' });
+      return { status: 200, body: { host: config.self, ...usage } };
+    } catch (err) {
+      throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+    }
   }
 
   async function localSpawnDirs(req) {

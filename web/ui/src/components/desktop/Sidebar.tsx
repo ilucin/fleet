@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
-import { CommandIcon, KeyboardIcon, NotebookTextIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
+import { CommandIcon, GaugeIcon, KeyboardIcon, NotebookTextIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import { HostDot } from '@/components/HostBadge'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
@@ -221,6 +221,11 @@ export function Sidebar({ list, now, cursorKey, selectedKey, searchRef, onSearch
         </Button>
         <NotesLink size="icon-sm" />
         <Button asChild variant="ghost" size="icon-sm" className="text-dimmer hover:text-foreground">
+          <a href="#/usage" aria-label="Usage limits" title="Usage limits">
+            <GaugeIcon />
+          </a>
+        </Button>
+        <Button asChild variant="ghost" size="icon-sm" className="text-dimmer hover:text-foreground">
           <a href="#/settings" aria-label="Settings" title="Settings">
             <Settings2Icon />
           </a>
@@ -269,6 +274,11 @@ export function SidebarRail({
         <KeyboardIcon />
       </Button>
       <NotesLink />
+      <Button asChild variant="ghost" size="icon">
+        <a href="#/usage" aria-label="Usage limits" title="Usage limits">
+          <GaugeIcon />
+        </a>
+      </Button>
       <Button asChild variant="ghost" size="icon">
         <a href="#/settings" aria-label="Settings" title="Settings">
           <Settings2Icon />

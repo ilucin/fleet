@@ -26,7 +26,7 @@ phone ──http──▶ workstation:7777 (self=workstation) ──http──�
 ```
 server.mjs            wiring: config → deps → API → HTTP server → listen
 lib/config.mjs        shared fleet config loader + binary resolution
-lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `config set`, `--local stack … --json`, …)
+lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `usage --json`, `config set`, `--local stack … --json`, …)
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
@@ -167,6 +167,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (trimmed, 1..64 chars, one line) | `{ ok: true, host, id, result, title, from, tmux, message, … }` — the `fleet rename --json` report. **409** `{ error, result: "held", held: "waiting", … }` when the session is waiting on a prompt (nothing typed); 400 bad title; 404 unknown session; 502/504 CLI failure / timeout. Proxied once to a peer like the other session actions |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt?, model? }` | `{ ok, host, name, dir, tmuxSession, command, trusted, model }` |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
+| GET | `/api/hosts/:host/usage` | `?refresh=1` skips the CLI's 60s cache | `{ host, account, limits: [{ kind, group, label, model, percent, severity, resets_at, active }], extra_usage, fetched_at, stale, error }` — `fleet usage --json` (docs/architecture.md → Subscription usage); 502 with the CLI's reason, 504 on timeout. Proxied once to a peer |
 | GET | `/api/hosts/:host/spawn-dirs` | | `{ host, hosts: [names], spawnDirs: [{ label, paths: { host: dir } }], checks: [{ path, resolved, exists, isDir } \| null], offered: [{ label, path }], limits: { maxEntries, maxLabel, maxPath } }` — see **spawn-dirs** |
 | PUT | `/api/hosts/:host/spawn-dirs` | `{ spawnDirs: [{ label, paths }], dryRun? }` | the GET shape for the new list + `saved` (`false` on a dry run). 400 `{ error, errors: [{ index, field, host?, error }], checks }`; 502 when `fleet config set` failed |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |

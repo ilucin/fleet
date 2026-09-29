@@ -577,3 +577,53 @@ export interface NoteFile {
   text: string
   editorUrl: string | null
 }
+
+// --- Subscription usage (GET /api/hosts/:host/usage → `fleet usage --json`) -------------------
+
+export interface UsageAccount {
+  uuid: string | null
+  email: string | null
+  organization: string | null
+  /** `pro`, `max`, `team`, `enterprise`, … */
+  plan: string | null
+  tier: string | null
+  /** e.g. `Team · Max 5x`. */
+  plan_label: string | null
+}
+
+export interface UsageLimit {
+  /** `session`, `weekly_all`, `weekly_scoped`, … */
+  kind: string
+  /** `session` | `weekly`. */
+  group: string
+  label: string
+  /** The model a scoped limit counts (`Fable`, `Opus`, …). */
+  model: string | null
+  /** 0–100 (may exceed 100). */
+  percent: number
+  /** `normal`, `warning`, `critical`, … (open set). */
+  severity: string
+  resets_at: string | null
+  /** The limit currently binding. */
+  active: boolean
+}
+
+export interface UsageExtra {
+  enabled: boolean
+  used: number | null
+  limit: number | null
+  currency: string | null
+  percent: number | null
+}
+
+export interface UsageResponse {
+  host: string
+  account: UsageAccount | null
+  limits: UsageLimit[]
+  extra_usage: UsageExtra | null
+  /** RFC 3339: when the numbers were read from Anthropic. */
+  fetched_at: string
+  /** A refresh failed; these are the last good numbers. */
+  stale: boolean
+  error: string | null
+}

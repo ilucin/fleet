@@ -15,10 +15,11 @@ import { ListScreen } from '@/screens/ListScreen'
 import { NotesScreen } from '@/screens/NotesScreen'
 import { SessionScreen } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
+import { UsageScreen } from '@/screens/UsageScreen'
 
 /**
  * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
- * plus `#/settings` (this viewer's preferences) and `#/notes[/<host>[/<path>]]` (the notes explorer).
+ * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
  */
@@ -44,6 +45,9 @@ export default function App() {
                   </Route>
                   <Route path="/settings">
                     <SettingsScreen />
+                  </Route>
+                  <Route path="/usage">
+                    <UsageScreen />
                   </Route>
                   <Route path={/^\/notes(?:\/.*)?$/}>
                     <NotesScreen />

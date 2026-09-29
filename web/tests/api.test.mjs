@@ -41,6 +41,11 @@ function fakeHost(self, sessions) {
     if (title === 'explode') throw new Error('tmux: boom');
     return { ok: true, result: 'renamed', title, from: 'app-9d', held: null, tmux: { renamed: true, from: 'fw-101010', to: 'fix-login', note: '⧉ fw-101010 → fix-login' }, message: `app-9d → ${title}` };
   };
+  cli.usage = async ({ refresh }) => {
+    calls.push(['usage', refresh]);
+    if (self === 'broken') throw new Error('no Claude Code login found');
+    return { account: { email: `me@${self}` }, limits: [{ kind: 'session', percent: 25 }], stale: false };
+  };
   return { calls, cli, backend, transcripts, spawner, killer, autoNamer, fleet: createFleet({ cli, self }) };
 }
 
@@ -365,4 +370,40 @@ test('stacks: settings/health advertise them; a server without the stacks module
   assert.equal((await get(`${urls.laptop}/api/hosts/laptop/stacks/not-a-stack`)).status, 400);
   // The kill still works (and skips the sync) without it.
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/kill`, {})).status, 200);
+});
+
+test('usage is GET-only, served locally or proxied once, with ?refresh=1 passed through', async (t) => {
+  const { urls, lap, remote } = await startPair(t);
+  const here = await get(`${urls.laptop}/api/hosts/laptop/usage`);
+  assert.equal(here.status, 200);
+  assert.deepEqual([here.body.host, here.body.account.email, here.body.limits[0].percent], ['laptop', 'me@laptop', 25]);
+  const there = await get(`${urls.laptop}/api/hosts/workstation/usage?refresh=1`);
+  assert.deepEqual([there.body.host, there.body.account.email], ['workstation', 'me@workstation']);
+  assert.deepEqual(lap.calls.filter((c) => c[0] === 'usage'), [['usage', false]]);
+  assert.deepEqual(remote.calls.filter((c) => c[0] === 'usage'), [['usage', true]]);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/usage`, {})).status, 405);
+  assert.equal((await get(`${urls.laptop}/api/hosts/nope/usage`)).status, 404);
+});
+
+test('usage: a CLI failure is a 502 with its reason', async () => {
+  const host = fakeHost('broken', []);
+  const config = normalizeConfig({ self: 'broken' }, { env: {}, home: '/home/tester' });
+  const api = createApi({ config, ...host, warmFleet: false });
+  await assert.rejects(api({ method: 'GET', headers: {} }, new URL('http://x/api/hosts/broken/usage')), (e) => e.status === 502 && /no Claude Code login/.test(e.message));
+});
+
+test('fleet CLI usage runs `fleet --local usage --json [--refresh]` and surfaces its error', async () => {
+  const calls = [];
+  let fail = false;
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (fail) throw Object.assign(new Error('exit 1'), { code: 1, stderr: 'Error: no Claude Code login found (run `claude` and /login)\n' });
+    return { stdout: JSON.stringify({ limits: [], stale: false }), stderr: '' };
+  };
+  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  assert.deepEqual(await cli.usage(), { limits: [], stale: false });
+  await cli.usage({ refresh: true });
+  assert.deepEqual(calls, [['--local', 'usage', '--json'], ['--local', 'usage', '--json', '--refresh']]);
+  fail = true;
+  await assert.rejects(cli.usage(), /^FleetCliError: no Claude Code login found/);
 });

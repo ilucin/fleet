@@ -26,6 +26,7 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | "what's in this stack / what are my siblings doing" | `fleet stack show <stack>` (`--json` to parse), `fleet stack list` |
 | "take this to another terminal" | `fleet handoff --file <brief.md> --dir <path> [--name <name>] [--tab] [--no-wait]` — see below |
 | "watch / notify me / anyone stuck" | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` |
+| "how much usage do I have left / my limits" | `fleet usage` (`--json` to parse) — session (5h), weekly, per-model weekly (e.g. Fable) and extra usage, with reset times |
 | "what's running everywhere" | `fleet list --all-hosts` (add `--json`; every row carries `host`) |
 | "…on the workstation" | `fleet -H <host> <any command above>` — runs it on that host over ssh |
 

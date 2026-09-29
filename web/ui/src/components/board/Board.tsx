@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
-import { PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
+import { GaugeIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
 import { BoardColumns } from '@/components/board/BoardColumns'
@@ -184,6 +184,11 @@ export function Board({ list, groups, columns, onMoveColumn, now, cursorKey, sel
           <GroupsStatus state={groups} now={now} />
           <span className={cn('hidden truncate text-[0.6875rem] tabular-nums xl:inline', note.error ? 'text-destructive' : 'text-dimmer')}>{note.text}</span>
           <NotesLink className="shrink-0 text-muted-foreground" />
+          <Button asChild variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
+            <a href="#/usage" aria-label="Usage limits" title="Usage limits">
+              <GaugeIcon />
+            </a>
+          </Button>
           <Button asChild variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
             <a href="#/settings" aria-label="Settings" title="Settings">
               <Settings2Icon />

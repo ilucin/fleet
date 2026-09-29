@@ -1,7 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
 // contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group` (+ `--rename` / `--move`),
-// `fleet config set`, `fleet --local stack … --json`) are documented in one
+// `fleet usage --json`, `fleet config set`, `fleet --local stack … --json`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -184,6 +184,26 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   }
 
   /**
+   * This machine's Claude subscription limits: `fleet usage --json` (`--refresh` skips its
+   * 60s cache). Resolves the CLI's object; throws FleetCliError (no login, endpoint down
+   * with nothing cached) with the CLI's reason as the message.
+   */
+  async function usage({ refresh = false, timeoutMs: t = 20 * 1000 } = {}) {
+    const args = ['--local', 'usage', '--json'];
+    if (refresh) args.push('--refresh');
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, 'fleet usage', t);
+      const why = String(err?.stderr ?? '').replace(/^(fleet:\s*)?(Error:\s*)?/i, '').trim();
+      if (why && !e.timedOut) e.message = why;
+      throw e;
+    }
+    return parseObject(stdout, 'fleet usage');
+  }
+
+  /**
    * Write one config key: `fleet --local config set <key> <json>` against `configFile`
    * (FLEET_CONFIG). The CLI owns the config file: it rewrites the raw JSON atomically
    * (tmp + rename), keeps every other key and refuses a file that does not parse.
@@ -245,6 +265,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     groupRun,
     groupCached,
     groupEdit,
+    usage,
     configSet,
     stackList,
     stackShow,
