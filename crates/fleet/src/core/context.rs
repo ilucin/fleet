@@ -10,6 +10,8 @@
 //!
 //! **Which window.** Transcripts don't record it, so it is inferred. 1M when:
 //! - the model id carries the `[1m]` suffix;
+//! - the model is natively 1M in Claude Code, with no suffix: Fable, Mythos, and
+//!   Opus / Sonnet 5.5 and later ([`native_1m`]);
 //! - the prompt is already larger than 200k (it can't fit otherwise);
 //! - the user's `settings.json` pins a `[1m]` model of the same family;
 //! - Claude Code's `~/.claude.json` has recorded this exact model id as
@@ -298,10 +300,37 @@ fn last_usage(text: &str) -> Option<(u64, Option<String>)> {
 
 fn window_for(model: Option<&str>, used: u64, cwd: Option<&str>, hints: &Hints) -> u64 {
     let model = model.unwrap_or("").to_lowercase();
-    if model.ends_with("[1m]") || used > WINDOW_200K || hints.says_1m(&model, cwd) {
+    if model.ends_with("[1m]")
+        || native_1m(&model)
+        || used > WINDOW_200K
+        || hints.says_1m(&model, cwd)
+    {
         WINDOW_1M
     } else {
         WINDOW_200K
+    }
+}
+
+/// Models that run with 1M in Claude Code without a `[1m]` suffix: every Fable
+/// and Mythos, and Opus / Sonnet from 5.5 on. Earlier Opus / Sonnet (4.6–5) are
+/// 1M only when opted into via `[1m]`, which the hints cover.
+fn native_1m(model: &str) -> bool {
+    let Some(rest) = model.strip_prefix("claude-") else {
+        return false;
+    };
+    let Some((family, version)) = rest.split_once('-') else {
+        return false;
+    };
+    match family {
+        "fable" | "mythos" => true,
+        "opus" | "sonnet" => {
+            let mut nums = version.split('-').map(|p| p.parse::<u32>().ok());
+            let major = nums.next().flatten().unwrap_or(0);
+            // A dated snapshot (`-20251101`) is not a minor version.
+            let minor = nums.next().flatten().filter(|n| *n < 100).unwrap_or(0);
+            (major, minor) >= (5, 5)
+        }
+        _ => false,
     }
 }
 
@@ -372,6 +401,23 @@ mod tests {
             |m: &str, used: u64, cwd: Option<&str>, h: &Hints| window_for(Some(m), used, cwd, h);
         assert_eq!(w("claude-opus-4-5", 150_000, None, &none), WINDOW_200K);
         assert_eq!(w("claude-sonnet-4-5[1m]", 10, None, &none), WINDOW_1M);
+        // Natively 1M without a suffix: Fable, Mythos, Opus / Sonnet 5.5+.
+        for m in [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-opus-6",
+            "claude-fable-5-1",
+            "claude-mythos-5",
+        ] {
+            assert_eq!(w(m, 10, None, &none), WINDOW_1M, "{m}");
+        }
+        for m in [
+            "claude-opus-5",
+            "claude-haiku-4-5-20251001",
+            "claude-opus-4-5-20251101",
+        ] {
+            assert_eq!(w(m, 10, None, &none), WINDOW_200K, "{m}");
+        }
         // Can't be 200k if the prompt is already bigger than that.
         assert_eq!(w("claude-opus-4-5", 250_000, None, &none), WINDOW_1M);
         // Settings pin `sonnet[1m]`: sonnet sessions get 1M, others don't.
