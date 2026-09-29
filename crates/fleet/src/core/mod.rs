@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod grouping;
 pub mod hosts;
 pub mod naming;
+pub mod stack;
 pub mod title;
 pub mod tmux;
 pub mod tools;

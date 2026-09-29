@@ -72,6 +72,9 @@ pub struct Session {
     pub host: Option<String>,
     /// Context-window usage from the transcript tail; `null` when unknown.
     pub context: Option<crate::core::context::ContextUsage>,
+    /// The session stack it belongs to (`{ id, label }`, see [`crate::core::stack`]);
+    /// `null` when none. Stamped by `list` (read-only); `None` inside discovery.
+    pub stack: Option<crate::core::stack::StackRef>,
 }
 
 impl Default for Session {
@@ -95,6 +98,7 @@ impl Default for Session {
             display_title: None,
             host: None,
             context: None,
+            stack: None,
         }
     }
 }
@@ -294,6 +298,7 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             display_title: None,
             host: None,
             context,
+            stack: None,
         });
     }
     crate::core::context::apply_native_1m(out.iter_mut().filter_map(|s| s.context.as_mut()));

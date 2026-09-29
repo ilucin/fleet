@@ -41,6 +41,8 @@ Pure logic plus thin process wrappers; no printing. Everything a future front-en
 - **config** — reads and patches the shared config file.
 - **hosts** — resolves the target host and dispatches over ssh.
 - **tools** — binary lookup (`PATH` plus Homebrew fallbacks), `~` expansion.
+- **brief** / **stack** — the [session brief](#session-briefs) and [session stack](#session-stacks)
+  files: format, merge rules, storage.
 
 ### CLI and TUI
 
@@ -124,6 +126,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.grouping` | `{ enabled, intervalMinutes }` (default off, 10): this host's web server runs `fleet group` over the whole fleet on that schedule and serves `/api/groups` (see [Smart grouping](#smart-grouping)) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }` (default `~/.local/share/fleet/uploads`, 100, 14): files dropped / pasted / picked in the web UI are stored there on the session's host as `YYYY-MM-DD/<rand>-<name>`, and their absolute path goes into the prompt; day dirs older than `retentionDays` are removed (`0` keeps them) |
 | `web.briefs` | `{ enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns, minNewChars, maxBriefChars }` (default off, `haiku`, 60 s, 15 min, 12000, 12, 2, 2000, 3000): background generation of [session briefs](#session-briefs) on this host; reading and editing briefs (and a manual regenerate) work either way |
+| `web.stacks` | `{ syncMinutes }` (default 2): how often this host's web server runs `fleet stack sync` while any of its sessions is in a [stack](#session-stacks) |
 | `web.notes` | `{ root, name?, searchCmd?, exclude? }` (default off): the web UI's notes explorer (`#/notes`) over the markdown notes under `root` on this host — browse, full-text search (built in, or an external `searchCmd` such as `rg -n -i -F {query}`), preview with `[[wiki]]` / relative links between notes; hidden entries, `node_modules`, `.gitignore`d paths and age-encrypted blocks are never served (web/ARCHITECTURE.md → notes). Peers browse each other's notes through the usual proxy |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra roots a relative file path in chat may be under. A relative path missing under the session cwd first matches files the session touched (from its transcript), then ancestors of those, then these roots; the sandbox stays `$HOME` + cwd |
 | `desktop.url` | the server [Fleet.app](desktop.md) opens instead of `hosts.<self>.web`; unset → this machine's server |
@@ -134,6 +137,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `spawnDirs` | directories offered for new sessions, per host (`paths.<host>`); also edited from the web UI (Settings → Start directories, which writes it through `fleet config set`) |
 | `tui` | dashboard preferences: `rows` (`"1"`, `"2"`, `"auto"`), `mouse` |
 | `naming` | generated names: `enabled`, `model` (default `haiku`), `syncTmux` (tmux name follows the title, default on), `autoTitle` |
+| `stacks` | [session stacks](#session-stacks): `enabled` (default `true` — `false` = never call the model; a new stack gets the skeleton StackBrief), `model` (default `sonnet`) |
 | `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
@@ -142,7 +146,7 @@ the single host `local`, and remote features say "run `fleet init`"; a present b
 an error.
 
 Env overrides for the web server: `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME`, `FLEET_WEB_GROUPING`, `FLEET_WEB_BRIEFS`, `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
+`FLEET_WEB_AUTONAME`, `FLEET_WEB_GROUPING`, `FLEET_WEB_BRIEFS`, `FLEET_BRIEFS_DIR`, `FLEET_STACKS_DIR`, `FLEET_BIN`, `FLEET_TMUX` — see [web/README.md](../web/README.md).
 
 ## Session discovery
 
@@ -224,6 +228,7 @@ by — with no config, `local`):
 | `gen_title` | string \| null | generated title, if cached |
 | `display_title` | string | **the** title every view draws — see [Session titles](#session-titles) |
 | `context` | object \| null | context-window usage (below); `null` when no transcript usage is found |
+| `stack` | object \| null | `{ id, label }` of the [session stack](#session-stacks) the session is a member of; `null` when none (read-only stamp: `list` never syncs or writes stack files) |
 | `host` | string | which machine the row came from |
 
 `list --all-hosts --json` is the same array across every configured host.
@@ -290,9 +295,17 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
 | GET | `/api/hosts/:host/notes/{tree,search,file,raw}` | the notes explorer (`web.notes`): the file list, `?q=` search with snippets + match ranges, `?path=` one note (frontmatter split, encrypted blocks withheld), `?path=` an image; 501 when the host has no `web.notes.root` |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` → a human edit (sets `editedAt`) → the same shape |
+| GET | `/api/hosts/:host/stacks` | `fleet --local stack list --json` → `{ host, stacks: [StackView + editorUrl] }` ([session stacks](#session-stacks); `editorUrl` for `absCwd`, built like briefs' via `lib/editor.mjs`) |
+| GET | `/api/hosts/:host/stacks/:id` | `fleet --local stack show <id> --json` → StackView (+ `editorUrl`); 404 when unknown |
+| PUT | `/api/hosts/:host/stacks/:id` | `{ markdown, expectUpdated? }` → `fleet --local stack set <id> [--expect-updated] --json` (markdown on stdin) → StackView; **409** `{ error, updated }` on conflict; 400 bad body (markdown a string ≤ 64 kB) |
+| DELETE | `/api/hosts/:host/stacks/:id` | `fleet --local stack rm <id> -f --json` → `{ removed }` |
+| POST | `/api/hosts/:host/stacks/:id/spawn` | `{ prompt?, name?, model?, dir? }` → a sibling in that stack: `dir` defaults to the stack's `absCwd`; otherwise as the session route below, without `ensure` |
+| POST | `/api/hosts/:host/sessions/:id/stack/spawn` | `{ prompt?, name?, model?, dir? }` → (1) `fleet --local stack ensure <session_id> --json` (timeout 150 s: it may call the model); (2) the server's own spawner (tmux, trust prompt handled) in the session's cwd (or `dir`, inside the session's cwd or a spawn dir) with `prompt` = `contextLine + ' ' + prompt`; (3) in the background, find the new session (by tmux session name, ≤ ~75 s) and `fleet --local stack add <stack id> <session_id> --json` → 200 `{ host, stack: StackView, created, generated, spawn: { name, dir, tmuxSession, command, trusted, model } }` |
+| POST | `/api/hosts/:host/stacks/sync` | `fleet --local stack sync --json` → `{ host, changed, stacks }` |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` → **202** `{ host, id, started, queued, generating: true }`, the model call runs in the background (poll GET); **429** `{ error, retryAfterMs }` at the hourly cap |
 
-`:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars). The
+`:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars) — on
+the `/stacks/:id` routes a stack id (or anything `fleet stack` resolves). The
 full contract (status codes, limits, timeouts) lives with the server: [web/README.md](../web/README.md),
 [web/ARCHITECTURE.md](../web/ARCHITECTURE.md).
 
@@ -467,6 +480,106 @@ the peer (which knows only its own absolute paths) and the server that received 
 the browser asked, which is assumed to be the machine the browser (and the editor) runs on.
 `fleet brief <target> --open` does the same from the CLI: `code <path>` here, `code --remote
 ssh-remote+<ssh dest> <path>` for a session on another host (`cursor` with `web.editor: "cursor"`).
+
+## Session stacks
+
+A **stack** is N Claude Code sessions on one host sharing one context layer: a markdown file,
+the **StackBrief**. Any session can spawn a *sibling* (`fleet stack spawn`, the web UI's "Spawn
+sibling"); the sibling joins the source's stack, which is created around the source first when
+it has none. Every session spawned into a stack starts with the **context line**:
+
+```
+You're running in the session stack with shared context: <abs path to the stack file>. <prompt>
+```
+
+(nothing after the period when the prompt is empty; `core::stack::context_line` /
+`stack_prompt`, and `contextLine` in every `--json` output so the web server prepends the same
+text). The StackBrief is generated once, at creation; after that it is maintained by scripts
+(membership) and by hand. Logic: `core::stack`; CLI: `fleet stack` ([cli.md](cli.md#stacks));
+the web server only shells out to `fleet --local stack … --json` and never parses the markdown.
+
+**Storage.** `$FLEET_STACKS_DIR`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/stacks/`, one
+`<stack_id>.md` per stack (dir `0700`, files `0600`, atomic temp + rename writes). The file is
+the state — no index; "which stack is session X in" scans the dir. Stack id: `st-` + 8 random
+lowercase hex, never changes. A stack lives on the host where its file is; its members are
+sessions of that host (`host` on members is for later — v1 never mixes hosts).
+
+**Format** (a contract: add keys freely, never rename or retype one):
+
+```markdown
+---
+stack: st-1a2b3c4d
+label: Login redirect fix
+host: laptop
+cwd: ~/Code/project
+created: 2026-09-29T10:00:00.000Z
+updated: 2026-09-29T12:00:00.000Z
+generatedAt: 2026-09-29T10:00:05.000Z
+editedAt: 2026-09-29T11:00:00.000Z
+members: [{"session":"<uuid>","host":"laptop","name":"login-redirect","added":"2026-09-29T10:00:00.000Z","closed":null,"cwd":"~/Code/project","firstPrompt":"Fix the login redirect loop"}]
+---
+> Shared context for the session stack **Login redirect fix** (`st-1a2b3c4d`). Every session in
+> this stack reads this file when it starts. Keep **Summary** and **Resources** current for your
+> siblings (PRs, worktrees, folders, decisions). **Sessions** is maintained by `fleet stack` — do
+> not edit it; read a sibling's brief or transcript from there when you need to know what it did.
+
+## Summary
+2–4 sentences on the stack as a whole: what, and where (repo, branch/worktree, host).
+
+## Resources
+- Git: `fix-login` · worktree `~/Code/project-wt`
+- PR: [owner/repo#12](https://github.com/owner/repo/pull/12)
+- Folder: `~/Code/project`
+
+## Sessions
+- **login-redirect** (`1a2b3c4d`, live) — added 2026-09-29 10:00 · brief `~/.local/state/fleet/briefs/<uuid>.md` · transcript `~/.claude/projects/<encoded cwd>/<uuid>.jsonl`
+  first prompt: "Fix the login redirect loop"
+
+## Notes
+free text; any other `## ` section is kept as is
+```
+
+- Frontmatter: the briefs' encoding (`key: value`, arrays/objects one-line JSON). Machine keys —
+  `stack`, `host`, `cwd`, `created`, `updated` (last write of any kind), `generatedAt` (the model
+  wrote Summary/Resources), `editedAt` (last human edit), `members` — are never taken from an
+  edited body; `label` is (from the submitted frontmatter). Unknown keys are preserved.
+- `members[]`: `{ session, host, name, added, closed, cwd?, firstPrompt? }` — `name` is the
+  display title at the last sync, `closed` `null` while live and an ISO time once the session was
+  seen gone (members are never removed automatically; `fleet stack remove` does), `cwd` (`~/…`)
+  and `firstPrompt` (≤ 160 chars) are kept so the Sessions line survives the session. Unknown
+  member keys are preserved.
+- Body: the header blockquote and `## Sessions` are **regenerated** on every machine write
+  (Sessions from `members`: `live` / `closed <date>`, the brief path whether or not it exists, the
+  transcript path for the member's cwd, `first prompt:` when known; dates UTC). `Summary`,
+  `Resources`, `Notes` and any other section, and text above the first heading, are a human's
+  and kept verbatim. Parsing is tolerant like briefs (case-insensitive headings, any order,
+  missing sections); Resources bullets parse like a brief's (`parse_resource_line`; `Folder:`
+  lines get the kind `Folder`).
+- Human edit (`fleet stack set` / `edit`, web PUT): the submitted body is authoritative except
+  for the header and Sessions; machine keys are the stored file's; `editedAt` + `updated`
+  stamped; `--expect-updated` / `expectUpdated` refuses a stale edit (CLI exit 3, HTTP 409). At
+  most 64 kB.
+
+**Membership sync** (`core::stack::sync`, no model): for every stack file on this host, a member
+whose session id is not among the live sessions gets `closed = now` (once); a live one gets its
+`name` refreshed from `display_title` (and `closed` cleared — a resumed session). Only files
+whose members changed are rewritten. It runs in `fleet stack list` / `show` / `sync` and after
+`spawn` / `add` / `remove`; the web server runs `stack sync` after a kill and every
+`web.stacks.syncMinutes` while any session is in a stack. Nothing is marked closed when the
+session registry can't be read. `fleet list` only stamps `stack: { id, label } | null` on each
+row (read-only).
+
+**Generation** (creation only; `stacks.model`, default `sonnet`): one `core::naming::ask_claude`
+call (`-p --model <m> --strict-mcp-config`, tools disallowed, prompt on stdin, neutral cwd, 120 s)
+with the source session's display title, cwd, host, its Git line (`git rev-parse` in the cwd),
+first prompt, its session brief's body when there is one, and the last ~6000 characters of its
+conversation (user prompts and turn-ending assistant text, main thread, tool blocks skipped).
+The answer must be `Label: <2–5 words>`, `## Summary` (≤ 1000 chars, generalised to the stack)
+and `## Resources` (`- Kind: value` bullets of things really in the input); the Git line and a
+Folder line are added when missing. Anything unparseable, a failed call, `--no-llm`,
+`FLEET_FIXTURE` or `stacks.enabled: false` → the skeleton (Summary "Started from <title> in
+<cwd>.", Resources = Git line + Folder): a model failure never blocks creating the stack
+(`generated: false` and a `warning`). There is no regeneration after creation (v1).
 
 ## Extension points
 

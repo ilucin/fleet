@@ -8,5 +8,6 @@ pub mod hosts;
 pub mod init;
 pub mod render;
 pub mod skill;
+pub mod stack;
 pub mod tmux;
 pub mod web;

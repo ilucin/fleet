@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { ChevronRightIcon } from 'lucide-react'
+import { ChevronRightIcon, LayersIcon } from 'lucide-react'
 
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { SessionRow } from '@/components/SessionRow'
+import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
 import { parseIdList, type BoardColumn } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
 import { storage } from '@/lib/storage'
@@ -10,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 const COLLAPSED_KEY = 'fleet.groupsCollapsed'
 
-/** Mobile board: one collapsible section per group (collapsed ids persist in `fleet.groupsCollapsed`). */
+/** Mobile board: one collapsible section per group / session stack (collapsed ids persist in `fleet.groupsCollapsed`); stacks get a ⋯ menu. */
 export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: number }) {
   const [collapsed, setCollapsed] = useState<string[]>(() => parseIdList(storage.getJSON(COLLAPSED_KEY)))
   const toggle = (id: string) => {
@@ -25,7 +26,7 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
         const open = !collapsed.includes(c.id)
         const bodyId = `group-${c.id}`
         return (
-          <section key={c.id} aria-label={c.label}>
+          <section key={c.id} aria-label={c.label} className="relative">
             <button
               type="button"
               aria-expanded={open}
@@ -35,12 +36,22 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
             >
               <ChevronRightIcon className={cn('size-4 shrink-0 text-dimmer transition-transform', open && 'rotate-90')} />
               <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-[0.9375rem] font-semibold', c.ungrouped && 'text-muted-foreground')}>{c.label}</span>
+                <span className={cn('flex min-w-0 items-center gap-1.5 text-[0.9375rem] font-semibold', c.ungrouped && 'text-muted-foreground')}>
+                  {c.stack ? <LayersIcon aria-label="Session stack" className="size-3.5 shrink-0 text-primary" /> : null}
+                  <span className="min-w-0 truncate">{c.label}</span>
+                </span>
                 {c.description ? <span className="block truncate text-xs text-dimmer">{c.description}</span> : null}
               </span>
               <StatusSummaryDots summary={c.summary} />
               <span className="rounded-md bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">{c.sessions.length}</span>
+              {/* Room for the stack menu, which sits over the button (no button inside a button). */}
+              {c.stack ? <span aria-hidden className="w-9 shrink-0" /> : null}
             </button>
+            {c.stack ? (
+              <div className="absolute top-0 right-0 flex h-11 items-center">
+                <StackColumnMenu stack={c.stack} label={c.label} sessions={c.sessions} className="size-10 rounded-lg" />
+              </div>
+            ) : null}
             {open ? (
               <div id={bodyId} className="mt-1 flex flex-col gap-2">
                 {c.sessions.map((s) => (

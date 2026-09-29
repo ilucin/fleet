@@ -6,7 +6,9 @@
 //     web: { port, bind, dir, ui, editor, quickReplies, models: [ { id, label } ],
 //            autoName: { enabled, intervalMinutes },
 //            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays },
-//            briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, … } },
+//            briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, … },
+//            stacks: { syncMinutes } },
+//     stacks: { enabled, model },         (read by the CLI; the server only reports them)
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
@@ -26,6 +28,8 @@ export const DEFAULT_GROUPING_MINUTES = 10;
 export const DEFAULT_UPLOADS_DIR = '~/.local/share/fleet/uploads';
 export const DEFAULT_UPLOAD_MAX_MB = 100;
 export const DEFAULT_UPLOAD_RETENTION_DAYS = 14;
+export const DEFAULT_STACKS_SYNC_MINUTES = 2;
+export const DEFAULT_STACKS_MODEL = 'sonnet';
 
 /** web.briefs defaults (lib/briefs.mjs). Off by default: it spends model calls. */
 export const DEFAULT_BRIEFS = Object.freeze({
@@ -191,7 +195,8 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
- *               minNewChars, maxBriefChars, dir }, configFile, configFound }
+ *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
+ *     configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -401,6 +406,23 @@ export function normalizeConfig(
   if (env.FLEET_WEB_BRIEFS != null && env.FLEET_WEB_BRIEFS !== '') briefs.enabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_BRIEFS);
   briefs.dir = briefsDir(env, home);
 
+  // web.stacks: the background `fleet stack sync` (lib/stacks.mjs); top-level `stacks` is the
+  // CLI's (`enabled` = may call the model when a stack is created, `model`), reported in /api/settings.
+  const ws = web.stacks == null ? {} : web.stacks;
+  if (!isObject(ws)) throw new Error('config.web.stacks must be an object { syncMinutes }');
+  let syncMinutes = DEFAULT_STACKS_SYNC_MINUTES;
+  if (ws.syncMinutes != null) {
+    const m = Number(ws.syncMinutes);
+    if (!Number.isFinite(m) || m <= 0) throw new Error(`config.web.stacks.syncMinutes must be a number > 0: ${ws.syncMinutes}`);
+    syncMinutes = m;
+  }
+  let stacksSync = true;
+  if (env.FLEET_WEB_STACKS != null && env.FLEET_WEB_STACKS !== '') stacksSync = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_STACKS);
+  // The CLI validates its own keys; here a bad value only falls back to the default.
+  const st = isObject(raw.stacks) ? raw.stacks : {};
+  const stacksModel = typeof st.model === 'string' && MODEL_ID_RE.test(st.model) ? st.model : DEFAULT_STACKS_MODEL;
+  const stacks = { sync: stacksSync, syncMinutes, generate: st.enabled !== false, model: stacksModel };
+
   return {
     self: self.trim(),
     port,
@@ -422,6 +444,7 @@ export function normalizeConfig(
     files,
     notes,
     briefs,
+    stacks,
   };
 }
 

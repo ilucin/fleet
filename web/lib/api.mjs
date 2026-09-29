@@ -15,6 +15,16 @@ import { DISABLED_GROUPS } from './grouping.mjs';
 import { DEFAULT_MODELS } from './config.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
 import { editorUrl, withBriefEditor, withSessionEditors } from './editor.mjs';
+import {
+  STACK_BODY_LIMIT,
+  STACK_ID_RE,
+  resolveStackSpawnDir,
+  validateStackEdit,
+  validateStackLabel,
+  withStackEditor,
+  withStacksEditor,
+} from './stacks.mjs';
+import { DEFAULT_STACKS_MODEL } from './config.mjs';
 
 export const API_VERSION = 1;
 
@@ -57,6 +67,11 @@ const FILES_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/files\/(stat|raw
 const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenerate)?$/;
 const NOTES_ROUTE = /^\/api\/hosts\/([^/]+)\/notes\/(tree|search|file|raw)$/;
 const SPAWN_DIRS_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn-dirs$/;
+const STACKS_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks(\/sync)?$/;
+const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn)?$/;
+const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/stack\/spawn$/;
+/** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
+const STACK_SPAWN_PROXY_MS = 180 * 1000;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -83,6 +98,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
+ *   stacks      lib/stacks.mjs#createStacks (…/stacks routes, sibling spawn, sync after kill; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
@@ -106,6 +122,7 @@ export function createApi({
   briefs = null,
   notes = null,
   spawnDirs = null,
+  stacks = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -216,6 +233,8 @@ export function createApi({
       const session = await resolveLocalSession(id);
       const result = await killer.kill(session);
       refreshFleet();
+      // The StackBrief marks it closed; best effort (logged by lib/stacks.mjs), never fails the kill.
+      stacks?.sync('kill').catch(() => {});
       return {
         status: 200,
         body: { ok: true, host: config.self, id: session.session_id, name: session.name ?? null, ...result },
@@ -359,7 +378,7 @@ export function createApi({
   }
 
   /** Serve locally when `host` is self, proxy (once, with ?local=1) when it is a peer. */
-  async function forHost({ req, url, host, local, stream = false, streamResponse = false }) {
+  async function forHost({ req, url, host, local, stream = false, streamResponse = false, timeoutMs = peerProxyTimeoutMs, bodyLimit }) {
     const target = resolveHost(host, config);
     if (target.kind === 'unknown') throw new HttpError(`unknown host: ${host}`, 404);
     if (target.kind === 'self') return local();
@@ -383,13 +402,13 @@ export function createApi({
       });
       return { status: proxied.status, body: proxied.body };
     }
-    const rawBody = req.method === 'POST' || req.method === 'PUT' ? JSON.stringify(await readJsonBody(req)) : null;
+    const rawBody = req.method === 'POST' || req.method === 'PUT' ? JSON.stringify(await readJsonBody(req, bodyLimit)) : null;
     const proxied = await proxyToPeer(target.url, {
       method: req.method,
       pathname: url.pathname,
       search: url.search.replace(/^\?/, ''),
       body: rawBody,
-      timeoutMs: peerProxyTimeoutMs,
+      timeoutMs,
     });
     return { status: proxied.status, body: proxied.body };
   }
@@ -412,6 +431,7 @@ export function createApi({
             lastRun: grouper?.lastRun ?? null,
           },
           briefs: briefs?.status() ?? { enabled: false },
+          stacks: stacks?.status() ?? { sync: false, lastSync: null },
         },
       };
     }
@@ -428,6 +448,8 @@ export function createApi({
           models: config.models ?? DEFAULT_MODELS,
           uploads: { maxMB: config.uploads?.maxMB ?? null },
           notes: notes ? { enabled: true, name: notes.name ?? null } : { enabled: false },
+          // `generate`: whether creating a stack calls the model (the CLI's `stacks.enabled`).
+          stacks: { enabled: Boolean(stacks), model: config.stacks?.model ?? DEFAULT_STACKS_MODEL, generate: config.stacks?.generate !== false },
         },
       };
     }
@@ -549,6 +571,46 @@ export function createApi({
       return r;
     }
 
+    const sl = STACKS_ROUTE.exec(url.pathname);
+    if (sl) {
+      const [, rawHost, sync] = sl;
+      if (req.method !== (sync ? 'POST' : 'GET')) throw new HttpError('method not allowed', 405);
+      const host = decodeURIComponent(rawHost);
+      const r = await forHost({ req, url, host, local: () => localStacks({ action: sync ? 'sync' : 'list', req }) });
+      return r.status === 200 ? { ...r, body: withStacksEditor(r.body, host, config) } : r;
+    }
+
+    const sk = STACK_ROUTE.exec(url.pathname);
+    if (sk) {
+      const [, rawHost, rawId, spawn] = sk;
+      const allowed = spawn ? ['POST'] : ['GET', 'PUT', 'DELETE'];
+      if (!allowed.includes(req.method)) throw new HttpError('method not allowed', 405);
+      const id = decodeURIComponent(rawId);
+      if (!STACK_ID_RE.test(id)) throw new HttpError(`invalid stack id: ${id}`, 400);
+      const host = decodeURIComponent(rawHost);
+      const action = spawn ? 'spawn' : req.method;
+      const r = await forHost({
+        req,
+        url,
+        host,
+        timeoutMs: spawn ? STACK_SPAWN_PROXY_MS : peerProxyTimeoutMs,
+        bodyLimit: STACK_BODY_LIMIT,
+        local: () => (spawn ? localStackSpawn({ req, stackId: id }) : localStacks({ action, id, req })),
+      });
+      if (r.status !== 200 || action === 'DELETE') return r;
+      if (spawn) return { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, config) } };
+      return { ...r, body: withStackEditor(r.body, host, config) };
+    }
+
+    const ssp = SESSION_STACK_SPAWN_ROUTE.exec(url.pathname);
+    if (ssp) {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      const host = decodeURIComponent(ssp[1]);
+      const id = decodeURIComponent(ssp[2]);
+      const r = await forHost({ req, url, host, timeoutMs: STACK_SPAWN_PROXY_MS, local: () => localStackSpawn({ req, sessionId: id }) });
+      return r.status === 200 ? { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, config) } } : r;
+    }
+
     const n = NOTES_ROUTE.exec(url.pathname);
     if (n) {
       const [, rawHost, action] = n;
@@ -618,6 +680,95 @@ export function createApi({
       if (err?.status) throw new HttpError(err.message, err.status);
       throw err;
     }
+  }
+
+  // --- session stacks (lib/stacks.mjs): the CLI's JSON passed through ----------------------
+  async function localStacks({ action, id = null, req }) {
+    if (!stacks) throw new HttpError('session stacks are not available on this server', 501);
+    if (action === 'list') return { status: 200, body: await stacks.list() };
+    if (action === 'sync') {
+      await readJsonBody(req);
+      const body = await stacks.syncNow('manual');
+      refreshFleet();
+      return { status: 200, body };
+    }
+    if (action === 'GET') return { status: 200, body: await stacks.show(id) };
+    if (action === 'DELETE') {
+      const body = await stacks.remove(id);
+      refreshFleet();
+      return { status: 200, body };
+    }
+    // PUT
+    const edit = validateStackEdit(await readJsonBody(req, STACK_BODY_LIMIT));
+    try {
+      const body = await stacks.set(id, edit.markdown, edit.expectUpdated);
+      refreshFleet(); // the label shows on session rows
+      return { status: 200, body };
+    } catch (err) {
+      if (err?.status === 409 && err.body) return { status: 409, body: err.body };
+      throw err;
+    }
+  }
+
+  /**
+   * A sibling: from a session (`sessionId`: `stack ensure` first — it may create the stack) or
+   * from a stack (`stackId`). Spawns with this server's spawner in the source's directory, the
+   * stack's context line prepended to the prompt, then adds the new session to the stack in the
+   * background once it shows up in `fleet list` (lib/stacks.mjs#join).
+   */
+  async function localStackSpawn({ req, sessionId = null, stackId = null }) {
+    if (!stacks) throw new HttpError('session stacks are not available on this server', 501);
+    const body = await readJsonBody(req);
+    const roots = config.spawnDirs.map((d) => d.path);
+    const check = validateSpawnRequest(body, { spawnDirs: roots.length ? roots : ['/'] });
+    if (!check.ok) throw new HttpError(check.error, 400);
+    const requested = typeof body.dir === 'string' && body.dir.trim() ? check.dir : null;
+    const label = validateStackLabel(body.label);
+
+    let stack;
+    let created = false;
+    let generated = false;
+    let dir;
+    if (sessionId != null) {
+      const source = await resolveLocalSession(sessionId);
+      if (!source.session_id || !SESSION_ID_RE.test(source.session_id)) throw new HttpError('this session has no session id yet', 409);
+      if (typeof source.cwd !== 'string' || !source.cwd) throw new HttpError('this session has no working directory', 409);
+      dir = await resolveStackSpawnDir({ base: source.cwd, requested, roots }); // before any model call
+      const out = await stacks.ensure(source.session_id, { label });
+      // `ensure --json` is flat: the StackView keys plus `created` (bool: made by this call),
+      // `createdAt`, `generated`, `warning` and `stack` (the untouched StackView, whose own
+      // `created` is the timestamp). Prefer the nested view; fall back to the flat keys.
+      created = Boolean(out?.created);
+      generated = Boolean(out?.generated);
+      if (out?.stack && typeof out.stack === 'object') stack = out.stack;
+      else {
+        const { created: _c, generated: _g, createdAt, warning: _w, ...rest } = out ?? {};
+        stack = createdAt != null ? { ...rest, created: createdAt } : rest;
+      }
+    } else {
+      stack = await stacks.show(stackId);
+      dir = await resolveStackSpawnDir({ base: stack?.absCwd ?? stack?.cwd, requested, roots });
+    }
+    if (!stack?.id || typeof stack.contextLine !== 'string') throw new HttpError('fleet stack returned no stack id / contextLine — update fleet on this host', 502);
+
+    // Exactly `core::stack::stack_prompt`: the context line, a space, the trimmed prompt.
+    const userPrompt = check.prompt.trim();
+    const prompt = userPrompt ? `${stack.contextLine} ${userPrompt}` : stack.contextLine;
+    const nameGiven = check.nameGiven !== false || !config.autoName?.enabled;
+    let result;
+    try {
+      result = await spawner.spawn({ name: check.name, dir, prompt, nameGiven, model: check.model });
+    } catch (err) {
+      if (err?.status) throw new HttpError(err.message, err.status);
+      throw err;
+    }
+    refreshFleet();
+    if (!nameGiven && check.prompt.trim() && spawnNamer) spawnNamer.schedule(result.tmuxSession).catch(() => {});
+    stacks.join(result.tmuxSession, stack.id);
+    return {
+      status: 200,
+      body: { host: config.self, stack, created: Boolean(created), generated: Boolean(generated), spawn: { ok: true, host: config.self, ...result } },
+    };
   }
 
   async function localFiles({ action, id, url, req }) {

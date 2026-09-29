@@ -1,7 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
 // contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group` (+ `--rename` / `--move`),
-// `fleet config set`) are documented in one
+// `fleet config set`, `fleet --local stack … --json`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -14,6 +14,9 @@ export class FleetCliError extends Error {
     this.timedOut = timedOut;
   }
 }
+
+/** clap's answer when the binary predates `fleet stack` (an older CLI on that host). */
+const NO_SUBCOMMAND_RE = /unrecognized subcommand|unexpected argument 'stack'|invalid subcommand/i;
 
 /**
  * `run(file, args, opts)` is injected (lib/run.mjs in production, a fake in tests).
@@ -197,5 +200,58 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     }
   }
 
-  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached, groupEdit, configSet };
+  /**
+   * `fleet --local stack <args…> --json` (session stacks, docs/architecture.md → Session stacks).
+   * Resolves the parsed JSON object. Throws FleetCliError carrying `exitCode`, `report` (a JSON
+   * object the CLI printed on stdout before failing — `set` does on a conflict, exit 3),
+   * `missing` (the binary has no `stack` command), `timedOut`; its message is the CLI's stderr.
+   */
+  async function stack(args, { input = null, timeoutMs: t = 20 * 1000 } = {}) {
+    const argv = ['--local', 'stack', ...args.map(String), '--json'];
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, argv, { timeout: t, env: { ...process.env, NO_COLOR: '1' }, ...(input != null ? { input } : {}) }));
+    } catch (err) {
+      const e = wrap(err, `fleet stack ${args[0] ?? ''}`.trim(), t);
+      const why = String(err?.stderr ?? '').replace(/^Error:\s*/, '').trim();
+      if (why && !e.timedOut) e.message = why.split('\n')[0];
+      e.exitCode = typeof err?.code === 'number' ? err.code : null;
+      e.report = tryObject(err?.stdout);
+      e.missing = !e.timedOut && NO_SUBCOMMAND_RE.test(why);
+      throw e;
+    }
+    return parseObject(stdout, `fleet stack ${args[0] ?? ''}`.trim());
+  }
+
+  // `--flag=value` everywhere: a value starting with "-" must not read as a flag.
+  const stackList = () => stack(['list']);
+  const stackShow = (id) => stack(['show', id]);
+  /** Human edit: the markdown on stdin; exit 3 (conflict) when `expectUpdated` is stale. */
+  const stackSet = (id, markdown, expectUpdated = null) =>
+    stack(['set', id, ...(expectUpdated ? [`--expect-updated=${expectUpdated}`] : [])], { input: markdown });
+  const stackRemove = (id) => stack(['rm', id, '-f']);
+  /** The session's stack, created around it when it has none (may call the model: 150 s). */
+  const stackEnsure = (sessionId, { label = null } = {}) =>
+    stack(['ensure', sessionId, ...(label ? [`--label=${label}`] : [])], { timeoutMs: 150 * 1000 });
+  const stackAdd = (stackId, sessionId) => stack(['add', stackId, sessionId]);
+  const stackSync = () => stack(['sync']);
+
+  return {
+    bin,
+    list,
+    nameAll,
+    nameOne,
+    rename,
+    groupRun,
+    groupCached,
+    groupEdit,
+    configSet,
+    stackList,
+    stackShow,
+    stackSet,
+    stackRemove,
+    stackEnsure,
+    stackAdd,
+    stackSync,
+  };
 }

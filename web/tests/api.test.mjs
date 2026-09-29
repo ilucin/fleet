@@ -352,3 +352,17 @@ test('fleet CLI rename runs `fleet rename <id> <title> --json` and resolves a he
   mode = 'fail';
   await assert.rejects(cli.rename({ target: 'abc', title: 'T' }), /no live session/);
 });
+
+test('stacks: settings/health advertise them; a server without the stacks module answers 501, also through a peer', async (t) => {
+  const { urls } = await startPair(t);
+  const s = await get(`${urls.laptop}/api/settings`);
+  assert.deepEqual(s.body.stacks, { enabled: false, model: 'sonnet', generate: true });
+  const h = await get(`${urls.laptop}/api/health`);
+  assert.deepEqual(h.body.stacks, { sync: false, lastSync: null });
+  const proxied = await get(`${urls.laptop}/api/hosts/workstation/stacks`);
+  assert.equal(proxied.status, 501);
+  assert.match(proxied.body.error, /stacks are not available/);
+  assert.equal((await get(`${urls.laptop}/api/hosts/laptop/stacks/not-a-stack`)).status, 400);
+  // The kill still works (and skips the sync) without it.
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/kill`, {})).status, 200);
+});

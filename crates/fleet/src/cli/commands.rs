@@ -70,7 +70,7 @@ pub fn persist_ui(key: &str, value: &str) -> std::result::Result<(), String> {
 /// Resolve the command used to launch Claude in a spawned session. Hosts differ:
 /// some invoke `claude`, others a wrapper/alias. Precedence: `FLEET_CMD` env var
 /// → `claude` in the config → `claude`.
-fn resolve_launcher() -> String {
+pub(crate) fn resolve_launcher() -> String {
     if let Ok(cmd) = std::env::var("FLEET_CMD") {
         let cmd = cmd.trim();
         if !cmd.is_empty() {
@@ -87,7 +87,7 @@ fn resolve_launcher() -> String {
 
 /// A `--model` id is typed into a shell: letters, digits and `._[]-` only (the
 /// web server enforces the same set). Blank means Claude's own default.
-fn clean_model(raw: &str) -> Result<Option<String>> {
+pub(crate) fn clean_model(raw: &str) -> Result<Option<String>> {
     let m = raw.trim();
     if m.is_empty() {
         return Ok(None);
@@ -105,7 +105,7 @@ fn clean_model(raw: &str) -> Result<Option<String>> {
 }
 
 /// The launcher with `--model <id>` appended when one was picked.
-fn with_model(launcher: &str, model: Option<&str>) -> String {
+pub(crate) fn with_model(launcher: &str, model: Option<&str>) -> String {
     match model {
         Some(m) => format!("{launcher} --model {}", crate::core::tools::shq(m)),
         None => launcher.to_string(),
@@ -130,6 +130,8 @@ pub fn list_rows() -> Vec<Session> {
     naming::stamp_titles(&mut rows);
     // The one title each view draws, computed once here (docs/architecture.md).
     title::stamp_display_titles(&mut rows);
+    // Which session stack each row is in (read-only: no sync, no writes).
+    crate::core::stack::stamp_stacks(&mut rows);
     let host = host_label();
     for r in rows.iter_mut() {
         r.host = Some(host.clone());
@@ -509,7 +511,7 @@ pub struct SpawnOpts {
 impl SpawnOpts {
     /// Fill in the defaults that need the environment: cwd, and the backend we're
     /// sitting in. Also validates, so a bad dir/name fails before anything opens.
-    fn resolve(&self) -> Result<(String, Backend, Option<String>)> {
+    pub(crate) fn resolve(&self) -> Result<(String, Backend, Option<String>)> {
         let dir = self
             .dir
             .as_deref()
@@ -653,7 +655,7 @@ fn spawn_from(source: &str, extra: Option<String>, mut opts: SpawnOpts) -> Resul
 
 /// Where handoff briefs are kept. They outlive the spawn on purpose: the record
 /// of what was handed off, and a file the new session can re-read at any point.
-fn handoff_dir() -> PathBuf {
+pub(crate) fn handoff_dir() -> PathBuf {
     claude_home().join("fleet-handoffs")
 }
 
@@ -733,7 +735,11 @@ fn same_dir(a: &str, b: &str) -> bool {
 /// Poll the registry for the session that just appeared in `dir`. Claude takes a
 /// few seconds to register, so this is worth waiting on — it gives the caller a
 /// name to `peek`/`send` with instead of "go look for it".
-fn await_new_session(before: &HashSet<String>, dir: &str, timeout: Duration) -> Option<Session> {
+pub(crate) fn await_new_session(
+    before: &HashSet<String>,
+    dir: &str,
+    timeout: Duration,
+) -> Option<Session> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(700));
@@ -929,6 +935,7 @@ mod tests {
             display_title: None,
             host: None,
             context: None,
+            stack: None,
         };
         let text = compose("Do it.", "/tmp", Some(&from), "2026-08-17 10:00");
         assert!(text.contains("(app-f9, in /tmp)"));

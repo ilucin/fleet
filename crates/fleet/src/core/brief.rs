@@ -207,7 +207,7 @@ fn is_ws(c: char) -> bool {
 }
 
 /// `String(v).replace(/[\r\n]+/g, ' ').trim()`
-fn one_line(s: &str) -> String {
+pub(crate) fn one_line(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_break = false;
     for c in s.chars() {
@@ -330,7 +330,12 @@ pub fn parse_frontmatter(text: &str) -> (Map<String, Value>, String) {
 }
 
 pub fn serialize_frontmatter(meta: &Map<String, Value>) -> String {
-    let mut keys: Vec<&str> = META_ORDER
+    serialize_frontmatter_ordered(meta, &META_ORDER)
+}
+
+/// [`serialize_frontmatter`] with another key order (the stack files use their own).
+pub fn serialize_frontmatter_ordered(meta: &Map<String, Value>, order: &[&str]) -> String {
+    let mut keys: Vec<&str> = order
         .iter()
         .copied()
         .filter(|k| meta.contains_key(*k))
@@ -338,7 +343,7 @@ pub fn serialize_frontmatter(meta: &Map<String, Value>) -> String {
     keys.extend(
         meta.keys()
             .map(String::as_str)
-            .filter(|k| !META_ORDER.contains(k)),
+            .filter(|k| !order.contains(k)),
     );
     let mut lines = Vec::new();
     for k in keys {
@@ -659,7 +664,7 @@ fn parse_git_value(value: &str) -> (Option<String>, Option<String>, Option<bool>
 }
 
 /// `/^\s*[-*+]\s+(.*)$/`
-fn bullet(line: &str) -> Option<&str> {
+pub(crate) fn bullet(line: &str) -> Option<&str> {
     let l = line.trim_start_matches(is_ws);
     let r = l.strip_prefix(['-', '*', '+'])?;
     if !r.starts_with(is_ws) {
@@ -687,7 +692,7 @@ pub fn parse_todo_line(line: &str) -> Option<Todo> {
 }
 
 /// `/^##\s+(.+?)\s*#*\s*$/` → the heading text, trimmed.
-fn heading(line: &str) -> Option<String> {
+pub(crate) fn heading(line: &str) -> Option<String> {
     let r = line.strip_prefix("##")?;
     if !r.starts_with(is_ws) {
         return None;
@@ -713,7 +718,7 @@ fn heading(line: &str) -> Option<String> {
 }
 
 /// `lines.join('\n').replace(/^\s*\n/, '').trimEnd()`
-fn join(lines: &[&str]) -> String {
+pub(crate) fn join(lines: &[&str]) -> String {
     let s = lines.join("\n");
     let lead = s.len() - s.trim_start_matches(is_ws).len();
     let s = match s[..lead].rfind('\n') {

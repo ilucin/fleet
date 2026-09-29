@@ -26,12 +26,12 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
+`web.ui` (a path), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `web.stacks`, `grouping.host`, `stacks.model` (reported only), `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` / `PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` (`0` / `1`), `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` / `FLEET_WEB_STACKS` (`0` / `1`), `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX`.
 
 `web.autoName` (default off; opt in with `{ "enabled": true, "intervalMinutes": 5 }`) makes each server run
 `fleet name --all --apply` on its own host every few minutes, so sessions started without a
@@ -53,8 +53,16 @@ Resources and todos come from the transcript for free; the summary costs one
 `maxDeltaChars`, `maxCallsPerHour`, `minNewTurns`, `minNewChars`, `maxBriefChars`). Reading and
 editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
 
+**Session stacks** (sessions sharing one StackBrief file, owned by `fleet stack`): the server
+serves `/api/hosts/:host/stacks…` (list, show, edit with conflict check, delete, sync) and spawns
+siblings (`POST …/sessions/:id/stack/spawn` creates the stack around a session first — one
+Sonnet call — and `POST …/stacks/:id/spawn`), adding the new session to the stack once it
+registers. It runs `fleet stack sync` after a kill and every `web.stacks.syncMinutes` (default 2)
+while a session is in a stack; `FLEET_WEB_STACKS=0` turns that background sync off. Routes,
+statuses and limits: ARCHITECTURE.md → HTTP API / Session stacks.
+
 `web.editor` (`"vscode"` default, `"cursor"`, or `null` to hide it) sets the "Open in editor"
-link on briefs and session rows (`editorUrl`): a local folder for sessions on this server's host,
+link on briefs, stacks and session rows (`editorUrl`): a local folder for sessions on this server's host,
 Remote-SSH through `hosts.<host>.ssh` for the others (no ssh alias → no link).
 
 ## Another UI

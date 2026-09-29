@@ -52,6 +52,8 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--name <n>] [--model <id>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
 | `fleet brief <target> [--json \| --prompt]` | print the session's [brief](#briefs) — its body (Summary / Resources / Todos, no frontmatter); `--json` the parsed shape; `--prompt` only the continue prompt |
 | `fleet brief <target> --edit` / `--set [--expect-updated <iso>]` / `--regenerate` / `--open` | edit it in `$VISUAL`/`$EDITOR`; save markdown from stdin; ask the web server to regenerate it; open the session's checkout in VS Code — see [Briefs](#briefs) |
+| `fleet stack list\|show\|new\|ensure\|spawn\|add\|remove\|edit\|set\|sync\|rm …` | [session stacks](#stacks): sessions that share one context file (the StackBrief) |
+| `fleet stack spawn <target> [prompt] [--name <n>] [--model <id>] [--dir <path>] [--no-wait]` | spawn a **sibling** of `<target>`: a new session in its cwd, in its stack (created around it first when it has none), told where the StackBrief is — see [Stacks](#stacks) |
 | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` | live dashboard + notifications on finished/stuck sessions |
 | `fleet skill install [--force]\|show` | install / print the Claude Code skill (`~/.claude/skills/fleet/SKILL.md`; `--force` overwrites a different one) |
 
@@ -78,6 +80,62 @@ reachable by its **full** session id. With `-H <host>` every form runs on that h
 | `--set` | the markdown on stdin, saved as a human edit — the same rules as the web UI's save (`PUT`): it is authoritative for the body, the stored frontmatter is kept (the machine keys stay the server's), resource lines it removes are added to `dismissed` so they are never re-added, `editedAt` is stamped. `--expect-updated <iso>` refuses (exit 3, nothing written) unless the stored `updated` still is that (`""` = no brief yet) — what `--edit` uses so a brief regenerated while you were editing isn't overwritten. `-n` prints the result instead of writing it |
 | `--open` | open the session's git root (else its cwd) in VS Code: `code <path>`, or for a session on another host (`-H`) `code --remote ssh-remote+<its ssh dest> <path>` with the path from `fleet brief --json` there. `cursor` instead of `code` with `web.editor: "cursor"`. Needs the editor's command on `PATH`; `-n` prints the command |
 | `--regenerate` | POST `/api/hosts/<self>/sessions/<id>/brief/regenerate` to this host's web server (`hosts.<self>.web`, else `http://127.0.0.1:<web.port>`) via `curl`; prints whether it started or was queued. The model call runs in the background — read the result with `fleet brief` a little later. At the server's hourly cap: exit 3 with the wait. Needs a live session and a running web server (`fleet web serve`) |
+
+### Stacks
+
+A **stack** is a set of sessions on one host that share one context layer: a markdown file, the
+**StackBrief** — `$FLEET_STACKS_DIR`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/stacks/<stack_id>.md`
+(dir `0700`, files `0600`, atomic writes; format in [architecture.md](architecture.md#session-stacks)).
+The file is the state: id (`st-` + 8 hex, never changes), label, cwd, the members, and the
+sections Summary / Resources / Sessions / Notes. It is written with one `claude -p --model
+<stacks.model>` call (default `sonnet`) when the stack is created; after that scripts keep
+`## Sessions` (membership) and people — or the sessions themselves — edit the rest by hand.
+
+Every session spawned into a stack gets this first prompt: `You're running in the session stack
+with shared context: <abs path to the file>. <prompt>`.
+
+`<stack>` resolves: exact id (`st-1a2b3c4d` or `1a2b3c4d`) → label (exact, then case-insensitive
+prefix, then substring) → a member's session id (whole, or a prefix of ≥ 8) → a session target
+that is a member. Two hits on the same rung is an error listing the candidates (exit 2); no hit is
+exit 3. `<target>` is a live session target as everywhere else (an ambiguous one is exit 2).
+With `-H <host>` every form runs on that host, where the files are.
+
+| form | does |
+| --- | --- |
+| `fleet stack list [--json]` | the host's stacks (after a sync): label, id, live/closed counts, cwd, updated. `--json`: `{ host, stacks: [StackView…] }` |
+| `fleet stack show <stack> [--json \| --path]` | the StackBrief body (no frontmatter); `--json` the StackView; `--path` only the file path |
+| `fleet stack new --from <target> [--label <l>] [--no-llm] [--json]` | create a stack around a live session (error if it is in one already — says which). The model writes Summary / Resources and a label (unless `--label`); `--no-llm`, `FLEET_FIXTURE`, `stacks.enabled: false` or a failing call give the skeleton (Summary "Started from <title> in <cwd>.", Resources = the Git line + Folder) — a failed call never blocks the stack: `generated: false` and a `warning` |
+| `fleet stack ensure <target> [--label] [--no-llm] [--json]` | the session's stack, created like `new` when it has none |
+| `fleet stack spawn <target> [prompt] [--name] [--model] [--dir] [--backend iterm\|tmux] [--tmux-session <s>] [--window] [--no-wait] [--label] [--no-llm] [--json]` | a sibling: `ensure` on `<target>`, then a new session on this host in `<target>`'s cwd (`--dir` overrides) whose first prompt is the context line + `prompt`, always through a prompt file `~/.claude/fleet-handoffs/<stamp>-stack-<hex>.md`; then waits (≤ 75 s) for it to register and adds it. `--no-wait` skips that and prints the `fleet stack add` to run later. `-n` / `FLEET_DRY_RUN` prints the launch line and the prompt and writes nothing (not even a new stack). Starts an agent — confirm like `spawn` |
+| `fleet stack add <stack> <target> [--json]` | add a live session (refused when it is live in another stack) |
+| `fleet stack remove <stack> <target\|session_id> [--json]` | drop a member (a gone one by its session id or a prefix of ≥ 4, or its name); removing the last leaves an empty stack (the file stays) |
+| `fleet stack edit <stack>` | the body in `$VISUAL` / `$EDITOR`, saved as a human edit (with `--expect-updated` semantics; on another host fetched with `stack show --json` and written back with `stack set`) |
+| `fleet stack set <stack> [--expect-updated <iso>] [--json]` | the markdown on stdin, saved as a human edit: authoritative for everything but the header and `## Sessions` (regenerated); the stored machine keys stay; a `label:` in its frontmatter renames the stack; `editedAt` stamped. A stale `--expect-updated` is exit 3, nothing written (with `--json` stdout still carries `{ error, id, updated }`, the stored timestamp) |
+| `fleet stack sync [--json]` | reconcile members with the live sessions: gone → `closed` (once), live → name refreshed; only changed files are rewritten. `--json`: `{ host, changed: [ids], stacks: [StackView…] }`. Also runs implicitly in `list`, `show` and after `spawn` / `add` / `remove` |
+| `fleet stack rm <stack> [-f] [--json]` | delete the stack's file (asks unless `-f`; `--json` needs `-f`) → `{ removed: id }` |
+
+**StackView** (`--json`; the web API serves it as-is):
+
+```json
+{ "host": "laptop", "id": "st-1a2b3c4d", "label": "Login redirect fix", "path": "/abs/…/stacks/st-1a2b3c4d.md",
+  "cwd": "~/Code/project", "absCwd": "/abs/…/Code/project",
+  "created": "…", "updated": "…", "generatedAt": "…", "editedAt": null,
+  "contextLine": "You're running in the session stack with shared context: /abs/…/stacks/st-1a2b3c4d.md.",
+  "members": [ { "session": "<uuid>", "host": "laptop", "name": "login-redirect", "added": "…", "closed": null,
+                 "cwd": "~/Code/project", "firstPrompt": "…",
+                 "live": true, "status": "idle", "briefPath": "/abs/…/briefs/<uuid>.md", "briefExists": true } ],
+  "markdown": "<whole file>", "body": "<without frontmatter>",
+  "parsed": { "summary": "…", "resources": [ { "kind": "PR", "label": "…", "url": "…", "path": null, "text": "…", "branch": null, "linked": null } ],
+              "notes": "…" } }
+```
+
+`status` is `null` for a member that is not live. `new` / `ensure --json` print the StackView plus
+`created` (**bool**: made by this call — it shadows the view's timestamp, which is repeated as
+`createdAt`), `generated`, `warning` (string \| null) and `stack` (the untouched StackView).
+`spawn --json`: `{ stack: StackView, created, generated, warning, spawned: { desc, dir,
+promptFile, tmuxSession }, session: { session_id, pid, display_title } | null, addError,
+addCommand, contextLine }` (`addError` when the new session didn't register in time or could not
+be added; `addCommand` with `--no-wait`); under `-n`: `dryRun: true`, `prompt`, `session: null`.
 
 ### Grouping
 
@@ -256,7 +314,8 @@ fleet init --yes --self laptop \
 | `FLEET_NODE` | `node` binary for `fleet web serve` (over config `web.node`; set by the launchd agent) |
 | `FLEET_WEB_PORT`, `FLEET_WEB_BIND`, `FLEET_WEB_UI` | web server listen address / UI directory (over config `web.*`) |
 | `FLEET_BRIEFS_DIR` | where [briefs](#briefs) live (default `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs`); shared with the web server |
-| `VISUAL`, `EDITOR` | the editor for `fleet brief --edit` and `fleet config edit` (default `vi`) |
+| `FLEET_STACKS_DIR` | where [stacks](#stacks) live (default `${XDG_STATE_HOME:-~/.local/state}/fleet/stacks`) |
+| `VISUAL`, `EDITOR` | the editor for `fleet brief --edit`, `fleet stack edit` and `fleet config edit` (default `vi`) |
 | `FLEET_GROUPS_STATE` | `fleet group` state file (default `${XDG_STATE_HOME:-~/.local/state}/fleet/groups.json`) |
 | `FLEET_FIXTURE=<sessions.json>` | read a canned fleet from a file instead of the live registry (demo/tests; backends are inert) |
 | `NO_COLOR=1` | no colors |
@@ -267,8 +326,8 @@ fleet init --yes --self laptop \
 | --- | --- |
 | 0 | success |
 | 1 | error, bad usage |
-| 2 | tmux commands: ambiguous match (candidates are printed) |
-| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
+| 2 | tmux and `stack` commands: ambiguous match (candidates are printed) |
+| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; `stack set`/`edit`: the StackBrief changed since it was opened; `stack`: no stack matches; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
 | 4 | host unreachable |
 | 127 | a required tool (tmux, node) was not found |
 

@@ -24,6 +24,7 @@ import { createSpawnDirsEditor } from './lib/spawn-dirs.mjs';
 import { createTouchedIndex } from './lib/touched.mjs';
 import { createBriefExtractor } from './lib/brief-extract.mjs';
 import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
+import { createStacks } from './lib/stacks.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -100,6 +101,23 @@ const briefs = createBriefs({
   git: (cwd) => gitInfo(cwd, { run }),
   log,
 });
+// Session stacks: the routes always work (the CLI owns the files); the background membership
+// sync runs every web.stacks.syncMinutes while a session is in a stack (FLEET_WEB_STACKS=0: off).
+const stacks = createStacks({
+  cli,
+  listSessions: async () => {
+    const host = await fleet.localHost({ force: true });
+    if (!host.ok) throw new Error(host.error);
+    return host.sessions;
+  },
+  gateSessions: async () => {
+    const host = await fleet.localHost();
+    return host.ok ? host.sessions : null;
+  },
+  syncEnabled: config.stacks.sync,
+  syncIntervalMs: config.stacks.syncMinutes * 60 * 1000,
+  log,
+});
 const handleApi = createApi({
   config,
   fleet,
@@ -116,6 +134,7 @@ const handleApi = createApi({
   // Settings → Start directories: writes through `fleet config set`, hot-reloads config.spawnDirs.
   spawnDirs: createSpawnDirsEditor({ config, configFile: config.configFile ?? configPath(process.env), cli }),
   briefs,
+  stacks,
   grouper,
   name: NAME,
   version: VERSION,
@@ -158,6 +177,10 @@ server.listen(config.port, config.bind, () => {
   } else {
     log(`[fleet-web] briefs: background generation off (web.briefs.enabled = false); ${config.briefs.dir}`);
   }
+  stacks.start();
+  log(config.stacks.sync
+    ? `[fleet-web] stacks: sync every ${config.stacks.syncMinutes}m while a session is in a stack (fleet stack sync)`
+    : '[fleet-web] stacks: background sync off (FLEET_WEB_STACKS=0)');
 });
 
 let shuttingDown = false;
@@ -169,6 +192,7 @@ function shutdown(signal) {
   spawnNamer?.stop();
   grouper?.stop();
   briefs.stop();
+  stacks.stop();
   uploader.stop();
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);

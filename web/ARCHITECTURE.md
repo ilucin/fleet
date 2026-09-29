@@ -26,7 +26,7 @@ phone ──http──▶ workstation:7777 (self=workstation) ──http──�
 ```
 server.mjs            wiring: config → deps → API → HTTP server → listen
 lib/config.mjs        shared fleet config loader + binary resolution
-lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `config set`, …)
+lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `config set`, `--local stack … --json`, …)
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
@@ -42,6 +42,7 @@ lib/touched.mjs       absolute paths a session's tool calls touched, parsed incr
 lib/brief-format.mjs  session brief file format: parse/serialise, resource + Git-line merge, model-output check, continue prompt (pure)
 lib/brief-extract.mjs brief resources + todos from a transcript (incremental, no model); the conversation delta for the model
 lib/briefs.mjs        brief store (atomic files), budgeted `claude -p` generation, background pass (see Session briefs)
+lib/stacks.mjs        session stacks: `fleet stack` errors → HTTP, sibling spawn dir rule, post-spawn `stack add`, background `stack sync`
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
@@ -75,6 +76,8 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.grouping` | `{ enabled, intervalMinutes }`, default `{ false, 10 }` (opt-in): run the grouping pass here for the whole fleet (see Smart grouping) |
 | `web.uploads` | `{ dir, maxMB, retentionDays }`, default `{ "~/.local/share/fleet/uploads", 100, 14 }`: where files attached in the UI are stored on this host, the per-file limit, and how many days a day dir is kept (`0` = forever; cleanup runs at start and daily) |
 | `web.briefs` | `{ enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns, minNewChars, maxBriefChars }`, default `{ false, "haiku", 60000, 900000, 12000, 12, 2, 2000, 3000 }` (opt-in): background brief generation on this host (see Session briefs); GET/PUT and a manual regenerate work when off |
+| `web.stacks` | `{ syncMinutes }`, default `{ 2 }` (> 0): how often the background `fleet stack sync` runs — only while the last `fleet list` shows a session in a stack; first run 30 s after start (see Session stacks) |
+| `stacks` | the CLI's (`{ enabled, model }`, default `{ true, "sonnet" }`: whether/which model writes a new StackBrief). The server only reports them in `/api/settings`; a bad value falls back to the default, never a startup error |
 | `web.notes` | `{ root, name?, searchCmd?, exclude? }`, default none (off): the notes explorer over the markdown notes under `root` (`~` expanded, absolute). `name` defaults to the root's basename; `searchCmd` is an argv array (or a space-separated string) run with cwd = root — `{query}` is the query as one argument, `{args}` one argument per word, neither → the query is appended; `exclude` = extra names / root-relative paths to hide (see Notes) |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
@@ -84,8 +87,9 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `spawnDirs[]` | `{ label, paths: { <host>: dir } }` → this host offers `{ label, path: paths[self] }`; `{ label, path }` means the same dir on every host; `~` expanded; none → `[{ label: "Home", path: $HOME }]` |
 
 Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` (or `PORT`), `FLEET_WEB_BIND`, `FLEET_WEB_UI`,
-`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` (`0`/`false`/`off` disables, anything else enables),
-`FLEET_BRIEFS_DIR` (where brief files live), `FLEET_BIN`, `FLEET_TMUX`.
+`FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` / `FLEET_WEB_STACKS` (`0`/`false`/`off` disables, anything else enables;
+`FLEET_WEB_STACKS` only turns the background stack sync off — the routes keep working),
+`FLEET_BRIEFS_DIR` (where brief files live), `FLEET_BIN`, `FLEET_TMUX`. The CLI reads `FLEET_STACKS_DIR` (where StackBriefs live).
 
 Missing config → runs as a single host `local` on 127.0.0.1 and logs a hint to run
 `fleet init`. A config that exists but is not valid JSON / has a bad shape → exits with code
@@ -126,6 +130,16 @@ The grouping pass is `fleet group --input - --apply --json` (timeout 5 min, the 
 `/api/fleet` body on stdin; `lib/run.mjs` takes `opts.input`); at start the server reads the stored
 groups with `fleet group --cached --json`. Both answer the JSON report in docs/cli.md → Grouping.
 
+Session stacks are `fleet --local stack <sub> … --json` (`NO_COLOR=1`, timeout 20 s; `ensure`
+150 s, it may call the model): `list`, `show <id>`, `set <id> [--expect-updated=<iso>]` (markdown
+on stdin), `rm <id> -f`, `ensure <session_id> [--label=<l>]`, `add <stack_id> <session_id>`,
+`sync`. Every answer is passed through as-is (StackView, docs/architecture.md → Session stacks);
+the server never parses a StackBrief. Failures map to HTTP by exit code and stderr
+(`lib/stacks.mjs#stackHttpError`): "no stack …" / "not found" → 404; `set` exit 3 → 409 with the
+JSON report the CLI printed on stdout (`{ error, updated }`); other exit 2/3 → 409; exit 1 → 400;
+a timeout → 504; a CLI without the `stack` subcommand (clap "unrecognized subcommand") → 501;
+anything else → 502.
+
 Peek/send/keys do **not** go through `fleet peek/send` (those truncate to terminal width and
 add a header). `lib/backends.mjs` drives the backends directly, mirroring the CLI:
 
@@ -143,8 +157,8 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 
 | method | path | request | response |
 | --- | --- | --- | --- |
-| GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun }, grouping, briefs: { enabled, model, callsLastHour, maxCallsPerHour, generating, lastRun } }` |
-| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }], notes: { enabled, name? } }` |
+| GET | `/api/health` | | `{ name, version, apiVersion, self, uptime, now, autoName: { enabled, intervalMinutes, lastRun }, grouping, briefs: { enabled, model, callsLastHour, maxCallsPerHour, generating, lastRun }, stacks: { sync, syncMinutes, lastSync: { at, ms, reason, ok, changed: [ids], error? } \| null } }` |
+| GET | `/api/settings` | | `{ apiVersion, self, hosts: [names], quickReplies: [{ label, text }], uploads: { maxMB }, models: [{ id, label }], notes: { enabled, name? }, stacks: { enabled, model, generate } }` — `stacks.model` / `generate` = the config's `stacks.model` (default `"sonnet"`) / `stacks.enabled` |
 | GET | `/api/fleet` | `?local=1` = this host only | `{ self, hosts: [Host], snapshotAt }` — self first, then peers (`snapshotAt` only on the merged view) |
 | GET | `/api/hosts/:host/sessions/:id/peek` | `?lines=200` (10..2000) | `{ host, id, backend, lines, text, capturedAt }` |
 | GET | `/api/hosts/:host/sessions/:id/messages` | `?limit=60` (1..500) | `{ host, id, status, backend, name, limit, messages: [Message], total, truncated, updatedAt, capturedAt }` |
@@ -170,6 +184,21 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | GET | `/api/hosts/:host/notes/raw` | `?path=<root-relative image>` | the image bytes (streamed, also through a peer); 400 for anything but an image |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` (≤ 60000 chars; frontmatter optional — the server keeps its own keys) | `Brief` after the edit (`editedAt` set; resource lines removed by the edit become `dismissed`). 400 not a string |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` | **202** `{ host, id, started, queued, generating: true }` — returns at once, poll GET until `generating` is false. `started: false, queued: false` = one for this session is already running; `queued: true` = waiting for another session's call. **429** `{ error, retryAfterMs }` at `maxCallsPerHour`; 404 no transcript / gone session |
+| GET | `/api/hosts/:host/stacks` | | `{ host, stacks: [StackView] }` (`fleet stack list --json`, which syncs membership first) |
+| POST | `/api/hosts/:host/stacks/sync` | `{}` | `{ host, changed: [ids], stacks: [StackView] }` (`fleet stack sync --json`) |
+| GET | `/api/hosts/:host/stacks/:id` | `:id` = `st-` + 8 hex | `StackView`. 400 bad id, 404 unknown stack |
+| PUT | `/api/hosts/:host/stacks/:id` | `{ markdown, expectUpdated? }` — markdown a string ≤ 64 kB (UTF-8; the request body may be up to 256 kB), `expectUpdated` the `updated` you loaded | `StackView` after the human edit (`fleet stack set`). **409** `{ error, updated }` when the stored `updated` differs (nothing written — reload); 400 bad body / id; 404 unknown |
+| DELETE | `/api/hosts/:host/stacks/:id` | | `{ removed: id }` (`fleet stack rm <id> -f`). 404 unknown |
+| POST | `/api/hosts/:host/sessions/:id/stack/spawn` | `{ prompt?, name?, model?, dir?, label? }` — as spawn; `label` names a stack created here | **Sibling spawn**: `fleet stack ensure <session_id>` (creates the stack around the session when it has none: one model call, ≤ 150 s), then this server's spawner in the session's cwd (`dir` must be inside it or inside a spawn dir) with the prompt `contextLine + " " + prompt` (only the context line when empty); the new session is added to the stack in the background. → `{ host, stack: StackView, created, generated, spawn: { ok, host, name, dir, tmuxSession, command, trusted, model } }`. 400 bad body / dir (checked before `ensure`), 404 unknown session, 409 no session id / cwd yet. Proxy timeout 180 s |
+| POST | `/api/hosts/:host/stacks/:id/spawn` | `{ prompt?, name?, model?, dir? }` | the same without `ensure`: `dir` defaults to the stack's `absCwd` (400 when that is not a directory here); `created` / `generated` are `false` |
+
+The stack routes need the `fleet stack` subcommand on that host (501 otherwise; absent routes on
+an older server are 404). `editor` / `editorUrl` (for `absCwd`) are added to every StackView by the
+server that received the request, like briefs. **StackView** = `{ host, id, label, path, cwd,
+absCwd, created, updated, generatedAt, editedAt, contextLine, members: [{ session, host, name,
+added, closed, live, status, briefPath, briefExists }], markdown, body, parsed: { summary,
+resources: [Resource], notes } }` — the CLI's shape, passed through (docs/architecture.md →
+Session stacks).
 
 **Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text, branch, linked }], todos: [{ done, text }], plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` —
 `markdown` is the whole file (frontmatter included, canonical form); `kind` is `PR` | `Issue` |
@@ -378,6 +407,28 @@ past every gate (idle ≥ `idleMs`, ≥ `minNewTurns` / `minNewChars` new, ≥ `
 session's call, nothing else generating, < `maxCallsPerHour`) — one `claude -p` call. GET also runs
 the model-free extraction (so a brief exists as soon as someone looks), never the model. The
 `claude` binary is resolved from `PATH`, `~/.local/bin`, `~/.claude/local` and the Homebrew dirs.
+
+## Session stacks
+
+A stack is N sessions sharing one StackBrief file; the CLI owns it (docs/architecture.md →
+Session stacks) and the server only shells out to `fleet --local stack … --json`
+(lib/fleet-cli.mjs) through `createStacks` (lib/stacks.mjs), always created in server.mjs.
+
+- **Sibling spawn** (`…/sessions/:id/stack/spawn`, `…/stacks/:id/spawn`): the body is validated
+  and the directory resolved before anything else (no model call for a bad request), then
+  `stack ensure` (session route only), then the normal spawner (lib/spawn.mjs: tmux, trust prompt,
+  long prompts via a file) with the StackView's `contextLine` prepended. An unnamed spawn with a
+  prompt still gets the targeted naming pass (`createSpawnNamer`), as with `/spawn`.
+- **Joining**: `stacks.join(tmuxSession, stackId)` polls this host's fresh `fleet list` after 3,
+  4, 5, 6, 7, 10, 10, 15 and 15 s (75 s in all) for the row with that `tmux_session` and a
+  `session_id` (`findSpawned`, shared with the spawn namer), then runs `stack add <stack> <session>`.
+  A refusal (exit 1–3) stops it, other failures retry; each outcome is logged (`[stacks] …`).
+  Out of tries, the log says which `fleet stack add` to run.
+- **Sync**: `fleet stack sync` runs after every successful kill (best effort, never fails the
+  kill) and every `web.stacks.syncMinutes` (default 2, first after 30 s) while `fleet list` (the
+  2 s cache) shows any session with `stack != null`. `FLEET_WEB_STACKS=0` turns the background
+  pass off. Runs are de-duplicated; a call made during a run gets one trailing run.
+  `/api/health` reports `stacks.lastSync`.
 
 ## UI (`ui/`, React)
 

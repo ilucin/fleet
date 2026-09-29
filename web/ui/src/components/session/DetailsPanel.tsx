@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   CodeXmlIcon,
   CopyIcon,
+  GitForkIcon,
+  LayersIcon,
   Loader2Icon,
   MessageSquareTextIcon,
   PowerIcon,
@@ -50,6 +52,11 @@ export interface DetailsPanelProps {
   editor?: { url: string | null | undefined; kind?: string | null }
   /** Desktop panel: the ✕ in the top-right corner. */
   onClose?: () => void
+  /**
+   * Session stacks (absent: the host predates them): in a stack → StackBrief (the sheet);
+   * not in one → Spawn sibling… (creates the stack).
+   */
+  stack?: { label: string | null; onOpen: () => void } | { label: null; onSpawnSibling: () => void } | null
 }
 
 const segItem =
@@ -271,6 +278,23 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
           </Section>
 
           <Section title="Session">
+            {p.stack ? (
+              'onOpen' in p.stack ? (
+                <Row label="Session stack" hint={p.stack.label ?? undefined}>
+                  <Button variant="outline" className="h-9 px-3" onClick={p.stack.onOpen}>
+                    <LayersIcon />
+                    StackBrief
+                  </Button>
+                </Row>
+              ) : (
+                <Row label="Sibling session" hint="Starts a new stack around this session (one Sonnet call)">
+                  <Button variant="outline" className="h-9 px-3" onClick={p.stack.onSpawnSibling}>
+                    <GitForkIcon />
+                    Spawn sibling…
+                  </Button>
+                </Row>
+              )
+            ) : null}
             {s ? (
               <div className="py-1.5">
                 <Row label="Attach command" hint={attachCmd ? 'Run in a terminal on any fleet host' : 'Only for tmux sessions — this one is an iTerm tab'}>

@@ -23,6 +23,10 @@ import type {
   SpawnDirsResponse,
   SpawnRequest,
   SpawnResponse,
+  StackSpawnRequest,
+  StackSpawnResponse,
+  StacksResponse,
+  StackView,
   UploadResponse,
 } from './types'
 import type { GroupEdit } from '@/lib/groups'
@@ -46,7 +50,7 @@ export function isAbortError(err: unknown): boolean {
 
 export interface RequestOptions {
   signal?: AbortSignal
-  method?: 'GET' | 'POST' | 'PUT'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   body?: unknown
   /** A raw body (a File for uploads), sent as-is with its own type. */
   file?: Blob
@@ -158,6 +162,27 @@ export const api = {
   notesSearch: (host: string, q: string, limit = 50, o: Opts = {}) =>
     request<NotesSearch>(`${hostPath(host)}/notes/search?q=${enc(q)}&limit=${limit}`, o),
   noteFile: (host: string, path: string, o: Opts = {}) => request<NoteFile>(`${hostPath(host)}/notes/file?path=${enc(path)}`, o),
+
+  /** Session stacks on `host` (404 / 501 on servers that predate stacks — see lib/stacks.ts `stacksMissing`). */
+  stacks: (host: string, o: Opts = {}) => request<StacksResponse>(`${hostPath(host)}/stacks`, o),
+  stack: (host: string, id: string, o: Opts = {}) => request<StackView>(`${hostPath(host)}/stacks/${enc(id)}`, o),
+  /** A human edit of the whole StackBrief; 409 `{ error, updated }` when `expectUpdated` is stale. */
+  saveStack: (host: string, id: string, markdown: string, expectUpdated?: string | null, o: Opts = {}) =>
+    request<StackView>(`${hostPath(host)}/stacks/${enc(id)}`, {
+      ...o,
+      method: 'PUT',
+      body: { markdown, ...(expectUpdated ? { expectUpdated } : {}) },
+    }),
+  deleteStack: (host: string, id: string, o: Opts = {}) =>
+    request<{ removed: string }>(`${hostPath(host)}/stacks/${enc(id)}`, { ...o, method: 'DELETE' }),
+  /** A sibling of `sessionId`: its stack (created first when it has none — one model call), then a new session in its cwd. */
+  spawnSibling: (host: string, sessionId: string, body: StackSpawnRequest, o: Opts = {}) =>
+    request<StackSpawnResponse>(sessionPath(host, sessionId, 'stack/spawn'), { ...o, method: 'POST', body }),
+  /** A new session in an existing stack (in the stack's directory). */
+  spawnInStack: (host: string, stackId: string, body: StackSpawnRequest, o: Opts = {}) =>
+    request<StackSpawnResponse>(`${hostPath(host)}/stacks/${enc(stackId)}/spawn`, { ...o, method: 'POST', body }),
+  syncStacks: (host: string, o: Opts = {}) =>
+    request<{ host?: string; changed: string[]; stacks: StackView[] }>(`${hostPath(host)}/stacks/sync`, { ...o, method: 'POST', body: {} }),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),

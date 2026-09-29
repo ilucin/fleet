@@ -22,6 +22,8 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | "spawn / start a session to …" | `fleet spawn "<prompt>" --dir <path> [--name <name>] [--model <id>] [--backend iterm\|tmux] [--window]` |
 | "what is X doing / where was X" (summary, PRs, files, todos) | `fleet brief <target>` (`--json` to parse) — the session's brief; see below |
 | "continue X's work in a new session" | `fleet spawn --from <target> ["<extra instructions>"] [--name <name>]` — same host and cwd, seeded with X's brief |
+| "spawn a sibling / another session on this with shared context" | `fleet stack spawn <this session> "<prompt>"` — see Session stacks below |
+| "what's in this stack / what are my siblings doing" | `fleet stack show <stack>` (`--json` to parse), `fleet stack list` |
 | "take this to another terminal" | `fleet handoff --file <brief.md> --dir <path> [--name <name>] [--tab] [--no-wait]` — see below |
 | "watch / notify me / anyone stuck" | `fleet watch [--interval 5] [--stuck 300] [--quiet] [--rows 1\|2\|auto] [--no-mouse]` |
 | "what's running everywhere" | `fleet list --all-hosts` (add `--json`; every row carries `host`) |
@@ -146,6 +148,16 @@ Every session can have a **brief** — a small markdown file (Summary / Resource
 - `fleet brief <target> --set` (markdown on stdin) saves a human edit — edits are authoritative, and resource lines removed are never re-added. Only edit when the user asks. `--edit` opens an editor: tell the user to run it, don't run it inline.
 - `fleet brief <target> --open` opens the session's checkout (git root, else cwd) in VS Code — Remote-SSH for a session on another host. Only when the user asks.
 - `fleet brief <target> --regenerate` asks the host's web server for a fresh one (a model call, capped per hour) — only when the user asks; it runs in the background.
+
+## Session stacks
+
+A **stack** is a set of sessions (on one host) that share one context file, the **StackBrief** — a markdown file with `## Summary`, `## Resources`, `## Sessions` and `## Notes`. It is written once by a model when the stack is created; after that `fleet stack` keeps `## Sessions` (who is in it, live or closed, where each one's brief and transcript are) and everyone else edits the rest by hand.
+
+- **If your first prompt starts with "You're running in the session stack with shared context: <path>."** — you are in a stack. **Read that file first**, before anything else. While you work, keep its **Summary** and **Resources** current for your siblings (PRs you opened, worktrees/branches, folders, decisions that bind everyone): edit the file directly, it is meant to be hand-edited. **Never touch `## Sessions`** (it is regenerated) or the frontmatter members.
+- **See what a sibling did:** `fleet stack show <stack>` (the StackBrief; `--json` for members with `live` / `status` / `briefPath`), then `fleet brief <session>` for that sibling's brief, or read the transcript path listed under Sessions.
+- **Spawn a sibling:** `fleet stack spawn <this session> "<prompt>" [--name <n>] [--model <id>]` — a new session in the same cwd and stack (the stack is created around this session first when it has none — one Sonnet call). It starts a new agent: **confirm with the user like `spawn`**. It waits until the sibling registers and adds it; `--no-wait` prints the `fleet stack add` to run later. `<this session>` is your own title, name or session-id prefix as `fleet list` shows it (match your cwd and first prompt there).
+- **Overview:** `fleet stack list` (stacks on this host, live/closed counts); `fleet list --json` rows carry `stack: { id, label } | null`.
+- Membership changes: `fleet stack add <stack> <session>`, `fleet stack remove <stack> <session>`; `fleet stack sync` marks gone sessions closed (it also runs on its own). `fleet stack set <stack>` saves markdown from stdin; `fleet stack rm <stack> -f` deletes a stack — only when the user asks. Add `-H <host>` for a stack on another host.
 
 ## Session names
 

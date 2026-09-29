@@ -177,6 +177,31 @@ impl GroupingConfig {
     }
 }
 
+/// `stacks` — session stacks (`fleet stack`, docs/architecture.md → "Session stacks").
+/// Opt-*out*: `enabled: false` never calls the model (a new stack gets the skeleton brief).
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StacksConfig {
+    /// Call the model when a stack is created. `false` = skeleton StackBrief only.
+    pub enabled: Option<bool>,
+    /// Model passed to `claude -p --model` (default `sonnet`).
+    pub model: Option<String>,
+}
+
+impl StacksConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+    pub fn model(&self) -> String {
+        self.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("sonnet")
+            .to_string()
+    }
+}
+
 /// The typed view of the config file.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -198,6 +223,7 @@ pub struct Config {
     pub tui: UiConfig,
     pub naming: NamingConfig,
     pub grouping: GroupingConfig,
+    pub stacks: StacksConfig,
 }
 
 impl Config {

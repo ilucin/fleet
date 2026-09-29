@@ -19,6 +19,7 @@ import {
   repoOf,
   statusSummary,
   stickyColumns,
+  withStackColumns,
 } from './groups'
 
 const s = (over: Partial<Session>): Session => ({ host: 'laptop', session_id: 'id', status: 'idle', ...over })
@@ -208,6 +209,17 @@ describe('stickyColumns', () => {
     expect(ids(stickyColumns([col('c'), col('b'), col('a')], gone.order).columns)).toEqual(['a', 'b', 'c'])
   })
 
+  test('a new stack column goes first; a remembered one keeps its slot', () => {
+    const r = stickyColumns([col('a'), col('stack:st-1', { source: 'stack' }), col('b')], ['a', 'b'])
+    expect(ids(r.columns)).toEqual(['stack:st-1', 'a', 'b'])
+    expect(r.order).toEqual(['stack:st-1', 'a', 'b'])
+    expect(ids(stickyColumns([col('stack:st-1', { source: 'stack' }), col('a'), col('b')], ['a', 'stack:st-1', 'b']).columns)).toEqual([
+      'a',
+      'stack:st-1',
+      'b',
+    ])
+  })
+
   test('over the cap, absent ids are forgotten first', () => {
     const prev = Array.from({ length: BOARD_ORDER_MAX }, (_, i) => `old${i}`)
     const r = stickyColumns([col('old50'), col('new')], prev)
@@ -251,4 +263,47 @@ test('reorderColumns', () => {
   expect(reorderColumns(['a', 'b', 'c'], 'a', UNGROUPED_ID)).toEqual(['b', 'c', 'a'])
   expect(reorderColumns(['a', 'b'], 'x', 'b')).toEqual(['a', 'x', 'b'])
   expect(reorderColumns(['a', 'b'], 'a', 'a')).toEqual(['a', 'b'])
+})
+
+describe('withStackColumns', () => {
+  const st = (id: string, label = id) => ({ id, label })
+  const sessions = [
+    s({ session_id: 'a', cwd: '~/Code/project', stack: st('st-1', 'Login fix'), updated_at: 5 }),
+    s({ session_id: 'b', cwd: '~/Code/project', stack: null, updated_at: 4 }),
+    s({ session_id: 'c', cwd: '~/Code/other', stack: st('st-1', 'Login fix'), status: 'waiting', updated_at: 3 }),
+    s({ session_id: 'd', cwd: '~/Code/other', stack: st('st-2'), updated_at: 2 }),
+  ]
+  const base = () => boardColumns(sessions, fallbackGroups(sessions))
+
+  test('every stack is a column before the others; its members leave their groups; empty groups vanish', () => {
+    const cols = withStackColumns(base(), sessions)
+    expect(cols.map((c) => c.id)).toEqual(['stack:st-1', 'stack:st-2', 'repo:~/Code/project'])
+    const first = cols[0]
+    expect(first).toMatchObject({ label: 'Login fix', source: 'stack', ungrouped: false, stack: { id: 'st-1', host: 'laptop' } })
+    // Waiting first inside the column, and the summary follows the members.
+    expect(first.sessions.map((x) => x.session_id)).toEqual(['c', 'a'])
+    expect(first.summary.waiting).toBe(1)
+    const project = cols[2]
+    expect(project.sessions.map((x) => x.session_id)).toEqual(['b'])
+    expect(project.summary).toEqual(statusSummary(project.sessions))
+  })
+
+  test('no stacks (older servers, no `stack` on rows): the columns come back as they were', () => {
+    const plain = sessions.map(({ stack: _stack, ...rest }) => rest as Session)
+    const cols = boardColumns(plain, fallbackGroups(plain))
+    expect(withStackColumns(cols, plain)).toBe(cols)
+  })
+
+  test('only stacks with a shown member get a column (filters apply)', () => {
+    const shown = sessions.filter((x) => x.session_id !== 'd')
+    const cols = withStackColumns(boardColumns(shown, fallbackGroups(sessions)), shown)
+    expect(cols.map((c) => c.id)).toEqual(['stack:st-1', 'repo:~/Code/project'])
+  })
+
+  test('the same stack id on two hosts stays two columns', () => {
+    const two = [s({ session_id: 'a', stack: st('st-1') }), s({ session_id: 'b', host: 'workstation', stack: st('st-1') })]
+    const cols = withStackColumns(boardColumns(two, []), two)
+    expect(cols.map((c) => c.id)).toEqual(['stack:st-1', 'stack:workstation/st-1'])
+    expect(boardOrder(cols).map((x) => x.session_id)).toEqual(['a', 'b'])
+  })
 })

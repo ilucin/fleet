@@ -35,7 +35,7 @@ src/
   lib/title.ts        the one session title: sessionTitle() (display_title + optimistic override), validateTitle(),
                       titleChanged(), renameFailure() / tmuxNote() toast copy, echoesTitle()
   lib/sessions.ts     status meta/labels, filters, search, sort, listView(), findSession(), sessionHref(),
-                      spawnTargets(), findSpawned(), withoutSession()
+                      spawnTargets(), findSpawned(), withoutSession(), clusterByStack() (a stack's rows adjacent)
   lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
   lib/markdown.ts     safe markdown → AST, linkify()
   lib/autoname.ts     naming-pass summaries for toasts / the menu
@@ -43,7 +43,10 @@ src/
   lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
                       fallbackGroups()/repoOf() (client-side group-by-repo, worktree-aware),
                       statusSummary(), boardOrder() (↑/↓ order), groupsStatusText(), regroupToast(),
-                      applyGroupEdit() (optimistic rename / move), reorderColumns()
+                      applyGroupEdit() (optimistic rename / move), reorderColumns(),
+                      withStackColumns() (session stacks → `stack:<id>` columns first)
+  lib/stacks.ts       session stacks: memberLive()/memberCounts()/memberCountsText(), sortedMembers(),
+                      stacksMissing() (server predates stacks), stacksKnown(), conflictUpdated() (409 body)
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
   lib/shortcuts.ts    desktop keyboard map: BINDINGS (⌘/Ctrl combos), matchShortcut() (key + platform /
                       typing context → action), shortcutHint() (per browser / Fleet.app), isTypingTarget(),
@@ -84,6 +87,10 @@ src/
   hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
                       every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now;
                       edit() = rename / move (optimistic, POST /api/groups/edit); useBoardColumns() + moveColumn()
+  hooks/useStack.ts   useStack(host, id, enabled, ms): one stack (15s in the sheet, 60s for the session's stack bar),
+                      `missing` when the server predates stacks
+  hooks/useStackUi.ts module store for the app-wide Stack sheet / Spawn sibling form: openStackSheet(),
+                      openSiblingSpawn(SiblingTarget), close…()
   hooks/useMediaQuery.ts   useMediaQuery(), useIsDesktop() (≥ 1024px), WIDE_QUERY (≥ 1440px)
   hooks/useTitles.ts  inline-rename store: startEditing/openTitleEditor/stopEditing, useEditing(scope, key),
                       useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
@@ -105,6 +112,8 @@ src/
   components/board/   Board (desktop Kanban + header), BoardColumns (columns, drag'n'drop, rename), BoardCard,
                       GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
+  components/stack/   StackUi (mounted once in App: the sheet + the sibling form), StackSheet, StackChip (list rows),
+                      StackColumnMenu (board column / mobile section ⋯), StackBar (under the session header)
   components/session/ detail screen parts: ChatView, TermView, Composer, OutboxBubbles (pending / sending / sent /
                       failed user bubbles; the terminal view's strip), FilePreview, DetailsPanel (the desktop
                       details column) / DetailsDrawer (mobile ⋯), BriefSection (its top), LatestButton
@@ -179,7 +188,7 @@ src/
   ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
   sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)
   of the usual `SessionRow`s. The List view is unchanged.
-  Desktop editing (server groups only — not the repo fallback, not Ungrouped):
+  Desktop editing (server groups only — not the repo fallback, not Ungrouped or stack columns):
   click a column's name to rename it (Enter / clicking away saves, Esc cancels); drag a card onto
   another column to move the session there, or onto "Drop here for a new group" (shown while
   dragging) and name it; drag a column's header to reorder the columns (`fleet.boardOrder`).
@@ -195,6 +204,36 @@ src/
   and `fleet.spawnModel` (a model id no longer offered falls back to the first option). The unsent
   first prompt is kept as a draft (`fleet.spawnDraft`, a week) across closing the form and reloads,
   and cleared once the session starts; a prefilled "Continue in new session" never touches it.
+- **Session stacks** (docs/architecture.md / ../ARCHITECTURE.md → stacks): N sibling sessions sharing one
+  context file, the **StackBrief**. Everything keys off `stack: { id, label } | null` on fleet rows;
+  a row without the field (older CLI) and a 404 "not found" / 501 on the stack routes (older server)
+  hide the stack UI — no error on list load.
+  - **List**: a session in a stack shows a chip (layers icon + label, truncated) in its row's meta
+    line; a click opens the Stack sheet (never the row). Rows of one stack stay adjacent: after the
+    activity sort each stack moves up to its first member (`clusterByStack`, stable).
+  - **Board**: every stack with a shown member is its own column (`stack:<id>`, `source: 'stack'`),
+    its members taken out of the smart / repo groups (empty groups vanish; `withStackColumns`, before
+    the sticky order — a new stack column starts first, then keeps its slot like any column). Header:
+    layers icon, label, status dots, count, ⋯ → StackBrief / Spawn sibling. Stack columns take no
+    drops and cannot be renamed there (edit the label in the StackBrief). Mobile grouped list: the
+    same sections, ⋯ beside the section header.
+  - **Session screen**: a slim bar under the header while the session is in a stack — label,
+    "2 live · 1 closed" (loaded once, then every 60s), StackBrief, Spawn sibling. Not in one: Details →
+    Session → **Spawn sibling…** (the form says it starts a new stack around this session, one Sonnet call).
+  - **Stack sheet** (desktop: a large dialog; mobile: full screen): label, host · cwd · counts ·
+    "updated 3m ago · edited"; **Sessions** (live first with their status, closed ones with "closed 2h
+    ago"; a click opens that session); **StackBrief** — Summary, Resources (URLs open a new tab),
+    Notes, the file path. Edit (pencil) = the whole file incl. frontmatter in a textarea (`label:`
+    renames; `## Sessions` is regenerated by fleet); Save (⌘/Ctrl+Enter; Esc cancels) PUTs it with
+    `expectUpdated` = the `updated` the edit started from. A 409 ("changed elsewhere") toasts, reloads
+    and keeps the edit open with a note — Save again overwrites. Footer: Spawn sibling, Open in
+    VS Code / Cursor (`editorUrl`, hidden when absent and on touch screens), Delete stack (click twice
+    within 5s; the sessions keep running). Polls the stack every 15s while open.
+  - **Spawn sibling**: the New session form in a `sibling` mode — host and directory fixed (the
+    source session's / stack's, shown read-only), model picker, first prompt (never the saved draft).
+    From a session → `POST …/sessions/:id/stack/spawn` (ensures the stack; "Creating stack…" while the
+    model call runs); from a stack → `POST …/stacks/:id/spawn`. A toast says when a stack was created
+    (and whether the model wrote the StackBrief); then the usual spawn watch opens the new session.
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
   - header: back, title (click to rename), status, host, "updated Xs ago", Chat | Term toggle, ⋯;

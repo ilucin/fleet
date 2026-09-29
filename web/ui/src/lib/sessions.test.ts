@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 
 import type { FleetResponse, Session } from '@/api/types'
 import {
+  clusterByStack,
   findSession,
   findSpawned,
   listView,
@@ -111,4 +112,41 @@ test('withoutSession drops only that session', () => {
   const out = withoutSession(fleet, 'a', '1')
   expect(out.hosts[0].sessions.map((s) => s.session_id)).toEqual(['2'])
   expect(out.hosts[1].sessions).toHaveLength(1)
+})
+
+test('clusterByStack: a stack moves up to its first member, everything else keeps its place', () => {
+  const st = { id: 'st-1', label: 'Login fix' }
+  const rows = [
+    s({ session_id: 'a', stack: st }),
+    s({ session_id: 'b', stack: null }),
+    s({ session_id: 'c' }),
+    s({ session_id: 'd', stack: st }),
+    s({ session_id: 'e', stack: { id: 'st-2', label: 'x' } }),
+  ]
+  expect(clusterByStack(rows).map((x) => x.session_id)).toEqual(['a', 'd', 'b', 'c', 'e'])
+  // Same id on another host: a different stack.
+  const hosts = [s({ session_id: 'a', stack: st }), s({ session_id: 'b' }), s({ session_id: 'c', host: 'workstation', stack: st })]
+  expect(clusterByStack(hosts).map((x) => x.session_id)).toEqual(['a', 'b', 'c'])
+  // Nothing to move: the same array back.
+  const plain = [s({ session_id: 'a' }), s({ session_id: 'b' })]
+  expect(clusterByStack(plain)).toBe(plain)
+})
+
+test('listView keeps stacks adjacent after sorting by activity', () => {
+  const st = { id: 'st-1', label: 'Login fix' }
+  const f: FleetResponse = {
+    self: 'laptop',
+    hosts: [
+      {
+        name: 'laptop',
+        ok: true,
+        sessions: [
+          s({ session_id: 'a', updated_at: 3, stack: st }),
+          s({ session_id: 'b', updated_at: 2 }),
+          s({ session_id: 'c', updated_at: 1, stack: st }),
+        ],
+      },
+    ],
+  }
+  expect(listView(f, {}).sessions.map((x) => x.session_id)).toEqual(['a', 'c', 'b'])
 })

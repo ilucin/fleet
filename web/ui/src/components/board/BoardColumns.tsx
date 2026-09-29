@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { PlusIcon } from 'lucide-react'
+import { LayersIcon, PlusIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
 import { BoardCard } from '@/components/board/BoardCard'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
+import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
 import { Input } from '@/components/ui/input'
 import { memberId, type BoardColumn, type GroupEdit } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
@@ -111,6 +112,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
             className={cn(
               'relative flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30 transition-colors',
               c.ungrouped && 'border-dashed',
+              c.stack && 'border-primary/25',
               drag?.kind === 'column' && drag.id === c.id && 'opacity-50',
               hit && !side && 'border-primary/60 bg-accent/50',
             )}
@@ -126,6 +128,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
               title={c.description ?? undefined}
             >
               <div className="flex min-w-0 items-center gap-2">
+                {c.stack ? <LayersIcon aria-label="Session stack" className="size-3.5 shrink-0 text-primary" /> : null}
                 <ColumnTitle
                   column={c}
                   editable={editable && isGroup(c)}
@@ -135,6 +138,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
                 />
                 <StatusSummaryDots summary={c.summary} />
                 <span className="rounded-md bg-muted px-1.5 text-[0.6875rem] text-muted-foreground tabular-nums">{c.sessions.length}</span>
+                {c.stack ? <StackColumnMenu stack={c.stack} label={c.label} sessions={c.sessions} className="-my-1 -mr-1.5" /> : null}
               </div>
               {c.description ? <p className="mt-0.5 line-clamp-2 text-[0.6875rem] text-dimmer">{c.description}</p> : null}
             </header>

@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use fleet::cli::{
     brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, skill,
-    tmux as tmux_cmds, web,
+    stack as stack_cmds, tmux as tmux_cmds, web,
 };
 use fleet::core::config;
 use fleet::core::discovery::Backend;
@@ -247,6 +247,12 @@ enum Commands {
         window: bool,
     },
 
+    /// Session stacks: sessions sharing one context file (the StackBrief); spawn siblings
+    Stack {
+        #[command(subcommand)]
+        cmd: StackCmd,
+    },
+
     /// Hand the current work off to a fresh session in another window
     Handoff {
         /// The brief for the new session (or use --file / stdin)
@@ -393,6 +399,132 @@ struct NewArgs {
 }
 
 #[derive(Subcommand, Clone)]
+enum StackCmd {
+    /// Stacks on this host (after a membership sync)
+    #[command(visible_alias = "ls")]
+    List {
+        /// `{ host, stacks: [StackView…] }`
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a stack's StackBrief (body, no frontmatter)
+    Show {
+        /// stack id, label (or a fragment of it), or a member session target
+        stack: String,
+        /// The StackView JSON
+        #[arg(long, conflicts_with = "path")]
+        json: bool,
+        /// Only the file's path
+        #[arg(long)]
+        path: bool,
+    },
+    /// Create a stack around a live session (one model call writes Summary / Resources)
+    New {
+        /// The session the stack starts from
+        #[arg(long, value_name = "TARGET")]
+        from: String,
+        /// Stack label (default: the model's, else the session's title)
+        #[arg(long)]
+        label: Option<String>,
+        /// Skip the model call: write the skeleton StackBrief
+        #[arg(long)]
+        no_llm: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The session's stack, created like `new` when it has none
+    Ensure {
+        target: String,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        no_llm: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Spawn a sibling: a new session in <target>'s stack (created if needed), same cwd
+    Spawn {
+        /// The session whose stack the sibling joins
+        target: String,
+        /// The sibling's first prompt (after the stack's context line)
+        prompt: Option<String>,
+        /// Display name for the new session
+        #[arg(long)]
+        name: Option<String>,
+        /// Model for the new session (`claude --model <id>`)
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+        /// Working directory (default: <target>'s cwd)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Backend to spawn into (same default as spawn)
+        #[arg(long, value_enum)]
+        backend: Option<BackendArg>,
+        /// Open a window in this tmux session instead of a new session (tmux only)
+        #[arg(long)]
+        tmux_session: Option<String>,
+        /// Open a new window instead of a tab (iterm only)
+        #[arg(long)]
+        window: bool,
+        /// Don't wait for the new session to register (prints the `fleet stack add` to run)
+        #[arg(long)]
+        no_wait: bool,
+        /// Label for a stack created by this spawn
+        #[arg(long)]
+        label: Option<String>,
+        /// Skip the model call when a stack is created
+        #[arg(long)]
+        no_llm: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a live session to a stack
+    Add {
+        stack: String,
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Drop a member (a session target, or a full session id for a gone one)
+    Remove {
+        stack: String,
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit the StackBrief in $VISUAL / $EDITOR (saved as a human edit)
+    Edit {
+        stack: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save the markdown on stdin as a human edit
+    Set {
+        stack: String,
+        /// Refuse (exit 3) unless the stored `updated` is this
+        #[arg(long, value_name = "ISO")]
+        expect_updated: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconcile members with the live sessions (gone → closed)
+    Sync {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a stack's file
+    Rm {
+        stack: String,
+        /// Don't ask
+        #[arg(short, long)]
+        force: bool,
+        /// `{ removed: id }` (needs -f)
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Clone)]
 enum TmuxCmd {
     /// Sessions, most recently attached first
     #[command(visible_alias = "ls")]
@@ -511,7 +643,11 @@ fn placement(c: &Commands) -> Placement {
         Commands::Tmux { .. } | Commands::Enter { .. } | Commands::Last | Commands::New(_) => {
             Placement::Dispatch(Scope::DefaultHost)
         }
-        Commands::Brief { edit: true, .. } | Commands::Brief { open: true, .. } => Placement::Here,
+        Commands::Brief { edit: true, .. }
+        | Commands::Brief { open: true, .. }
+        | Commands::Stack {
+            cmd: StackCmd::Edit { .. },
+        } => Placement::Here,
         Commands::List {
             all_hosts: true, ..
         }
@@ -687,6 +823,72 @@ fn run(cli: Cli) -> Result<i32> {
                 window,
             },
         )?,
+        Commands::Stack { cmd } => match cmd {
+            StackCmd::List { json } => stack_cmds::list(json)?,
+            StackCmd::Show { stack, json, path } => stack_cmds::show(&stack, json, path)?,
+            StackCmd::New {
+                from,
+                label,
+                no_llm,
+                json,
+            } => stack_cmds::new(&from, label.as_deref(), no_llm, json)?,
+            StackCmd::Ensure {
+                target,
+                label,
+                no_llm,
+                json,
+            } => stack_cmds::ensure(&target, label.as_deref(), no_llm, json)?,
+            StackCmd::Spawn {
+                target,
+                prompt,
+                name,
+                model,
+                dir,
+                backend,
+                tmux_session,
+                window,
+                no_wait,
+                label,
+                no_llm,
+                json,
+            } => stack_cmds::spawn(stack_cmds::SpawnArgs {
+                target,
+                prompt,
+                label,
+                no_llm,
+                opts: commands::SpawnOpts {
+                    dir,
+                    backend: backend.map(Into::into),
+                    name,
+                    model,
+                    tmux_session,
+                    window,
+                },
+                wait: !no_wait,
+                json,
+            })?,
+            StackCmd::Add {
+                stack,
+                target,
+                json,
+            } => stack_cmds::add(&stack, &target, json)?,
+            StackCmd::Remove {
+                stack,
+                target,
+                json,
+            } => stack_cmds::remove(&stack, &target, json)?,
+            StackCmd::Edit { stack, json } => {
+                let t = target(cli.host.as_deref(), cli.local, Scope::SelfHost)?;
+                return stack_cmds::edit(&t, &stack, json);
+            }
+            StackCmd::Set {
+                stack,
+                expect_updated,
+                json,
+            } => stack_cmds::set(&stack, expect_updated.as_deref(), json)?,
+            StackCmd::Sync { json } => stack_cmds::sync(json)?,
+            StackCmd::Rm { stack, force, json } => stack_cmds::rm(&stack, force, json)?,
+        },
         Commands::Handoff {
             brief,
             file,

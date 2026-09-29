@@ -14,6 +14,7 @@ import {
   regroupToast,
   reorderColumns,
   stickyColumns,
+  withStackColumns,
   type BoardColumn,
   type GroupEdit,
   type ViewMode,
@@ -120,6 +121,7 @@ const ORDER_KEY = 'fleet.boardOrder'
 /**
  * The board's columns for `sessions` (already filtered), in a sticky order remembered in
  * `fleet.boardOrder`: a column keeps its place while statuses change; new ones are appended.
+ * Session stacks become their own columns first (withStackColumns), so their ids are remembered too.
  * `moveColumn` is a drag on the board (per browser, like the rest of that order).
  */
 export function useBoardColumns(
@@ -130,7 +132,10 @@ export function useBoardColumns(
 ): { columns: BoardColumn[]; moveColumn: (id: string, before: string | null) => void } {
   const [order, setOrder] = useState<string[]>(() => parseIdList(storage.getJSON(ORDER_KEY)))
   const sticky = useMemo(
-    () => (enabled ? stickyColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups), order) : null),
+    () =>
+      enabled
+        ? stickyColumns(withStackColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups), sessions), order)
+        : null,
     [enabled, sessions, groups, fleet, order],
   )
   if (sticky && (sticky.order.length !== order.length || sticky.order.some((id, i) => id !== order[i]))) setOrder(sticky.order)

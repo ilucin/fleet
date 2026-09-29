@@ -112,6 +112,15 @@ export function createAutoNamer({ cli, intervalMs = 5 * 60 * 1000, initialDelayM
   };
 }
 
+/**
+ * The row of a session the web just spawned into tmux session `tmuxSession`, once it has
+ * registered (has a session id) — shared by the spawn namer and the stack joiner (lib/stacks.mjs).
+ */
+export function findSpawned(rows, tmuxSession) {
+  const s = Array.isArray(rows) ? rows.find((r) => r?.tmux_session === tmuxSession) : null;
+  return s?.session_id ? s : null;
+}
+
 /** Waits between tries of a targeted pass: ~2 min in all, tighter at first. */
 export const SPAWN_NAME_DELAYS_MS = [8000, 10000, 12000, 15000, 20000, 25000, 30000];
 
@@ -147,8 +156,8 @@ export function createSpawnNamer({ cli, listSessions, delaysMs = SPAWN_NAME_DELA
       } catch {
         continue;
       }
-      const s = rows.find((r) => r?.tmux_session === tmuxSession);
-      if (!s || !s.session_id) continue; // not registered yet
+      const s = findSpawned(rows, tmuxSession);
+      if (!s) continue; // not registered yet
       if (s.name_source && s.name_source !== 'derived') return { ok: true, reason: 'already named', tries };
       if (s.status === 'busy') continue; // still on its first turn
       try {

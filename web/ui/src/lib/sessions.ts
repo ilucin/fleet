@@ -85,7 +85,36 @@ export function listView(
     number
   >
   const filter = findStatusFilter(status)
-  return { sessions: scoped.filter(filter.match).sort(byLastActivity), counts }
+  return { sessions: clusterByStack(scoped.filter(filter.match).sort(byLastActivity)), counts }
+}
+
+/**
+ * Keep the sessions of one stack adjacent: every stack moves up to the position of its first
+ * member (members keep their relative order), everything else stays where it was. Stable, pure;
+ * rows without `stack` (older servers) come back unchanged.
+ */
+export function clusterByStack(sessions: Session[]): Session[] {
+  const key = (s: Session) => (s.stack?.id ? `${s.host}/${s.stack.id}` : null)
+  const members = new Map<string, Session[]>()
+  for (const s of sessions) {
+    const k = key(s)
+    if (!k) continue
+    const list = members.get(k)
+    if (list) list.push(s)
+    else members.set(k, [s])
+  }
+  if (![...members.values()].some((l) => l.length > 1)) return sessions
+  const out: Session[] = []
+  const done = new Set<string>()
+  for (const s of sessions) {
+    const k = key(s)
+    if (!k) out.push(s)
+    else if (!done.has(k)) {
+      done.add(k)
+      out.push(...(members.get(k) ?? [s]))
+    }
+  }
+  return out
 }
 
 export function findSession(fleet: FleetResponse | null | undefined, host: string, id: string): Session | null {

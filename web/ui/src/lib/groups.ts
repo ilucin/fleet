@@ -19,7 +19,11 @@ export interface BoardColumn {
   /** Waiting first, then most recent activity. */
   sessions: Session[]
   summary: StatusSummary
+  /** `source: 'stack'` columns: the session stack they show (on `host`). */
+  stack?: { id: string; host: string } | null
 }
+
+export const STACK_COLUMN_PREFIX = 'stack:'
 
 /** The key a group member and a live session share: `host/session_id` (or `host/pid`). */
 export const memberKey = (host: string, id: string) => `${host}/${id}`
@@ -139,19 +143,70 @@ export function boardColumns(sessions: Session[], groups: SessionGroup[]): Board
   return cols.sort(compareColumns)
 }
 
+/**
+ * Session stacks as board columns: every stack a session in `sessions` belongs to (`session.stack`)
+ * becomes a column `stack:<id>` (source `stack`), placed before the other columns; its members
+ * leave the other columns, which vanish when that empties them. `sessions` = what the board shows
+ * (already filtered). No-op when no session carries a stack (older servers).
+ */
+export function withStackColumns(columns: BoardColumn[], sessions: Session[]): BoardColumn[] {
+  const stacks = new Map<string, { id: string; host: string; label: string; sessions: Session[] }>()
+  for (const s of sessions) {
+    const st = s.stack
+    if (!st?.id) continue
+    const k = memberKey(s.host, st.id)
+    const entry = stacks.get(k)
+    if (entry) entry.sessions.push(s)
+    else stacks.set(k, { id: st.id, host: s.host, label: st.label || st.id, sessions: [s] })
+  }
+  if (!stacks.size) return columns
+  const inStack = new Set([...stacks.values()].flatMap((st) => st.sessions.map((s) => memberKey(s.host, s.session_id))))
+  const ids = new Set<string>()
+  const stackCols: BoardColumn[] = [...stacks.values()]
+    .map((st) => {
+      // Stack ids are random per host; two hosts sharing one would still get distinct columns.
+      let id = `${STACK_COLUMN_PREFIX}${st.id}`
+      if (ids.has(id)) id = `${STACK_COLUMN_PREFIX}${st.host}/${st.id}`
+      ids.add(id)
+      const list = [...st.sessions].sort(byUrgency)
+      return {
+        id,
+        label: st.label,
+        description: null,
+        source: 'stack',
+        ungrouped: false,
+        sessions: list,
+        summary: statusSummary(list),
+        stack: { id: st.id, host: st.host },
+      }
+    })
+    .sort(compareColumns)
+  const rest: BoardColumn[] = []
+  for (const c of columns) {
+    const left = c.sessions.filter((s) => !inStack.has(memberKey(s.host, s.session_id)))
+    if (!left.length) continue
+    rest.push(left.length === c.sessions.length ? c : { ...c, sessions: left, summary: statusSummary(left) })
+  }
+  return [...stackCols, ...rest]
+}
+
 /** How many column ids `fleet.boardOrder` remembers (absent ones are forgotten first). */
 export const BOARD_ORDER_MAX = 100
 
 /**
  * Sticky column order: columns already in `prev` keep their place (live status changes never
- * reshuffle the board), new ones are appended in `compareColumns` order, Ungrouped stays last.
+ * reshuffle the board), new ones are appended in `compareColumns` order (new stack columns are
+ * put first instead), Ungrouped stays last.
  * Returns the columns in that order and the updated order to remember — ids of columns that
  * are gone for now (filtered out, no live sessions) keep their slot so they come back in place.
  */
 export function stickyColumns(columns: BoardColumn[], prev: readonly string[]): { columns: BoardColumn[]; order: string[] } {
   const known = new Set(prev)
-  const fresh = columns.filter((c) => !c.ungrouped && !known.has(c.id)).map((c) => c.id)
-  let order = [...prev.filter((id) => id !== UNGROUPED_ID), ...fresh]
+  const freshCols = columns.filter((c) => !c.ungrouped && !known.has(c.id))
+  // A new stack column starts at the front (stacks lead the board); other new columns are appended.
+  const freshStacks = freshCols.filter((c) => c.source === 'stack').map((c) => c.id)
+  const fresh = freshCols.filter((c) => c.source !== 'stack').map((c) => c.id)
+  let order = [...freshStacks, ...prev.filter((id) => id !== UNGROUPED_ID), ...fresh]
   if (order.length > BOARD_ORDER_MAX) {
     const present = new Set(columns.map((c) => c.id))
     let drop = order.length - BOARD_ORDER_MAX

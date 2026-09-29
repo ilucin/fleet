@@ -20,6 +20,7 @@ import { EditableTitle } from '@/components/EditableTitle'
 import { HostBadge } from '@/components/HostBadge'
 import { NewSessionDialog, NewSessionDrawer, type SpawnPrefill } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
+import { StackBar } from '@/components/stack/StackBar'
 import { ChatView } from '@/components/session/ChatView'
 import { Composer, type ComposerApi } from '@/components/session/Composer'
 import { FilePreview } from '@/components/session/FilePreview'
@@ -38,6 +39,7 @@ import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
 import { usePrefs } from '@/hooks/usePrefs'
 import { useSettings } from '@/hooks/useSettings'
+import { openSiblingSpawn, openStackSheet } from '@/hooks/useStackUi'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { CHAT_LIMITS, CHAT_POLL_MS, PEEK_POLL_MS, TERM_LINES, nextChatLimit, parseMode, parseSize, type DetailMode } from '@/lib/chat'
@@ -45,6 +47,7 @@ import { continueDraft } from '@/lib/brief'
 import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { tailAnchor } from '@/lib/outbox'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
+import { stacksKnown } from '@/lib/stacks'
 import { isPlainEscape, withHint } from '@/lib/shortcuts'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
@@ -400,6 +403,23 @@ export function SessionScreen({
     setTimeout(() => setContinueWith(prefill), 300)
   }
 
+  // Session stacks: open the sheet / the sibling form (mobile: the Details drawer closes first).
+  const fromMenu = (fn: () => void) => {
+    if (pane) return fn()
+    setMenuOpen(false)
+    setTimeout(fn, 300)
+  }
+  const stackRef = session?.stack ?? null
+  const stackMenu: DetailsPanelProps['stack'] = !session || !stacksKnown(session)
+    ? null
+    : stackRef
+      ? { label: stackRef.label, onOpen: () => fromMenu(() => openStackSheet(host, stackRef.id)) }
+      : {
+          label: null,
+          onSpawnSibling: () =>
+            fromMenu(() => openSiblingSpawn({ host, sessionId: id, cwd: session.cwd ?? null, label: shownTitle, creates: true })),
+        }
+
   const menuProps: DetailsPanelProps = {
     open: menuOpen,
     onOpenChange: setMenuOpen,
@@ -414,6 +434,7 @@ export function SessionScreen({
     brief: { host, brief, fileLinks, onContinue: continueInNew },
     editor: { url: brief.brief?.editorUrl ?? session?.editorUrl, kind: brief.brief?.editor },
     onClose: pane ? onToggleInspector : undefined,
+    stack: stackMenu,
     onClosed: () => {
       // Drop it from the list now; the next polls confirm (discovery caches ~2s).
       if (fleet) applyFleet(withoutSession(fleet, host, id))
@@ -523,6 +544,8 @@ export function SessionScreen({
           ) : null}
         </div>
       </header>
+
+      {session?.stack ? <StackBar session={session} pane={pane} /> : null}
 
       {hostDown || missing ? (
         <div className="shrink-0 px-3 px-safe">

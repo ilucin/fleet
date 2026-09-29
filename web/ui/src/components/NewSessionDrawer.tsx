@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckIcon, FolderIcon, Loader2Icon, PaperclipIcon, PlayIcon } from 'lucide-react'
+import { CheckIcon, FolderIcon, GitForkIcon, LayersIcon, Loader2Icon, PaperclipIcon, PlayIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, ApiError } from '@/api/client'
@@ -17,11 +17,13 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAttach, useFileDrop } from '@/hooks/useAttach'
 import { useFleet } from '@/hooks/useFleet'
 import { useSettings } from '@/hooks/useSettings'
+import type { SiblingTarget } from '@/hooks/useStackUi'
 import { shortCwd } from '@/lib/format'
 import { pickModel } from '@/lib/models'
 import { storage } from '@/lib/storage'
 import { sessionHref, spawnTargets } from '@/lib/sessions'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
+import { stackErrorMessage, stacksMissing } from '@/lib/stacks'
 import { cn } from '@/lib/utils'
 
 const HOST_KEY = 'fleet.spawnHost'
@@ -63,6 +65,11 @@ export interface NewSessionDrawerProps {
   onOpenSession: (href: string) => void
   /** Start from these values (the caret goes to the end of the prompt). */
   prefill?: SpawnPrefill | null
+  /**
+   * Spawn sibling: a new session in the source session's / stack's directory (read-only), in its
+   * stack (created first when it has none) — POST …/stack/spawn. Host and directory are fixed.
+   */
+  sibling?: SiblingTarget | null
 }
 
 const samePath = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
@@ -72,25 +79,27 @@ const samePath = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/
  * prompt → POST spawn, then watch the fleet for the new session and open it. No name field:
  * the server's auto-namer names it (tmux `fw-hhmmss` when auto-naming is off).
  */
-export function NewSessionDrawer({ open, onOpenChange, onOpenSession, prefill }: NewSessionDrawerProps) {
+export function NewSessionDrawer({ open, onOpenChange, onOpenSession, prefill, sibling }: NewSessionDrawerProps) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="px-safe" onOpenAutoFocus={prefill?.prompt ? (e) => e.preventDefault() : undefined}>
-        {open ? <NewSessionForm onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} /> : null}
+        {open ? <NewSessionForm onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} sibling={sibling} /> : null}
       </DrawerContent>
     </Drawer>
   )
 }
 
 /** Desktop: the same form in a centred dialog (`c` / `n`, the sidebar's `+`, the palette). */
-export function NewSessionDialog({ open, onOpenChange, onOpenSession, prefill }: NewSessionDrawerProps) {
+export function NewSessionDialog({ open, onOpenChange, onOpenSession, prefill, sibling }: NewSessionDrawerProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-h-[calc(100dvh-4rem)] overflow-hidden p-0 sm:max-w-lg"
         onOpenAutoFocus={prefill?.prompt ? (e) => e.preventDefault() : undefined}
       >
-        {open ? <NewSessionForm variant="dialog" onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} /> : null}
+        {open ? (
+          <NewSessionForm variant="dialog" onDone={() => onOpenChange(false)} onOpenSession={onOpenSession} prefill={prefill} sibling={sibling} />
+        ) : null}
       </DialogContent>
     </Dialog>
   )
@@ -101,11 +110,13 @@ function NewSessionForm({
   onOpenSession,
   variant = 'drawer',
   prefill = null,
+  sibling = null,
 }: {
   onDone: () => void
   onOpenSession: (href: string) => void
   variant?: 'drawer' | 'dialog'
   prefill?: SpawnPrefill | null
+  sibling?: SiblingTarget | null
 }) {
   const dialog = variant === 'dialog'
   const Header = dialog ? DialogHeader : DrawerHeader
@@ -115,6 +126,7 @@ function NewSessionForm({
   const hosts = spawnTargets(fleet)
 
   const [host, setHost] = useState(() => {
+    if (sibling) return sibling.host
     if (prefill && hosts.some((h) => h.name === prefill.host)) return prefill.host
     const remembered = storage.get(HOST_KEY)
     return hosts.find((h) => h.name === remembered)?.name ?? hosts[0]?.name ?? ''
@@ -132,9 +144,9 @@ function NewSessionForm({
   const { models } = useSettings()
   const [modelChoice, setModelChoice] = useState<string | null>(() => storage.get(MODEL_KEY))
   const model = pickModel(models, modelChoice)
-  const [prompt, setPrompt] = useState(() => prefill?.prompt ?? loadDraft())
-  // Keep the draft on every change (attachments typed in included); a prefill is never a draft.
-  const draftable = !prefill
+  const [prompt, setPrompt] = useState(() => prefill?.prompt ?? (sibling ? '' : loadDraft()))
+  // Keep the draft on every change (attachments typed in included); a prefill / sibling is never a draft.
+  const draftable = !prefill && !sibling
   useEffect(() => {
     if (draftable) saveDraft(prompt)
   }, [draftable, prompt])
@@ -171,10 +183,43 @@ function NewSessionForm({
   }
 
   // ⌘/Ctrl+Enter submits from any field (the prompt included; plain Enter there stays a newline).
-  const canStart = !busy && !!dir && progress == null
+  const canStart = !busy && (!!sibling || !!dir) && progress == null
+
+  const startSibling = async (sib: SiblingTarget) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const body = { prompt: prompt.trim() ? prompt : undefined, model: model || undefined }
+      const res = sib.sessionId ? await api.spawnSibling(sib.host, sib.sessionId, body) : await api.spawnInStack(sib.host, sib.stackId ?? '', body)
+      onDone()
+      const label = res.stack?.label || sib.label || 'the stack'
+      if (res.created)
+        toast.success(`Stack created: ${label}`, {
+          description: res.generated ? 'StackBrief written from this session.' : 'StackBrief skeleton — the model call was skipped or failed.',
+        })
+      const spawnHost = res.spawn?.host || res.host || sib.host
+      const name = res.spawn?.name || res.spawn?.tmuxSession || 'sibling'
+      const id = toast.loading(`Starting ${name} in ${label}…`, { description: 'Waiting for Claude to register' })
+      watchForSpawned(
+        { host: spawnHost, name, tmuxSession: res.spawn?.tmuxSession ?? name },
+        {
+          onFleet: applyFleet,
+          onFound: (s) => {
+            toast.success(`${name} is up`, { id, description: undefined })
+            onOpenSession(sessionHref(s))
+          },
+          onTimeout: () => toast.error(`${name} has not shown up yet`, { id, description: 'Check the list in a moment' }),
+        },
+      )
+    } catch (err) {
+      setError(stacksMissing(err) ? stackErrorMessage(err) : (err as Error)?.message || 'Failed to start')
+      setBusy(false)
+    }
+  }
 
   const start = async () => {
     if (busy || progress) return
+    if (sibling) return startSibling(sibling)
     if (!host) return setError('No reachable host to start a session on.')
     if (!dir) return setError('This host advertises no directories.')
     setBusy(true)
@@ -204,6 +249,92 @@ function NewSessionForm({
     }
   }
 
+  const modelField =
+    models.length > 1 ? (
+      <Field label="Model">
+        <ToggleGroup
+          type="single"
+          value={model || DEFAULT_MODEL_VALUE}
+          onValueChange={(v) => v && chooseModel(v === DEFAULT_MODEL_VALUE ? '' : v)}
+          aria-label="Model"
+          className="no-scrollbar w-full justify-start overflow-x-auto"
+        >
+          {models.map((m) => (
+            <ToggleGroupItem
+              key={m.id || DEFAULT_MODEL_VALUE}
+              value={m.id || DEFAULT_MODEL_VALUE}
+              title={m.id || "Claude's default model"}
+              className="h-10 shrink-0 rounded-full border border-border bg-card px-4 text-sm data-[state=on]:border-primary/50 data-[state=on]:bg-accent"
+            >
+              {m.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </Field>
+    ) : null
+  const promptField = (
+    <Field label="First prompt" hint="optional">
+      <Textarea
+        ref={promptRef}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onPaste={onPaste}
+        rows={3}
+        placeholder="What should Claude work on?"
+        className="max-h-48 min-h-20 rounded-xl bg-card text-base md:text-base"
+      />
+      <div className="flex min-w-0 items-center gap-2">
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          tabIndex={-1}
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? [])
+            e.target.value = ''
+            void attach(files)
+          }}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!host || progress != null}
+          onClick={() => picker.current?.click()}
+          className="-ml-2 h-9 shrink-0 rounded-lg px-2 text-muted-foreground"
+        >
+          {progress ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
+          Attach files
+        </Button>
+        <span className="min-w-0 truncate text-xs text-dimmer" role="status">
+          {progress
+            ? `Uploading ${progress.name}${progress.total > 1 ? ` (${progress.index}/${progress.total})` : ''}…`
+            : dialog
+              ? `or drop / paste them — stored on ${host}`
+              : `stored on ${host}`}
+        </span>
+      </div>
+    </Field>
+  )
+  const errorBox =
+    error ? (
+      <Alert variant="destructive">
+        <AlertDescription className="break-words">{error}</AlertDescription>
+      </Alert>
+    ) : null
+  const submitButton = (
+    <Button type="submit" className="h-11 w-full rounded-xl text-[0.9375rem]" disabled={!canStart}>
+      {busy ? <Loader2Icon className="animate-spin" /> : sibling ? <GitForkIcon /> : <PlayIcon />}
+      {busy ? (sibling?.creates ? 'Creating stack…' : 'Starting…') : sibling ? 'Spawn sibling' : `Start on ${host}`}
+      {dialog && !busy ? (
+        <Kbd aria-hidden className="ml-1 bg-primary-foreground/15 text-primary-foreground/80">
+          {isMacPlatform() ? '⌘↵' : 'Ctrl↵'}
+        </Kbd>
+      ) : null}
+    </Button>
+  )
+
   return (
     <form
       className={cn(
@@ -224,13 +355,37 @@ function NewSessionForm({
       }}
     >
       <Header className="px-0 pt-3 pb-2 text-left">
-        <Title className="text-left text-base font-semibold">{prefill ? 'Continue in new session' : 'New session'}</Title>
+        <Title className="text-left text-base font-semibold">{sibling ? 'Spawn sibling' : prefill ? 'Continue in new session' : 'New session'}</Title>
         <Description className="text-left text-xs">
-          Starts Claude in a new tmux session. A first-run folder trust prompt is accepted for you.
+          {sibling
+            ? sibling.creates
+              ? 'This starts a new stack around this session (one Sonnet call), then a sibling session in the same directory that reads the shared StackBrief first.'
+              : `A new session in the stack ${sibling.label ? `“${sibling.label}”` : ''}, in the same directory. It reads the shared StackBrief first.`
+            : 'Starts Claude in a new tmux session. A first-run folder trust prompt is accepted for you.'}
         </Description>
       </Header>
 
-      {hosts.length === 0 ? (
+      {sibling ? (
+        <div className="space-y-4 pt-1">
+          <Field label={sibling.creates ? 'From' : 'Stack'}>
+            <div className="flex min-h-12 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2">
+              {sibling.creates ? <GitForkIcon className="size-4 shrink-0 text-dimmer" /> : <LayersIcon className="size-4 shrink-0 text-primary" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{sibling.label || (sibling.creates ? 'this session' : 'Session stack')}</span>
+                <span className="flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-dimmer">
+                  <HostDot host={sibling.host} />
+                  <span className="shrink-0">{sibling.host}</span>
+                  {sibling.cwd ? <span className="min-w-0 truncate font-mono">· {shortCwd(sibling.cwd, 60)}</span> : null}
+                </span>
+              </span>
+            </div>
+          </Field>
+          {modelField}
+          {promptField}
+          {errorBox}
+          {submitButton}
+        </div>
+      ) : hosts.length === 0 ? (
         <Alert variant="destructive" className="my-2">
           <AlertDescription>No reachable host to start a session on.</AlertDescription>
         </Alert>
@@ -291,88 +446,13 @@ function NewSessionForm({
             )}
           </Field>
 
-          {models.length > 1 ? (
-            <Field label="Model">
-              <ToggleGroup
-                type="single"
-                value={model || DEFAULT_MODEL_VALUE}
-                onValueChange={(v) => v && chooseModel(v === DEFAULT_MODEL_VALUE ? '' : v)}
-                aria-label="Model"
-                className="no-scrollbar w-full justify-start overflow-x-auto"
-              >
-                {models.map((m) => (
-                  <ToggleGroupItem
-                    key={m.id || DEFAULT_MODEL_VALUE}
-                    value={m.id || DEFAULT_MODEL_VALUE}
-                    title={m.id || "Claude's default model"}
-                    className="h-10 shrink-0 rounded-full border border-border bg-card px-4 text-sm data-[state=on]:border-primary/50 data-[state=on]:bg-accent"
-                  >
-                    {m.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </Field>
-          ) : null}
+          {modelField}
 
-          <Field label="First prompt" hint="optional">
-            <Textarea
-              ref={promptRef}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onPaste={onPaste}
-              rows={3}
-              placeholder="What should Claude work on?"
-              className="max-h-48 min-h-20 rounded-xl bg-card text-base md:text-base"
-            />
-            <div className="flex min-w-0 items-center gap-2">
-              <input
-                ref={picker}
-                type="file"
-                multiple
-                hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? [])
-                  e.target.value = ''
-                  void attach(files)
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={!host || progress != null}
-                onClick={() => picker.current?.click()}
-                className="-ml-2 h-9 shrink-0 rounded-lg px-2 text-muted-foreground"
-              >
-                {progress ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
-                Attach files
-              </Button>
-              <span className="min-w-0 truncate text-xs text-dimmer" role="status">
-                {progress
-                  ? `Uploading ${progress.name}${progress.total > 1 ? ` (${progress.index}/${progress.total})` : ''}…`
-                  : dialog
-                    ? `or drop / paste them — stored on ${host}`
-                    : `stored on ${host}`}
-              </span>
-            </div>
-          </Field>
+          {promptField}
 
-          {error ? (
-            <Alert variant="destructive">
-              <AlertDescription className="break-words">{error}</AlertDescription>
-            </Alert>
-          ) : null}
+          {errorBox}
 
-          <Button type="submit" className="h-11 w-full rounded-xl text-[0.9375rem]" disabled={!canStart}>
-            {busy ? <Loader2Icon className="animate-spin" /> : <PlayIcon />}
-            {busy ? 'Starting…' : `Start on ${host}`}
-            {dialog && !busy ? (
-              <Kbd aria-hidden className="ml-1 bg-primary-foreground/15 text-primary-foreground/80">
-                {isMacPlatform() ? '⌘↵' : 'Ctrl↵'}
-              </Kbd>
-            ) : null}
-          </Button>
+          {submitButton}
         </div>
       )}
       <DropOverlay show={drop.dragging} hint={host ? `Uploaded to ${host}; the path goes into the first prompt` : undefined} />
