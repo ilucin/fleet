@@ -13,8 +13,8 @@ use colored::Colorize;
 use crate::cli::render::home_rel;
 use crate::core::config;
 use crate::core::grouping::{
-    self, Consolidate, Item, Observed, PassOpts, Report, State, ask_model, llm_allowed, run_pass,
-    view,
+    self, Consolidate, Item, MoveTo, Observed, PassOpts, Report, State, ask_model, llm_allowed,
+    run_pass, view,
 };
 use crate::error::{Error, Result};
 
@@ -27,6 +27,21 @@ pub struct GroupOpts {
     pub cached: bool,
     pub input: Option<String>,
     pub dry_run: bool,
+    /// `--rename` / `--move`: edit the stored groups instead of running a pass.
+    pub edit: Option<Edit>,
+}
+
+/// A change made on the board (web `POST /api/groups/edit`).
+pub enum Edit {
+    Rename {
+        id: String,
+        label: String,
+    },
+    /// `session` is `host/sessionId` (or `host/pid`).
+    Move {
+        session: String,
+        to: MoveTo,
+    },
 }
 
 fn observe(o: &GroupOpts) -> Result<(Observed, BTreeMap<String, String>)> {
@@ -93,7 +108,28 @@ pub fn run(o: GroupOpts) -> Result<()> {
     let path = grouping::state_path();
     let mut state = State::load_from(&path);
 
-    if o.cached {
+    if let Some(edit) = &o.edit {
+        let now = chrono::Utc::now().timestamp_millis();
+        match edit {
+            Edit::Rename { id, label } => grouping::rename_group(&mut state, id, label, now),
+            Edit::Move { session, to } => match session.split_once('/') {
+                Some((host, id)) if !host.is_empty() && !id.is_empty() => {
+                    grouping::move_session(&mut state, host, id, to, now).map(drop)
+                }
+                _ => Err(format!("--move wants host/sessionId, got \"{session}\"")),
+            },
+        }
+        .map_err(Error::Other)?;
+        if o.dry_run {
+            eprintln!("{}", "dry run: nothing saved".dimmed());
+        } else {
+            state
+                .save_to(&path)
+                .map_err(|e| Error::Other(format!("cannot write {}: {e}", path.display())))?;
+        }
+    }
+
+    if o.cached || o.edit.is_some() {
         let (groups, ungrouped) = view(&state, None);
         let report = Report {
             version: grouping::STATE_VERSION,

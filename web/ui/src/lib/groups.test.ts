@@ -3,6 +3,9 @@ import { describe, expect, test } from 'vitest'
 import type { GroupsResponse, Session, SessionGroup } from '@/api/types'
 import {
   BOARD_ORDER_MAX,
+  applyGroupEdit,
+  memberId,
+  reorderColumns,
   UNGROUPED_ID,
   type BoardColumn,
   boardColumns,
@@ -213,4 +216,39 @@ describe('stickyColumns', () => {
     expect(r.order).not.toContain('old0')
     expect(r.order.at(-1)).toBe('new')
   })
+})
+
+describe('applyGroupEdit', () => {
+  const base = resp({ groups: [g('g-1', [['laptop', 'a'], ['laptop', 'b']]), g('g-2', [['workstation', 'c']], { label: 'Reviews' })] })
+
+  test('rename changes only that label', () => {
+    const r = applyGroupEdit(base, { op: 'rename', id: 'g-2', label: 'Code Reviews' })
+    expect(r.groups.map((x) => x.label)).toEqual(['g-1', 'Code Reviews'])
+    expect(base.groups[1].label).toBe('Reviews')
+  })
+
+  test('move into a group; an emptied group goes', () => {
+    const r = applyGroupEdit(base, { op: 'move', host: 'workstation', session: 'c', to: 'g-1' })
+    expect(r.groups.map((x) => [x.id, x.members.map((m) => m.id)])).toEqual([['g-1', ['a', 'b', 'c']]])
+  })
+
+  test('move to a new group, or to the one that already has that name', () => {
+    const r = applyGroupEdit(base, { op: 'move', host: 'laptop', session: 'a', label: 'Spike' })
+    expect(r.groups.at(-1)).toMatchObject({ id: 'pending:Spike', label: 'Spike', source: 'manual', members: [{ host: 'laptop', id: 'a' }] })
+    const reused = applyGroupEdit(base, { op: 'move', host: 'laptop', session: 'a', label: 'reviews' })
+    expect(reused.groups.find((x) => x.id === 'g-2')?.members.map((m) => m.id)).toEqual(['c', 'a'])
+  })
+
+  test('memberId: the session id, else the pid', () => {
+    expect(memberId(s({ session_id: 'x' }))).toBe('x')
+    expect(memberId(s({ session_id: '', pid: 42 }))).toBe('42')
+  })
+})
+
+test('reorderColumns', () => {
+  expect(reorderColumns(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b'])
+  expect(reorderColumns(['a', 'b', 'c'], 'a', null)).toEqual(['b', 'c', 'a'])
+  expect(reorderColumns(['a', 'b', 'c'], 'a', UNGROUPED_ID)).toEqual(['b', 'c', 'a'])
+  expect(reorderColumns(['a', 'b'], 'x', 'b')).toEqual(['a', 'x', 'b'])
+  expect(reorderColumns(['a', 'b'], 'a', 'a')).toEqual(['a', 'b'])
 })

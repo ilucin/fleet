@@ -43,7 +43,8 @@ src/
   lib/models.ts       New session model picker: DEFAULT_MODELS (mirrors lib/config.mjs), normalizeModels(), pickModel()
   lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
                       fallbackGroups()/repoOf() (client-side group-by-repo, worktree-aware),
-                      statusSummary(), boardOrder() (↑/↓ order), groupsStatusText(), regroupToast()
+                      statusSummary(), boardOrder() (↑/↓ order), groupsStatusText(), regroupToast(),
+                      applyGroupEdit() (optimistic rename / move), reorderColumns()
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
   lib/shortcuts.ts    desktop keyboard map: BINDINGS (⌘/Ctrl combos), matchShortcut() (key + platform /
                       typing context → action), shortcutHint() (per browser / Fleet.app), isTypingTarget(),
@@ -82,7 +83,8 @@ src/
   hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`, shared with the classic UI)
   hooks/useSessionList.ts  list state shared by the mobile list and the desktop sidebar (search, filters, counts)
   hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
-                      every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now
+                      every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now;
+                      edit() = rename / move (optimistic, POST /api/groups/edit); useBoardColumns() + moveColumn()
   hooks/useMediaQuery.ts   useMediaQuery(), useIsDesktop() (≥ 1024px), WIDE_QUERY (≥ 1440px)
   hooks/useTitles.ts  inline-rename store: startEditing/openTitleEditor/stopEditing, useEditing(scope, key),
                       useSessionTitle(s) (optimistic title + saving), useRename() (POST rename, rollback + toast)
@@ -101,7 +103,8 @@ src/
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
-  components/board/   Board (desktop Kanban + header), BoardCard, GroupedList (mobile collapsible sections),
+  components/board/   Board (desktop Kanban + header), BoardColumns (columns, drag'n'drop, rename), BoardCard,
+                      GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
   components/session/ detail screen parts: ChatView, TermView, Composer, OutboxBubbles (pending / sending / sent /
                       failed user bubbles; the terminal view's strip), FilePreview, DetailsPanel (the desktop
@@ -177,6 +180,12 @@ src/
   ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
   sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)
   of the usual `SessionRow`s. The List view is unchanged.
+  Desktop editing (server groups only — not the repo fallback, not Ungrouped):
+  click a column's name to rename it (Enter / clicking away saves, Esc cancels); drag a card onto
+  another column to move the session there, or onto "Drop here for a new group" (shown while
+  dragging) and name it; drag a column's header to reorder the columns (`fleet.boardOrder`).
+  Rename and move are optimistic (`POST /api/groups/edit`) and stick: the grouping pass never
+  undoes them.
 - **New session** (drawer): host, directory (radio from that host's `spawnDirs`), model (chips
   from `/api/settings` → `models`, Default = no `--model`) and an optional first prompt →
   `api.spawn`. No name field: the server names it (a targeted auto-name pass right after the

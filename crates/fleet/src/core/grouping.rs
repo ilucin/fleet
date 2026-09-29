@@ -73,10 +73,13 @@ pub struct Group {
     pub label: String,
     #[serde(default)]
     pub description: Option<String>,
-    /// `llm` or `fallback`.
+    /// `llm`, `fallback` or `manual` (made on the board).
     pub source: String,
     #[serde(default)]
     pub created_at: i64,
+    /// Named by the user: consolidation never renames it nor merges it away.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -86,7 +89,7 @@ pub struct Assignment {
     pub id: String,
     pub group: String,
     pub fingerprint: String,
-    /// `llm` or `fallback`.
+    /// `llm`, `fallback` or `manual` (moved on the board: kept whatever the fingerprint).
     pub source: String,
     #[serde(default)]
     pub assigned_at: i64,
@@ -758,6 +761,7 @@ fn assign_fallback(state: &mut State, it: &Item, now: i64) {
             description: Some("Grouped by repository (model unavailable)".into()),
             source: "fallback".into(),
             created_at: now,
+            locked: false,
         });
     }
     assign(state, it, &id, "fallback", now);
@@ -807,9 +811,14 @@ where
     let mut todo: Vec<Item> = Vec::new();
     for it in &obs.items {
         match state.assignments.get(&it.key()) {
+            Some(a) if a.source == MANUAL => sum.kept += 1,
+            // Parked by repository while the model was down: reclassified, unless the
+            // user has since named that group.
             Some(a)
                 if a.fingerprint == it.fingerprint()
-                    && !(opts.allow_llm && a.source == "fallback") =>
+                    && !(opts.allow_llm
+                        && a.source == "fallback"
+                        && !state.group(&a.group).is_some_and(|g| g.locked)) =>
             {
                 sum.kept += 1
             }
@@ -883,6 +892,7 @@ where
                     description: desc.clone(),
                     source: "llm".into(),
                     created_at: now,
+                    locked: false,
                 });
                 sum.created += 1;
                 new_ids.insert(r.clone(), id);
@@ -1011,7 +1021,7 @@ fn apply_consolidation(state: &mut State, c: &Consolidation, sum: &mut RunSummar
         if sum.merged >= MAX_MERGES || gone.contains(into) || gone.contains(from) {
             continue;
         }
-        if state.group(into).is_none() || state.group(from).is_none() {
+        if state.group(into).is_none() || state.group(from).is_none() || pinned(state, from) {
             continue;
         }
         for a in state.assignments.values_mut() {
@@ -1036,6 +1046,7 @@ fn apply_consolidation(state: &mut State, c: &Consolidation, sum: &mut RunSummar
             continue;
         }
         if let Some(g) = state.groups.iter_mut().find(|g| g.id == *id)
+            && !g.locked
             && g.label != *label
         {
             g.label = label.clone();
@@ -1045,6 +1056,135 @@ fn apply_consolidation(state: &mut State, c: &Consolidation, sum: &mut RunSummar
             sum.renamed += 1;
         }
     }
+}
+
+/// A group the user shaped: renamed, or holding a session they moved there.
+fn pinned(state: &State, id: &str) -> bool {
+    state.group(id).is_some_and(|g| g.locked)
+        || state
+            .assignments
+            .values()
+            .any(|a| a.group == id && a.source == MANUAL)
+}
+
+// --- edits from the board ------------------------------------------------------
+
+/// Source of a group or assignment the user made on the board.
+pub const MANUAL: &str = "manual";
+
+/// Characters of a user-written group label.
+pub const MAX_USER_LABEL: usize = 48;
+
+/// A user-written label: one line, whitespace collapsed, capped; `None` when blank.
+pub fn clean_user_label(raw: &str) -> Option<String> {
+    let words: Vec<&str> = raw.split_whitespace().collect();
+    let out: String = words.join(" ").chars().take(MAX_USER_LABEL).collect();
+    let out = out.trim().to_string();
+    (!out.is_empty()).then_some(out)
+}
+
+fn label_taken(state: &State, label: &str, except: Option<&str>) -> bool {
+    state
+        .groups
+        .iter()
+        .any(|g| Some(g.id.as_str()) != except && g.label.eq_ignore_ascii_case(label))
+}
+
+/// Rename a group; the label is then the user's (never renamed, never merged away).
+pub fn rename_group(
+    state: &mut State,
+    id: &str,
+    label: &str,
+    now: i64,
+) -> std::result::Result<(), String> {
+    let label = clean_user_label(label).ok_or("the label is empty")?;
+    if label_taken(state, &label, Some(id)) {
+        return Err(format!("another group is already called \"{label}\""));
+    }
+    let g = state
+        .groups
+        .iter_mut()
+        .find(|g| g.id == id)
+        .ok_or_else(|| format!("no group {id}"))?;
+    g.label = label;
+    g.locked = true;
+    if g.source == "fallback" {
+        // Named by the user, it is no longer "grouped by repository".
+        g.source = MANUAL.into();
+        g.description = None;
+    }
+    state.updated_at = Some(now);
+    Ok(())
+}
+
+/// Where [`move_session`] puts a session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MoveTo {
+    Group(String),
+    /// A new group with this label (an existing group of that name is reused).
+    New(String),
+}
+
+/// Move the session `host/id` into a group, for good: later passes keep it
+/// there whatever changes about the session. Returns the group's id.
+pub fn move_session(
+    state: &mut State,
+    host: &str,
+    id: &str,
+    to: &MoveTo,
+    now: i64,
+) -> std::result::Result<String, String> {
+    let gid = match to {
+        MoveTo::Group(g) => {
+            state.group(g).ok_or_else(|| format!("no group {g}"))?;
+            g.clone()
+        }
+        MoveTo::New(label) => {
+            let label = clean_user_label(label).ok_or("the label is empty")?;
+            match state
+                .groups
+                .iter()
+                .find(|g| g.label.eq_ignore_ascii_case(&label))
+            {
+                Some(g) => g.id.clone(),
+                None => {
+                    let taken: HashSet<String> =
+                        state.groups.iter().map(|g| g.id.clone()).collect();
+                    let gid = new_group_id(&label, now, &taken);
+                    state.groups.push(Group {
+                        id: gid.clone(),
+                        label,
+                        description: None,
+                        source: MANUAL.into(),
+                        created_at: now,
+                        locked: true,
+                    });
+                    gid
+                }
+            }
+        }
+    };
+    let key = format!("{host}/{id}");
+    let prev = state.assignments.remove(&key);
+    state.assignments.insert(
+        key,
+        Assignment {
+            host: host.into(),
+            id: id.into(),
+            group: gid.clone(),
+            fingerprint: prev
+                .as_ref()
+                .map(|a| a.fingerprint.clone())
+                .unwrap_or_default(),
+            source: MANUAL.into(),
+            assigned_at: now,
+            name: prev.and_then(|a| a.name),
+        },
+    );
+    drop_empty(state);
+    state.dirty = true;
+    state.updated_at = Some(now);
+    Ok(gid)
 }
 
 // --- the view ----------------------------------------------------------------
@@ -1253,6 +1393,7 @@ mod tests {
             description: Some("desc".into()),
             source: "llm".into(),
             created_at: 0,
+            locked: false,
         });
         let long = "x".repeat(5000);
         let items: Vec<Item> = (0..200)
@@ -1286,6 +1427,7 @@ mod tests {
                 description: None,
                 source: "llm".into(),
                 created_at: 0,
+                locked: false,
             }],
             ..Default::default()
         };
@@ -1631,6 +1773,7 @@ mod tests {
                 description: None,
                 source: "llm".into(),
                 created_at: 0,
+                locked: false,
             });
             let it = item("laptop", &format!("s{i}"), "n", "~/Code/p", "t");
             assign(&mut state, &it, &format!("g-{i}"), "llm", 0);
@@ -1720,5 +1863,167 @@ mod tests {
         assert_eq!(State::load_from(&p), state);
         std::fs::write(&p, "{nope").unwrap();
         assert_eq!(State::load_from(&p), State::default());
+    }
+
+    fn gid(state: &State, label: &str) -> String {
+        state
+            .groups
+            .iter()
+            .find(|g| g.label == label)
+            .unwrap()
+            .id
+            .clone()
+    }
+
+    #[test]
+    fn a_renamed_group_is_never_renamed_or_merged_away() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let reviews = gid(&state, "Team Reviews");
+        rename_group(&mut state, &reviews, "  Reviews\n  Q3 ", NOW).unwrap();
+        assert_eq!(state.group(&reviews).unwrap().label, "Reviews Q3");
+        assert!(state.group(&reviews).unwrap().locked);
+        let sum = run_pass(
+            &mut state,
+            &obs(fleet_items()),
+            &PassOpts {
+                consolidate: Consolidate::Force,
+                ..opts()
+            },
+            |_| {
+                Ok(r#"{"merge":[{"into":"Fleet Board","from":["Reviews Q3"]}],"rename":{"Reviews Q3":{"label":"Other Name"}}}"#.into())
+            },
+        );
+        assert_eq!(sum.model_calls, 1);
+        assert_eq!(sum.merged + sum.renamed, 0);
+        assert_eq!(state.groups.len(), 2);
+        assert_eq!(state.group(&reviews).unwrap().label, "Reviews Q3");
+    }
+
+    #[test]
+    fn a_renamed_fallback_group_keeps_its_sessions_when_the_model_is_back() {
+        let mut state = State::default();
+        let off = PassOpts {
+            allow_llm: false,
+            ..opts()
+        };
+        run_pass(&mut state, &obs(fleet_items()), &off, |_| panic!());
+        let notes = state.assignments["workstation/b1"].group.clone();
+        rename_group(&mut state, &notes, "Reviews", NOW).unwrap();
+        let g = state.group(&notes).unwrap();
+        assert_eq!(
+            (g.source.as_str(), g.description.as_deref()),
+            (MANUAL, None)
+        );
+        // The model is back: the project sessions are reclassified, the named one is not.
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |p| {
+            assert!(p.contains("S2:") && !p.contains("S3:"));
+            Ok(r#"{"assign":{"S1":"N1","S2":"N1"},"new":{"N1":{"label":"Fleet Board"}}}"#.into())
+        });
+        assert_eq!(state.assignments["workstation/b1"].group, notes);
+        assert_eq!(state.assignments["laptop/a1"].source, "llm");
+    }
+
+    #[test]
+    fn rename_refuses_blank_duplicate_and_unknown() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let board = gid(&state, "Fleet Board");
+        assert!(rename_group(&mut state, &board, "   ", NOW).is_err());
+        assert!(rename_group(&mut state, &board, "team reviews", NOW).is_err());
+        assert!(rename_group(&mut state, "g-nope", "X", NOW).is_err());
+        // Same label, other case: its own label is fine.
+        rename_group(&mut state, &board, "fleet board", NOW).unwrap();
+    }
+
+    #[test]
+    fn a_moved_session_stays_put_and_empty_groups_vanish() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let board = gid(&state, "Fleet Board");
+        let reviews = gid(&state, "Team Reviews");
+        // The only review session moves to the board: its old group is gone.
+        let to = move_session(
+            &mut state,
+            "workstation",
+            "b1",
+            &MoveTo::Group(board.clone()),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(to, board);
+        assert!(state.group(&reviews).is_none());
+        let a = &state.assignments["workstation/b1"];
+        assert_eq!(
+            (a.group.as_str(), a.source.as_str()),
+            (board.as_str(), MANUAL)
+        );
+        // Retitled later: kept, no model call.
+        let mut items = fleet_items();
+        items[2].title = Some("something else entirely".into());
+        let sum = run_pass(&mut state, &obs(items), &opts(), |_| panic!());
+        assert_eq!(sum.model_calls, 0);
+        assert_eq!(state.assignments["workstation/b1"].group, board);
+        assert!(
+            move_session(
+                &mut state,
+                "laptop",
+                "a1",
+                &MoveTo::Group("g-nope".into()),
+                NOW
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_session_can_start_a_new_group() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let g = move_session(
+            &mut state,
+            "laptop",
+            "a2",
+            &MoveTo::New("Group API".into()),
+            NOW,
+        )
+        .unwrap();
+        let grp = state.group(&g).unwrap();
+        assert_eq!(
+            (grp.label.as_str(), grp.source.as_str(), grp.locked),
+            ("Group API", MANUAL, true)
+        );
+        // A label that exists (any case) reuses that group.
+        let again = move_session(
+            &mut state,
+            "laptop",
+            "a2",
+            &MoveTo::New("group api".into()),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(again, g);
+        assert!(move_session(&mut state, "laptop", "a1", &MoveTo::New(" ".into()), NOW).is_err());
+        // A group holding a moved session is never merged away.
+        let sum = run_pass(
+            &mut state,
+            &obs(fleet_items()),
+            &PassOpts {
+                consolidate: Consolidate::Force,
+                ..opts()
+            },
+            |_| Ok(r#"{"merge":[{"into":"Fleet Board","from":["Group API"]}],"rename":{}}"#.into()),
+        );
+        assert_eq!(sum.model_calls, 1);
+        assert_eq!(sum.merged, 0);
+        assert!(state.group(&g).is_some());
     }
 }

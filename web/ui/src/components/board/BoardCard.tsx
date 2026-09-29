@@ -1,3 +1,4 @@
+import type { DragEvent } from 'react'
 import { Link } from 'wouter'
 
 import type { Session } from '@/api/types'
@@ -21,10 +22,12 @@ export interface BoardCardProps {
   cursor?: boolean
   /** Desktop: open through the shell (cursor + focus handling) instead of plain navigation. */
   onOpen?: (s: Session) => void
+  /** Board drag'n'drop: the card can be dragged to another column. */
+  drag?: { dragging: boolean; onStart: (e: DragEvent) => void; onEnd: () => void }
 }
 
 /** One session on the desktop board: status, title (editable in place, see SessionRow), host, subtitle, status / waiting_for, context, age. */
-export function BoardCard({ session: s, now, selected, cursor, onOpen }: BoardCardProps) {
+export function BoardCard({ session: s, now, selected, cursor, onOpen, drag }: BoardCardProps) {
   const meta = statusMeta(s.status)
   const { title } = useSessionTitle(s)
   const prompt = sessionSubtitle(s)
@@ -36,6 +39,9 @@ export function BoardCard({ session: s, now, selected, cursor, onOpen }: BoardCa
     <Link
       href={sessionHref(s)}
       {...longPress}
+      draggable={drag ? true : undefined}
+      onDragStart={drag?.onStart}
+      onDragEnd={drag?.onEnd}
       onClick={(e) => {
         if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
         e.preventDefault()
@@ -49,6 +55,7 @@ export function BoardCard({ session: s, now, selected, cursor, onOpen }: BoardCa
         waiting ? 'border-status-waiting/35' : 'border-border/70',
         selected && 'border-primary/60 bg-accent/60 hover:bg-accent/70',
         cursor && 'border-primary/40 ring-2 ring-primary/40',
+        drag?.dragging && 'opacity-40',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">

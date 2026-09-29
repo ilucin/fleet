@@ -1,6 +1,6 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group`,
+// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group` (+ `--rename` / `--move`),
 // `fleet config set`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
@@ -156,6 +156,31 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   }
 
   /**
+   * A change made on the board: `fleet group --rename <id> --label <l> --json` or
+   * `fleet group --move <host/id> (--to <group id> | --label <new group>) --json`. Edits the
+   * stored groups only (no discovery, no model call); resolves the report like `--cached`.
+   */
+  async function groupEdit({ op, id, label, host, session, to, timeoutMs: t = 10 * 1000 } = {}) {
+    const args = ['group'];
+    // `--flag=value`: a label starting with "-" must not read as a flag.
+    if (op === 'rename') args.push(`--rename=${id}`, `--label=${label}`);
+    else if (op === 'move') args.push(`--move=${host}/${session}`, to ? `--to=${to}` : `--label=${label}`);
+    else throw new FleetCliError(`unknown group edit "${op}"`);
+    args.push('--json');
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, 'fleet group', t);
+      const why = String(err?.stderr ?? '').replace(/^Error:\s*/, '').trim();
+      if (why && !e.timedOut) e.message = why;
+      e.refused = !e.timedOut && Boolean(why);
+      throw e;
+    }
+    return parseObject(stdout, 'fleet group');
+  }
+
+  /**
    * Write one config key: `fleet --local config set <key> <json>` against `configFile`
    * (FLEET_CONFIG). The CLI owns the config file: it rewrites the raw JSON atomically
    * (tmp + rename), keeps every other key and refuses a file that does not parse.
@@ -172,5 +197,5 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     }
   }
 
-  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached, configSet };
+  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached, groupEdit, configSet };
 }

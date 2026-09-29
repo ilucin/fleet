@@ -172,6 +172,23 @@ enum Commands {
         /// Read sessions from a file ("-" = stdin): a `list --json` array or a `/api/fleet` body
         #[arg(long, value_name = "FILE", conflicts_with = "all_hosts")]
         input: Option<String>,
+        /// Rename a stored group (by id) to --label; the model never renames it again
+        #[arg(long, value_name = "GROUP_ID", requires = "label", conflicts_with_all = ["apply", "refresh", "consolidate", "all_hosts", "input", "cached", "move_session"])]
+        rename: Option<String>,
+        /// Move a session (`host/sessionId`) to --to <group id>, or to a new group named --label; it stays there
+        #[arg(long = "move", value_name = "HOST/ID", conflicts_with_all = ["apply", "refresh", "consolidate", "all_hosts", "input", "cached"])]
+        move_session: Option<String>,
+        /// With --move: the target group's id
+        #[arg(
+            long,
+            value_name = "GROUP_ID",
+            requires = "move_session",
+            conflicts_with = "label"
+        )]
+        to: Option<String>,
+        /// With --rename: the new label; with --move: the label of a new group (reused when one has it)
+        #[arg(long)]
+        label: Option<String>,
     },
 
     /// A session's brief: what it is doing, what it produced, its todos (read, edit, regenerate, open)
@@ -589,16 +606,42 @@ fn run(cli: Cli) -> Result<i32> {
             consolidate,
             cached,
             input,
-        } => group::run(group::GroupOpts {
-            all_hosts,
-            json,
-            apply,
-            refresh,
-            consolidate,
-            cached,
-            input,
-            dry_run: cli.dry_run,
-        })?,
+            rename,
+            move_session,
+            to,
+            label,
+        } => {
+            let edit = match (rename, move_session) {
+                (Some(id), _) => Some(group::Edit::Rename {
+                    id,
+                    label: label.unwrap_or_default(),
+                }),
+                (None, Some(session)) => Some(group::Edit::Move {
+                    session,
+                    to: match (to, label) {
+                        (Some(g), _) => fleet::core::grouping::MoveTo::Group(g),
+                        (None, Some(l)) => fleet::core::grouping::MoveTo::New(l),
+                        (None, None) => {
+                            return Err(Error::Other(
+                                "--move needs --to <group id> or --label <new group>".into(),
+                            ));
+                        }
+                    },
+                }),
+                _ => None,
+            };
+            group::run(group::GroupOpts {
+                all_hosts,
+                json,
+                apply,
+                refresh,
+                consolidate,
+                cached,
+                input,
+                dry_run: cli.dry_run,
+                edit,
+            })?
+        }
         Commands::Brief {
             target: session,
             json,

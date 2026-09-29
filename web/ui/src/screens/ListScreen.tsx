@@ -38,7 +38,7 @@ export function ListScreen() {
   const notesHosts = useNotesHosts()
   const board = mode === 'board'
   const groups = useGroups(board)
-  const columns = useBoardColumns(board, view.sessions, groups.groups, fleet)
+  const { columns } = useBoardColumns(board, view.sessions, groups.groups, fleet)
   // The filter rows live in a drawer under the search field, closed by default: swipe down on
   // the header (or tap the handle) opens it, swipe up closes it. Active filters show on the handle.
   const [filtersOpen, setFiltersOpen] = useState(false)

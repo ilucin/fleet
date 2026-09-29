@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createApi } from '../lib/api.mjs';
+import { createApi, groupEditOp } from '../lib/api.mjs';
 import { createHttpServer } from '../lib/app.mjs';
 import { createFleet } from '../lib/fleet.mjs';
 import { createFleetCli } from '../lib/fleet-cli.mjs';
@@ -24,6 +24,11 @@ function fakeCli({ fail = false } = {}) {
   return {
     calls,
     groupCached: async () => (calls.push(['cached']), report([BOARD], { mode: 'noop', ok: true, modelCalls: 0, classified: 0 })),
+    groupEdit: async (op) => {
+      calls.push(['edit', op]);
+      if (op.to === 'g-gone') throw Object.assign(new Error('no group g-gone'), { refused: true });
+      return report([{ ...BOARD, label: op.label ?? BOARD.label }]);
+    },
     groupRun: async ({ fleet, refresh }) => {
       calls.push(['run', fleet, refresh]);
       if (fail) throw new Error('fleet group timed out after 300s');
@@ -251,4 +256,75 @@ test('/api/groups: nobody runs grouping → disabled response and 501 on run', a
   const req = Object.assign(new (await import('node:stream')).PassThrough(), { method: 'POST', headers: {} });
   req.end('{}');
   await assert.rejects(api(req, new URL('http://x/api/groups/run')), (err) => err.status === 501);
+});
+
+test('grouper: an edit waits for a running pass and a pass waits for an edit', async () => {
+  const order = [];
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const cli = {
+    groupCached: async () => report([BOARD]),
+    groupRun: async () => (order.push('run:start'), await gate, order.push('run:end'), report([BOARD])),
+    groupEdit: async (op) => (order.push(`edit:${op.label}`), report([{ ...BOARD, label: op.label }])),
+  };
+  const g = createGrouper({ cli, getFleet: async () => FLEET });
+  const run = g.runOnce('manual');
+  await new Promise((r) => setImmediate(r));
+  const edit = g.edit({ op: 'rename', id: 'g-1', label: 'Renamed' });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(order, ['run:start'], 'the edit waits');
+  release();
+  await run;
+  const r = await edit;
+  assert.deepEqual(order, ['run:start', 'run:end', 'edit:Renamed']);
+  assert.equal(r.groups[0].label, 'Renamed');
+});
+
+test('fleet-cli groupEdit: flags as --k=v, the CLI error surfaces as refused', async () => {
+  const seen = [];
+  const cli = createFleetCli({ run: async (b, args) => (seen.push(args), { stdout: JSON.stringify(report([BOARD])), stderr: '' }) });
+  await cli.groupEdit({ op: 'rename', id: 'g-1', label: '-dash' });
+  await cli.groupEdit({ op: 'move', host: 'laptop', session: 'a1', to: 'g-2' });
+  await cli.groupEdit({ op: 'move', host: 'laptop', session: 'a1', label: 'New One' });
+  assert.deepEqual(seen, [
+    ['group', '--rename=g-1', '--label=-dash', '--json'],
+    ['group', '--move=laptop/a1', '--to=g-2', '--json'],
+    ['group', '--move=laptop/a1', '--label=New One', '--json'],
+  ]);
+  const failing = createFleetCli({
+    run: async () => {
+      throw Object.assign(new Error('Command failed'), { code: 1, stderr: 'Error: no group g-9\n' });
+    },
+  });
+  await assert.rejects(failing.groupEdit({ op: 'move', host: 'laptop', session: 'a1', to: 'g-9' }), (e) => e.refused && e.message === 'no group g-9');
+});
+
+test('groupEditOp validates the body', () => {
+  assert.deepEqual(groupEditOp({ op: 'rename', id: 'g-1', label: '  X  ' }), { op: 'rename', id: 'g-1', label: 'X' });
+  assert.deepEqual(groupEditOp({ op: 'move', host: 'laptop', session: 'a1', to: 'repo-app' }), { op: 'move', host: 'laptop', session: 'a1', to: 'repo-app' });
+  assert.deepEqual(groupEditOp({ op: 'move', host: 'laptop', session: '123', label: 'New' }), { op: 'move', host: 'laptop', session: '123', label: 'New' });
+  for (const bad of [
+    null,
+    { op: 'nuke' },
+    { op: 'rename', id: 'g-1', label: '   ' },
+    { op: 'rename', id: 'g 1', label: 'X' },
+    { op: 'move', host: 'a/b', session: 'a1', to: 'g-1' },
+    { op: 'move', host: 'laptop', session: '../x', to: 'g-1' },
+    { op: 'move', host: 'laptop', session: 'a1' },
+  ]) {
+    assert.throws(() => groupEditOp(bad), (e) => e.status === 400, JSON.stringify(bad));
+  }
+});
+
+test('/api/groups/edit: applied on the grouping host, proxied from a peer, refusals are 409', async (t) => {
+  const { urls, groupCli } = await startPair(t, { workstationGrouping: { host: 'laptop' } });
+  const r = await post(`${urls.workstation}/api/groups/edit`, { op: 'rename', id: 'g-1', label: 'Board UI' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.groups[0].label, 'Board UI');
+  assert.deepEqual(groupCli.calls.at(-1), ['edit', { op: 'rename', id: 'g-1', label: 'Board UI' }]);
+  const refused = await post(`${urls.laptop}/api/groups/edit`, { op: 'move', host: 'laptop', session: 'a1', to: 'g-gone' });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /no group g-gone/);
+  assert.equal((await post(`${urls.laptop}/api/groups/edit`, { op: 'rename', id: 'g-1' })).status, 400);
+  assert.equal((await get(`${urls.laptop}/api/groups/edit`)).status, 405);
 });

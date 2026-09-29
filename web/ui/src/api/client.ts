@@ -25,6 +25,7 @@ import type {
   SpawnResponse,
   UploadResponse,
 } from './types'
+import type { GroupEdit } from '@/lib/groups'
 
 /** A failed request. `status` is the HTTP status, or 0 when the network is unreachable. */
 export class ApiError extends Error {
@@ -160,6 +161,8 @@ export const api = {
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),
+  /** Rename a group / move a session (409: the id or label was refused). */
+  editGroups: (edit: GroupEdit, o: Opts = {}) => request<GroupsResponse>('/api/groups/edit', { ...o, method: 'POST', body: edit }),
 }
 
 /** GET …/files/raw — for <img>, <iframe>, fetch and download links. */

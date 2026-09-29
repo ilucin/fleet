@@ -20,6 +20,36 @@ export const API_VERSION = 1;
 
 const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|kill|rename)$/;
 const POST_ACTIONS = new Set(['send', 'keys', 'kill', 'rename']);
+
+const GROUP_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
+const MEMBER_HOST_RE = /^[^/\s]{1,128}$/;
+const MEMBER_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const MAX_GROUP_LABEL = 200;
+
+/**
+ * The body of POST /api/groups/edit, validated: `{ op: "rename", id, label }` or
+ * `{ op: "move", host, session, to }` / `{ op: "move", host, session, label }` (a new group).
+ */
+export function groupEditOp(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const label = () => {
+    const l = typeof b.label === 'string' ? b.label.trim() : '';
+    if (!l || l.length > MAX_GROUP_LABEL) throw new HttpError(`label must be 1-${MAX_GROUP_LABEL} characters`, 400);
+    return l;
+  };
+  const groupId = (v, what) => {
+    if (typeof v !== 'string' || !GROUP_ID_RE.test(v)) throw new HttpError(`invalid ${what}`, 400);
+    return v;
+  };
+  if (b.op === 'rename') return { op: 'rename', id: groupId(b.id, 'group id'), label: label() };
+  if (b.op === 'move') {
+    if (typeof b.host !== 'string' || !MEMBER_HOST_RE.test(b.host)) throw new HttpError('invalid host', 400);
+    if (typeof b.session !== 'string' || !MEMBER_ID_RE.test(b.session)) throw new HttpError('invalid session', 400);
+    const op = { op: 'move', host: b.host, session: b.session };
+    return b.to != null ? { ...op, to: groupId(b.to, 'target group id') } : { ...op, label: label() };
+  }
+  throw new HttpError('op must be "rename" or "move"', 400);
+}
 const SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn$/;
 const AUTONAME_ROUTE = /^\/api\/hosts\/([^/]+)\/autoname$/;
 const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
@@ -310,6 +340,24 @@ export function createApi({
     throw new HttpError(target.error ?? 'smart grouping is not enabled on this fleet (web.grouping.enabled)', 501);
   }
 
+  /** POST /api/groups/edit — rename a group / move a session, on the grouping host. */
+  async function handleGroupEdit(req, url) {
+    const op = groupEditOp(await readJsonBody(req));
+    const target = await groupsTarget(url);
+    if (target.kind === 'self') {
+      try {
+        return { status: 200, body: await grouper.edit(op) };
+      } catch (err) {
+        throw new HttpError(`group edit failed: ${err?.message ?? err}`, err?.refused ? 409 : err?.timedOut ? 504 : 502);
+      }
+    }
+    if (target.kind === 'peer') {
+      const r = await proxyToPeer(target.url, { method: 'POST', pathname: '/api/groups/edit', body: JSON.stringify(op), timeoutMs: peerProxyTimeoutMs });
+      return { status: r.status, body: r.body };
+    }
+    throw new HttpError(target.error ?? 'smart grouping is not enabled on this fleet (web.grouping.enabled)', 501);
+  }
+
   /** Serve locally when `host` is self, proxy (once, with ?local=1) when it is a peer. */
   async function forHost({ req, url, host, local, stream = false, streamResponse = false }) {
     const target = resolveHost(host, config);
@@ -392,6 +440,11 @@ export function createApi({
     if (url.pathname === '/api/groups') {
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
       return handleGroups(req, url, 'get');
+    }
+
+    if (url.pathname === '/api/groups/edit') {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return handleGroupEdit(req, url);
     }
 
     if (url.pathname === '/api/groups/run') {

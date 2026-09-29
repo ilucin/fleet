@@ -1,11 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ApiError, api, isAbortError } from '@/api/client'
 import type { FleetResponse, GroupsResponse, Session } from '@/api/types'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
-import { boardColumns, effectiveGroups, parseIdList, parseViewMode, regroupToast, stickyColumns, type BoardColumn, type ViewMode } from '@/lib/groups'
+import {
+  applyGroupEdit,
+  boardColumns,
+  effectiveGroups,
+  parseIdList,
+  parseViewMode,
+  regroupToast,
+  reorderColumns,
+  stickyColumns,
+  type BoardColumn,
+  type GroupEdit,
+  type ViewMode,
+} from '@/lib/groups'
 import { allSessions } from '@/lib/sessions'
 import { storage } from '@/lib/storage'
 
@@ -29,9 +41,13 @@ export function useGroups(enabled: boolean) {
   const [loaded, setLoaded] = useState(false)
   const [running, setRunning] = useState(false)
 
+  // Board edits in flight: a poll answered meanwhile is stale — it would undo the optimistic edit.
+  const editing = useRef(0)
+
   const poll = useCallback(async (signal: AbortSignal) => {
     try {
-      setGroups(await api.groups({ signal }))
+      const res = await api.groups({ signal })
+      if (editing.current === 0) setGroups(res)
       setError(null)
     } catch (err) {
       if (isAbortError(err)) throw err
@@ -68,7 +84,33 @@ export function useGroups(enabled: boolean) {
     }
   }, [running])
 
-  return { groups, error, loaded, running: busy, refresh, run }
+  /**
+   * Rename a group / move a session (POST /api/groups/edit): applied to the board at once,
+   * replaced by the server's answer; on failure a toast and a fresh fetch put it back.
+   */
+  const edit = useCallback(
+    async (e: GroupEdit) => {
+      editing.current += 1
+      setGroups((g) => (g ? applyGroupEdit(g, e) : g))
+      let failed = false
+      try {
+        const res = await api.editGroups(e)
+        if (editing.current === 1) setGroups(res)
+      } catch (err) {
+        failed = true
+        toast.error((err as Error)?.message || (e.op === 'rename' ? 'Rename failed' : 'Move failed'))
+      } finally {
+        editing.current -= 1
+        if (failed && editing.current === 0) refresh()
+      }
+    },
+    [refresh],
+  )
+
+  /** Only the server's groups can be edited — not the repo fallback drawn client-side. */
+  const editable = !!groups?.enabled
+
+  return { groups, error, loaded, running: busy, refresh, run, edit, editable }
 }
 
 export type GroupsState = ReturnType<typeof useGroups>
@@ -78,8 +120,14 @@ const ORDER_KEY = 'fleet.boardOrder'
 /**
  * The board's columns for `sessions` (already filtered), in a sticky order remembered in
  * `fleet.boardOrder`: a column keeps its place while statuses change; new ones are appended.
+ * `moveColumn` is a drag on the board (per browser, like the rest of that order).
  */
-export function useBoardColumns(enabled: boolean, sessions: Session[], groups: GroupsResponse | null, fleet: FleetResponse | null): BoardColumn[] {
+export function useBoardColumns(
+  enabled: boolean,
+  sessions: Session[],
+  groups: GroupsResponse | null,
+  fleet: FleetResponse | null,
+): { columns: BoardColumn[]; moveColumn: (id: string, before: string | null) => void } {
   const [order, setOrder] = useState<string[]>(() => parseIdList(storage.getJSON(ORDER_KEY)))
   const sticky = useMemo(
     () => (enabled ? stickyColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups), order) : null),
@@ -89,5 +137,6 @@ export function useBoardColumns(enabled: boolean, sessions: Session[], groups: G
   useEffect(() => {
     storage.set(ORDER_KEY, JSON.stringify(order))
   }, [order])
-  return sticky?.columns ?? []
+  const moveColumn = useCallback((id: string, before: string | null) => setOrder((o) => reorderColumns(o, id, before)), [])
+  return { columns: sticky?.columns ?? [], moveColumn }
 }

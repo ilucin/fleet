@@ -79,6 +79,7 @@ export function createGrouper({
   let report = null;
   let lastRun = null;
   let inFlight = null;
+  let editing = null; // the last board edit (resolves when done, never rejects)
   let timer = null;
   let checker = null;
   let stopped = false;
@@ -97,6 +98,7 @@ export function createGrouper({
   function runOnce(reason = 'manual', { refresh = false } = {}) {
     if (inFlight) return inFlight;
     inFlight = (async () => {
+      if (editing) await editing; // the pass must start from the state an edit just wrote
       const at = now();
       try {
         const fleet = await getFleet();
@@ -127,6 +129,24 @@ export function createGrouper({
       return response();
     })();
     return inFlight;
+  }
+
+  /**
+   * A change made on the board (`cli.groupEdit`: rename a group, move a session). Waits for a
+   * running pass — which would otherwise save over the edit — and edits run one at a time.
+   * Resolves the response; throws the CLI's error (`refused: true` = bad id/label).
+   */
+  function edit(op) {
+    if (typeof cli.groupEdit !== 'function') return Promise.reject(new Error('group edits are not available'));
+    const job = (async () => {
+      await editing;
+      await inFlight;
+      report = await cli.groupEdit(op);
+      log(`[grouping] edit: ${op.op}`);
+      return response();
+    })();
+    editing = job.catch(() => {});
+    return job;
   }
 
   /** Run early when live sessions exist that no group has seen (cheap: no CLI call, no discovery). */
@@ -187,6 +207,7 @@ export function createGrouper({
       clearTimer(checker);
     },
     runOnce,
+    edit,
     checkChanges,
     response,
     loadCached,

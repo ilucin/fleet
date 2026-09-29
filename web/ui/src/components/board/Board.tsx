@@ -2,9 +2,8 @@ import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
 import { PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
-import { BoardCard } from '@/components/board/BoardCard'
+import { BoardColumns } from '@/components/board/BoardColumns'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
-import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { NotesLink } from '@/components/desktop/Sidebar'
 import { HostDot } from '@/components/HostBadge'
 import { StatusDot } from '@/components/StatusDot'
@@ -31,6 +30,8 @@ export interface BoardProps {
   list: SessionListState
   groups: GroupsState
   columns: BoardColumn[]
+  /** Reorder: column `id` just before `before` (null: to the end) — a header drag. */
+  onMoveColumn: (id: string, before: string | null) => void
   now: number
   cursorKey: string | null
   selectedKey: string | null
@@ -51,9 +52,10 @@ export interface BoardProps {
 /**
  * Desktop board: a header (summary, List | Board, search, filters, last grouping run,
  * Regroup) over horizontal Kanban columns — one per group, cards = sessions. The same
- * search / status / host filters as the list apply to the cards.
+ * search / status / host filters as the list apply to the cards. Columns can be renamed,
+ * reordered and cards dragged between them (BoardColumns).
  */
-export function Board({ list, groups, columns, now, cursorKey, selectedKey, overlayInset, searchRef, onSearchNav, onOpen, onNew, view, onView }: BoardProps) {
+export function Board({ list, groups, columns, onMoveColumn, now, cursorKey, selectedKey, overlayInset, searchRef, onSearchNav, onOpen, onNew, view, onView }: BoardProps) {
   const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view: lv, hostCounts, summary, unreachable, note } = list
   const boardRef = useRef<HTMLDivElement>(null)
 
@@ -225,40 +227,16 @@ export function Board({ list, groups, columns, now, cursorKey, selectedKey, over
             {allSessions(fleet).length > 0 ? 'Nothing matches.' : 'No Claude sessions running.'}
           </div>
         ) : (
-          columns.map((c) => (
-            <section
-              key={c.id}
-              aria-label={`${c.label}: ${c.sessions.length} sessions`}
-              className={cn(
-                'flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30',
-                c.ungrouped && 'border-dashed',
-              )}
-            >
-              <header className="shrink-0 px-3 pt-2.5 pb-2" title={c.description ?? undefined}>
-                <div className="flex min-w-0 items-center gap-2">
-                  <h2 className={cn('min-w-0 flex-1 truncate text-sm font-semibold', c.ungrouped && 'text-muted-foreground')}>{c.label}</h2>
-                  <StatusSummaryDots summary={c.summary} />
-                  <span className="rounded-md bg-muted px-1.5 text-[0.6875rem] text-muted-foreground tabular-nums">{c.sessions.length}</span>
-                </div>
-                {c.description ? <p className="mt-0.5 line-clamp-2 text-[0.6875rem] text-dimmer">{c.description}</p> : null}
-              </header>
-              <div className="flex min-h-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2">
-                {c.sessions.map((s) => {
-                  const key = sessionKey(s)
-                  return (
-                    <BoardCard
-                      key={key}
-                      session={s}
-                      now={now}
-                      selected={key === selectedKey}
-                      cursor={key === cursorKey && key !== selectedKey}
-                      onOpen={openCard}
-                    />
-                  )
-                })}
-              </div>
-            </section>
-          ))
+          <BoardColumns
+            columns={columns}
+            now={now}
+            cursorKey={cursorKey}
+            selectedKey={selectedKey}
+            onOpen={openCard}
+            editable={groups.editable}
+            onEdit={groups.edit}
+            onMoveColumn={onMoveColumn}
+          />
         )}
         {fleet && columns.length && overlayInset ? <div aria-hidden className="shrink-0" style={{ width: overlayInset }} /> : null}
       </div>

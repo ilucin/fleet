@@ -165,6 +165,53 @@ export function stickyColumns(columns: BoardColumn[], prev: readonly string[]): 
   return { columns: sorted, order }
 }
 
+/**
+ * The remembered column order with `id` moved just before `before` (null: to the end).
+ * Ids missing from `order` (a column not remembered yet) are appended first.
+ */
+export function reorderColumns(order: readonly string[], id: string, before: string | null): string[] {
+  if (id === before || id === UNGROUPED_ID) return [...order]
+  const out = order.filter((x) => x !== id)
+  const at = before == null || before === UNGROUPED_ID ? -1 : out.indexOf(before)
+  if (at < 0) out.push(id)
+  else out.splice(at, 0, id)
+  return out
+}
+
+/** A change made on the board — the body of POST /api/groups/edit. */
+export type GroupEdit =
+  | { op: 'rename'; id: string; label: string }
+  /** Into group `to`, or (with `label`) a new group of that name — an existing one of that name is reused. */
+  | { op: 'move'; host: string; session: string; to: string; label?: undefined }
+  | { op: 'move'; host: string; session: string; label: string; to?: undefined }
+
+/** The id a group member uses for `s`: its session id, else its pid. */
+export const memberId = (s: Session): string => s.session_id || (s.pid != null ? String(s.pid) : '')
+
+/** Id of a group made optimistically on the board, until the server answers with the real one. */
+export const PENDING_PREFIX = 'pending:'
+
+/**
+ * `resp` with `edit` applied locally — the optimistic board while the server saves it
+ * (mirrors `core::grouping::{rename_group, move_session}`: a moved-from group left empty goes).
+ */
+export function applyGroupEdit(resp: GroupsResponse, edit: GroupEdit): GroupsResponse {
+  if (edit.op === 'rename') {
+    return { ...resp, groups: resp.groups.map((g) => (g.id === edit.id ? { ...g, label: edit.label } : g)) }
+  }
+  const member = { host: edit.host, id: edit.session }
+  const same = (m: { host: string; id: string }) => m.host === member.host && m.id === member.id
+  let groups = resp.groups.map((g) => ({ ...g, members: (g.members ?? []).filter((m) => !same(m)) }))
+  const label = edit.label ?? ''
+  let target = edit.to ?? groups.find((g) => g.label.toLowerCase() === label.toLowerCase())?.id
+  if (!target) {
+    target = `${PENDING_PREFIX}${label}`
+    groups.push({ id: target, label, description: null, source: 'manual', members: [] })
+  }
+  groups = groups.map((g) => (g.id === target ? { ...g, members: [...g.members, member] } : g)).filter((g) => g.members.length > 0)
+  return { ...resp, groups }
+}
+
 /** Sessions in board order (columns left→right, cards top→bottom) — the j/k cursor order. */
 export function boardOrder(columns: BoardColumn[]): Session[] {
   return columns.flatMap((c) => c.sessions)
