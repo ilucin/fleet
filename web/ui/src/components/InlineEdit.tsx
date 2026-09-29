@@ -130,6 +130,8 @@ export function InlineField({ initial = '', placeholder, onCommit, onCancel, cla
         className={cn(
           'absolute inset-y-0 -inset-x-1 min-w-0 rounded-sm bg-background px-1 outline-none ring-2 ring-ring/50',
           'placeholder:font-normal placeholder:text-dimmer',
+          // The label's size (base styles lift inputs to 16px); touch screens keep 16px, or iOS zooms.
+          'pointer-fine:text-[length:inherit]',
         )}
       />
     </span>
