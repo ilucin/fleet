@@ -28,6 +28,21 @@ import { cn } from '@/lib/utils'
 const HOST_KEY = 'fleet.spawnHost'
 const dirKey = (host: string) => `fleet.spawnDirLabel.${host}`
 const MODEL_KEY = 'fleet.spawnModel'
+// The unsent first prompt of a plain New session (not a prefilled "continue"), so closing the form,
+// a reload or a crash never loses it; cleared once a session starts. Stale after a week.
+const DRAFT_KEY = 'fleet.spawnDraft'
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+function loadDraft(): string {
+  const d = storage.getJSON<{ prompt?: unknown; at?: unknown }>(DRAFT_KEY)
+  if (!d || typeof d.prompt !== 'string' || typeof d.at !== 'number' || Date.now() - d.at > DRAFT_MAX_AGE_MS) return ''
+  return d.prompt
+}
+
+function saveDraft(prompt: string) {
+  if (prompt.trim()) storage.setJSON(DRAFT_KEY, { prompt, at: Date.now() })
+  else storage.remove(DRAFT_KEY)
+}
 // Radix ToggleGroup treats '' as "nothing selected": the default model ('' = no --model) needs a stand-in.
 const DEFAULT_MODEL_VALUE = '__default'
 
@@ -118,7 +133,12 @@ function NewSessionForm({
   const { models } = useSettings()
   const [modelChoice, setModelChoice] = useState<string | null>(() => storage.get(MODEL_KEY))
   const model = pickModel(models, modelChoice)
-  const [prompt, setPrompt] = useState(() => prefill?.prompt ?? '')
+  const [prompt, setPrompt] = useState(() => prefill?.prompt ?? loadDraft())
+  // Keep the draft on every change (attachments typed in included); a prefill is never a draft.
+  const draftable = !prefill
+  useEffect(() => {
+    if (draftable) saveDraft(prompt)
+  }, [draftable, prompt])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // Files dropped on the form / pasted / picked: uploaded to the chosen host, paths go into the prompt.
@@ -162,6 +182,7 @@ function NewSessionForm({
     setError(null)
     try {
       const res = await api.spawn(host, { dir: dir.path, prompt: prompt.trim() ? prompt : undefined, model: model || undefined })
+      if (draftable) storage.remove(DRAFT_KEY)
       onDone()
       const id = toast.loading(`Starting ${res.name} on ${host}…`, { description: 'Waiting for Claude to register' })
       watchForSpawned(

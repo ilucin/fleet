@@ -182,7 +182,9 @@ src/
   `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
   opens the session. ⌘/Ctrl+Enter starts it from any field (the prompt included — plain Enter
   there is a newline; the dialog's button shows `⌘↵`). Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys)
-  and `fleet.spawnModel` (a model id no longer offered falls back to the first option).
+  and `fleet.spawnModel` (a model id no longer offered falls back to the first option). The unsent
+  first prompt is kept as a draft (`fleet.spawnDraft`, a week) across closing the form and reloads,
+  and cleared once the session starts; a prefilled "Continue in new session" never touches it.
 - **Session detail** (`#/s/:host/:id`), fixed full-screen layout that follows the visual viewport
   (`fixed-app`: `--app-h` + `--app-top`, so the composer stays above the iOS keyboard):
   - header: back, title (click to rename), status, host, "updated Xs ago", Chat | Term toggle, ⋯;
