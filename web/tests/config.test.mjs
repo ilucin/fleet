@@ -55,7 +55,7 @@ test('normalizeConfig maps the shared config to server settings', () => {
     { label: 'Work', path: `${HOME}/Code/app` },
     { label: 'Shared', path: '/srv/shared' },
   ]);
-  assert.equal(cfg.uiDir, '/app/web/public');
+  assert.equal(cfg.uiDir, '/app/web/ui/dist');
   assert.match(cfg.tmux, /(^|\/)tmux$/, 'resolved from PATH/fallbacks or bare');
   assert.equal(cfg.quickReplies, null);
 });

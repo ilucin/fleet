@@ -1,5 +1,5 @@
 // Viewer preferences shown on the Settings screen (`#/settings`) — pure helpers, unit-tested in
-// prefs.test.ts. Stored per viewer in localStorage under the classic UI's keys.
+// prefs.test.ts. Stored per viewer in localStorage.
 import { CHAT_FONT_SIZES, TERM_FONT_SIZES, parseSize } from '@/lib/chat'
 
 export const TEXT_SIZE_KEY = 'fleet.chatFont'
@@ -9,7 +9,7 @@ export const HIDE_NOTES_KEY = 'fleet.chatHideNotes'
 export const SEND_DELAY_KEY = 'fleet.sendDelay'
 
 /**
- * Text size steps, named by the chat text size they give (the classic UI's `fleet.chatFont`
+ * Text size steps, named by the chat text size they give (the stored `fleet.chatFont`
  * values). The whole UI scales with it: the root font-size is set so the chat's 0.9375rem
  * comes out at exactly this many px, and every rem-based size scales along.
  */

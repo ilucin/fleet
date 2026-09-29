@@ -345,10 +345,10 @@ fn web_service_prints_a_launchd_plist() {
     assert!(s.contains(&env.config_path().display().to_string()), "{s}");
 }
 
-/// A fake web dir: server.mjs, a classic public/, and optionally a built ui/dist.
+/// A fake web dir: server.mjs, ui/ sources, and optionally a built ui/dist.
 fn fake_web(env: &Env, built: bool) -> std::path::PathBuf {
     let web = env.path("web");
-    std::fs::create_dir_all(web.join("public")).unwrap();
+    std::fs::create_dir_all(&web).unwrap();
     std::fs::write(web.join("server.mjs"), "").unwrap();
     std::fs::create_dir_all(web.join("ui/src")).unwrap();
     std::fs::write(web.join("ui/package.json"), "{}").unwrap();

@@ -25,7 +25,7 @@ export const DEFAULT_QUICK_REPLIES: QuickReply[] = [
   { label: '2', text: '2' },
 ]
 
-/** Key chips are built in (not configurable), as in the classic UI. */
+/** Key chips are built in (not configurable). */
 export const QUICK_KEYS: { label: string; key: SessionKey }[] = [
   { label: 'Esc', key: 'Escape' },
   { label: '↵', key: 'Enter' },

@@ -71,8 +71,8 @@ There is no chained hopping: a host dispatches only to hosts in its own config.
 
 Every machine runs the same `server.mjs`. It:
 
-- serves the static UI, installable as a PWA: the React app built to `web/ui/dist/` when present
-  (`fleet web build`), else the classic vanilla-JS `web/public/`;
+- serves the static UI, installable as a PWA: the React app built to `web/ui/dist/`
+  (`fleet web build`; until then `/` is a "not built" placeholder);
 - exposes **its own** sessions, discovered with `fleet list --json` (cached ~2 s);
 - drives its own backends directly for peek/send/keys (it needs untruncated, header-free output);
 - reads chat transcripts from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`;
@@ -117,7 +117,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
 | `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: the scheme of the "Open in editor" link the API puts on briefs and session rows (`editorUrl`, see [Session briefs](#session-briefs)); `null` = no link (the UI hides the button) |
-| `web.ui` | static UI directory to serve instead of the bundled one, or `"classic"` for `web/public`; unset → `web/ui/dist` when built, else `web/public` |
+| `web.ui` | static UI directory to serve instead of the bundled one; unset → `web/ui/dist`. The old `"classic"` value (the removed vanilla UI) is ignored |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
 | `web.models` | New session model picker: `[{ id, label }]` or bare ids (`""` = Claude's default, no `--model`); default Default, Fable 5.1, Opus 5.5, Sonnet 5, Haiku 4.5 |
 | `web.autoName` | `{ enabled, intervalMinutes }` (default off, 5 — opt in with `enabled: true`): the web server runs `fleet name --all --apply` on its host on that schedule (tmux names follow the titles, see [Session titles](#session-titles)); a web spawn with a first prompt also gets a targeted `fleet name <id> --apply` once it has replied |

@@ -8,7 +8,7 @@ export interface PollerOptions {
 }
 
 /**
- * setTimeout-chained poller, same behaviour as the classic UI's createPoller:
+ * setTimeout-chained poller:
  * - never overlaps (the next tick is scheduled after the previous one settles);
  * - the first run always happens, even in a hidden/prerendered tab, so a view never
  *   sits on skeletons; after that a hidden document pauses polling;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { nearBottom } from '@/lib/chat'
 
 /**
- * "Follow the tail" for a scroll container (chat / terminal), as in the classic UI:
+ * "Follow the tail" for a scroll container (chat / terminal):
  * - following → every content change (call `stick()` from a layout effect) and every
  *   resize of the scroller (keyboard, composer growing, font size) keeps it at the bottom;
  * - scrolling more than `slack` px up stops following (show a "↓ latest" button);

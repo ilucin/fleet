@@ -1,5 +1,4 @@
-// Safe Markdown → AST for the subset Claude Code actually emits — a port of the classic
-// UI's public/markdown.js. It never produces HTML: components/Markdown.tsx renders the
+// Safe Markdown → AST for the subset Claude Code actually emits. It never produces HTML: components/Markdown.tsx renders the
 // tree as React elements (text is escaped by React), and only http(s) URLs ever become
 // links. Unknown constructs fall back to plain text. Pure, unit-tested in markdown.test.ts.
 // With `{ files: true }` (chat + the file preview) a relative `[t](docs/a.md)` becomes a `file`

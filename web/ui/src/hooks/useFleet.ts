@@ -26,8 +26,7 @@ export function useFleet(): FleetState {
   return ctx
 }
 
-// Shared with the classic UI (same origin, same shape): a reload paints the
-// last list instantly while the first poll runs.
+// A reload paints the last list instantly while the first poll runs.
 export const SNAPSHOT_KEY = 'fleet.snapshot'
 export const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000
 

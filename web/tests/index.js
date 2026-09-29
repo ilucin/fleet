@@ -5,7 +5,6 @@ import './server.test.mjs';
 import './config.test.mjs';
 import './api.test.mjs';
 import './transcript.test.mjs';
-import './markdown.test.mjs';
 import './spawn.test.mjs';
 import './kill.test.mjs';
 import './autoname.test.mjs';

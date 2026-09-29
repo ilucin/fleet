@@ -24,7 +24,6 @@ import { sessionHref, spawnTargets } from '@/lib/sessions'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
-// Same keys as the classic UI's sheet.
 const HOST_KEY = 'fleet.spawnHost'
 const dirKey = (host: string) => `fleet.spawnDirLabel.${host}`
 const MODEL_KEY = 'fleet.spawnModel'

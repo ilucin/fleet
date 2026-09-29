@@ -4,8 +4,7 @@ The mobile-first PWA (with a keyboard-first desktop layout from 1024px up) for t
 Tailwind CSS v4 + [shadcn/ui](https://ui.shadcn.com) (radix, "nova" style) + lucide-react.
 It talks only to the server's HTTP API ([../ARCHITECTURE.md](../ARCHITECTURE.md) → "HTTP API").
 
-The server serves `dist/` by default once it is built (else the classic `../public/` UI;
-force that one with `web.ui: "classic"` or `FLEET_WEB_UI=classic`). `dist/` is gitignored and is
+The server serves `dist/` (until it is built, `/` is a "not built" placeholder). `dist/` is gitignored and is
 what `fleet install --host` copies — sources and `node_modules` never leave this machine.
 
 ## Build
@@ -38,7 +37,7 @@ src/
   lib/sessions.ts     status meta/labels, filters, search, sort, listView(), findSession(), sessionHref(),
                       spawnTargets(), findSpawned(), withoutSession()
   lib/chat.ts         detail-view constants + pure helpers (sizes, limits, grouping, interim notes)
-  lib/markdown.ts     safe markdown → AST (port of ../public/markdown.js), linkify()
+  lib/markdown.ts     safe markdown → AST, linkify()
   lib/autoname.ts     naming-pass summaries for toasts / the menu
   lib/models.ts       New session model picker: DEFAULT_MODELS (mirrors lib/config.mjs), normalizeModels(), pickModel()
   lib/groups.ts       Board view: boardColumns() (sessions × /api/groups → columns, Ungrouped last),
@@ -80,7 +79,7 @@ src/
   hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
                       refresh() (runs even while hidden)
   hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term
-  hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`, shared with the classic UI)
+  hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`)
   hooks/useSessionList.ts  list state shared by the mobile list and the desktop sidebar (search, filters, counts)
   hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
                       every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now;
@@ -120,7 +119,7 @@ src/
 
 ## Conventions
 
-- **Routing**: wouter with hash location, same URLs as the classic UI (`#/`, `#/s/<host>/<id>`; plus `#/settings`, `#/notes…`),
+- **Routing**: wouter with hash location, (`#/`, `#/s/<host>/<id>`; plus `#/settings`, `#/notes…`),
   so no server SPA fallback is needed and old bookmarks/PWA installs keep working.
 - **Data**: one `FleetProvider` polls `/api/fleet` for the whole app; screens read it with
   `useFleet()` (`fleet`, `fleetAt`, `error`, `refreshing`, `refresh()`, `applyFleet()`).
@@ -141,10 +140,10 @@ src/
   mobile `Switch` — two trees, not responsive classes, so the mobile layout cannot drift. Shared
   components take opt-in props (`layout="pane"`, `wide`, `desktop`, `selected`/`cursor`) whose
   defaults keep the mobile markup byte-identical; keep it that way (check a 390px iframe).
-- **Storage keys** are `fleet.*`; reuse the classic UI's keys where the meaning is the same
+- **Storage keys** are `fleet.*`; keep the existing ones stable, viewers' prefs live in them
   (`fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`).
 - **Text from sessions is data**: render it as text (React escapes); never `dangerouslySetInnerHTML`.
-  Markdown must stay DOM-only with `http(s)` links only, like `../public/markdown.js`.
+  Markdown must stay DOM-only with `http(s)` links only.
 - Pure logic goes in `lib/` with a `*.test.ts` next to it.
 - **Titles**: draw a session's name only through `sessionTitle()` / `useSessionTitle()` /
   `<EditableTitle>` — never `s.name` or `s.gen_title` directly. The CLI's `display_title` is the
@@ -192,7 +191,7 @@ src/
   first reply when `web.autoName` is on, else tmux `fw-hhmmss`). 400/409 are shown inline; on success a loading toast watches
   `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
   opens the session. ⌘/Ctrl+Enter starts it from any field (the prompt included — plain Enter
-  there is a newline; the dialog's button shows `⌘↵`). Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>` (classic keys)
+  there is a newline; the dialog's button shows `⌘↵`). Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>`
   and `fleet.spawnModel` (a model id no longer offered falls back to the first option). The unsent
   first prompt is kept as a draft (`fleet.spawnDraft`, a week) across closing the form and reloads,
   and cleared once the session starts; a prefilled "Continue in new session" never touches it.
@@ -321,7 +320,7 @@ src/
   (← Sessions, name, host picker, search ⌘F, root, editor link), then tree | results or recent |
   note. Mobile: the browse/search screen (recent + tree, or results), a note is its own screen;
   swipe right = back on both.
-- **PWA**: `public/` has the manifest (standalone, `/#/`) and the same icons as the classic UI;
+- **PWA**: `public/` has the manifest (standalone, `/#/`) and the app icons;
   `index.html` sets theme-color (kept in sync with the theme), apple-mobile-web-app meta,
   `viewport-fit=cover` and `interactive-widget=resizes-content`. No service worker (the app is
   useless offline; the server revalidates every file).

@@ -9,7 +9,7 @@ export const ALL_HOSTS = '*'
 
 /**
  * The session list's state, shared by the mobile list screen and the desktop sidebar:
- * search, status + host filters (persisted, `fleet.filter` shared with the classic UI),
+ * search, status + host filters (persisted in `fleet.filter`),
  * the filtered view, per-host counts, the header summary and the "updated Xs ago" note.
  */
 export function useSessionList(now: number) {

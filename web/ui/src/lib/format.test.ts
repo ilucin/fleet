@@ -58,15 +58,15 @@ test('firstLine / sessionSubtitle', () => {
   expect(sessionSubtitle({ title: 'x'.repeat(300) })).toBe(`${'x'.repeat(240)}…`)
 })
 
-test('hostColorSlot: stable, in range, same hash as the classic UI', () => {
-  // classic: hash = (hash * 31 + codePoint) >>> 0, slot = hash % 4
-  const classic = (s: string) => {
+test('hostColorSlot: stable, in range', () => {
+  // hash = (hash * 31 + codePoint) >>> 0, slot = hash % 4
+  const expected = (s: string) => {
     let h = 0
     for (const ch of s) h = (h * 31 + ch.codePointAt(0)!) >>> 0
     return h % 4
   }
   for (const name of ['laptop', 'workstation', 'local', '', 'ÄÖ-host']) {
-    expect(hostColorSlot(name)).toBe(classic(name))
+    expect(hostColorSlot(name)).toBe(expected(name))
   }
   expect(hostColorSlot('laptop')).toBe(hostColorSlot('laptop'))
 })

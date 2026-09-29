@@ -1,4 +1,4 @@
-// Static UI selection (web/ui/dist vs the classic web/public) and cache headers.
+// Static UI selection (web/ui/dist or web.ui) and cache headers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,8 +13,6 @@ const HOME = '/home/tester';
 function tmpWebRoot(t, { built }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-web-root-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'public'));
-  fs.writeFileSync(path.join(root, 'public', 'index.html'), '<p>classic</p>');
   fs.mkdirSync(path.join(root, 'ui', 'dist', 'assets'), { recursive: true });
   if (built) {
     fs.writeFileSync(path.join(root, 'ui', 'dist', 'index.html'), '<p>new ui</p>');
@@ -23,17 +21,17 @@ function tmpWebRoot(t, { built }) {
   return root;
 }
 
-test('resolveUiDir: built ui/dist wins, else classic public/', (t) => {
+test('resolveUiDir: ui/dist, built or not', (t) => {
   const built = tmpWebRoot(t, { built: true });
   assert.equal(resolveUiDir(null, { webRoot: built, home: HOME }), path.join(built, 'ui', 'dist'));
   const unbuilt = tmpWebRoot(t, { built: false });
-  assert.equal(resolveUiDir(null, { webRoot: unbuilt, home: HOME }), path.join(unbuilt, 'public'), 'dist without index.html');
+  assert.equal(resolveUiDir(null, { webRoot: unbuilt, home: HOME }), path.join(unbuilt, 'ui', 'dist'), 'placeholder until built');
   assert.equal(resolveUiDir(null, { webRoot: null, home: HOME }), null);
 });
 
-test('resolveUiDir: "classic" shortcut and explicit paths override', (t) => {
+test('resolveUiDir: explicit paths override, the retired "classic" means the default', (t) => {
   const built = tmpWebRoot(t, { built: true });
-  assert.equal(resolveUiDir(CLASSIC_UI, { webRoot: built, home: HOME }), path.join(built, 'public'));
+  assert.equal(resolveUiDir(CLASSIC_UI, { webRoot: built, home: HOME }), path.join(built, 'ui', 'dist'));
   assert.equal(resolveUiDir('~/my-ui', { webRoot: built, home: HOME }), `${HOME}/my-ui`);
   assert.equal(resolveUiDir('/srv/ui', { webRoot: built, home: HOME }), '/srv/ui');
 });
@@ -42,9 +40,9 @@ test('normalizeConfig: web.ui / FLEET_WEB_UI pick the UI dir', (t) => {
   const built = tmpWebRoot(t, { built: true });
   const opts = (env = {}) => ({ env, home: HOME, webRoot: built });
   assert.equal(normalizeConfig({}, opts()).uiDir, path.join(built, 'ui', 'dist'));
-  assert.equal(normalizeConfig({ web: { ui: 'classic' } }, opts()).uiDir, path.join(built, 'public'));
-  assert.equal(normalizeConfig({}, opts({ FLEET_WEB_UI: 'classic' })).uiDir, path.join(built, 'public'));
-  assert.equal(normalizeConfig({ web: { ui: 'classic' } }, opts({ FLEET_WEB_UI: '/x' })).uiDir, '/x', 'env beats config');
+  assert.equal(normalizeConfig({ web: { ui: 'classic' } }, opts()).uiDir, path.join(built, 'ui', 'dist'));
+  assert.equal(normalizeConfig({ web: { ui: '/y' } }, opts()).uiDir, '/y');
+  assert.equal(normalizeConfig({ web: { ui: '/y' } }, opts({ FLEET_WEB_UI: '/x' })).uiDir, '/x', 'env beats config');
 });
 
 test('cacheControlFor: hashed /assets/ files are immutable, the rest revalidates', () => {

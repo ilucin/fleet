@@ -16,7 +16,7 @@ import { SessionScreen } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 
 /**
- * Hash routing, same URLs as the classic UI: `#/` (list), `#/s/<host>/<session_id>` (detail),
+ * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
  * plus `#/settings` (this viewer's preferences) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.

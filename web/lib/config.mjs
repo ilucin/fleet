@@ -171,27 +171,18 @@ export function spawnDirsFor(list, self, home = os.homedir()) {
   return dirs.length ? dirs : [{ label: 'Home', path: home }];
 }
 
-/** `web.ui` / FLEET_WEB_UI shortcut for the vanilla UI in web/public. */
+/** The retired `web.ui` shortcut for the old vanilla UI; now means "the default". */
 export const CLASSIC_UI = 'classic';
 
 /**
  * The static UI directory:
  *   explicit path (`web.ui` / FLEET_WEB_UI, `~` expanded) → that directory;
- *   `"classic"` → <webRoot>/public (the vanilla UI);
- *   unset → <webRoot>/ui/dist when it has been built (has index.html), else <webRoot>/public.
+ *   unset (or the retired `"classic"`) → <webRoot>/ui/dist; until it is built the server
+ *   answers `/` with a "not built" placeholder.
  */
-export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir(), fsImpl = fs } = {}) {
-  const classic = webRoot ? path.join(webRoot, 'public') : null;
-  if (uiRaw === CLASSIC_UI) return classic;
-  if (uiRaw) return path.resolve(expandHome(uiRaw, home));
-  if (!webRoot) return null;
-  const built = path.join(webRoot, 'ui', 'dist');
-  try {
-    if (fsImpl.statSync(path.join(built, 'index.html')).isFile()) return built;
-  } catch {
-    /* not built */
-  }
-  return classic;
+export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}) {
+  if (uiRaw && uiRaw !== CLASSIC_UI) return path.resolve(expandHome(uiRaw, home));
+  return webRoot ? path.join(webRoot, 'ui', 'dist') : null;
 }
 
 /**
@@ -251,7 +242,7 @@ export function normalizeConfig(
   }
 
   const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
-  const uiDir = resolveUiDir(uiRaw, { webRoot, home, fsImpl });
+  const uiDir = resolveUiDir(uiRaw, { webRoot, home });
 
   const spawnDirs = spawnDirsFor(raw.spawnDirs, self.trim(), home);
 

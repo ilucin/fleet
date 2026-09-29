@@ -5,10 +5,9 @@ mobile-first PWA built on that API. Every host runs the same server; any one of
 them shows the whole fleet by merging in its peers. No auth — meant for a private network
 (e.g. a Tailscale tailnet). The server has no build step and no npm dependencies.
 
-The API is the stable part. Two UIs ship with it: `ui/` (React + shadcn/ui, built to `ui/dist/`,
-the default when built — see [ui/README.md](./ui/README.md)) and `public/` (the classic vanilla-JS
-UI, the fallback). Another UI can be pointed at the same API (or served by it via `web.ui`, see
-Config).
+The API is the stable part. The UI is `ui/` (React + shadcn/ui, built to `ui/dist/` — see
+[ui/README.md](./ui/README.md)). Another UI can be pointed at the same API (or served by it via
+`web.ui`, see Config).
 
 ## Topology
 
@@ -50,7 +49,6 @@ lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir
 lib/http.mjs, util.mjs, run.mjs   helpers (body limit, static path safety, execFile wrapper)
 ui/                   the React UI (Vite + TS + Tailwind v4 + shadcn/ui); only ui/dist is served/installed
-public/               the classic PWA (vanilla JS, hash routing, no build)
 ```
 
 `createApi(deps)` and `createHttpServer({ handleApi, uiDir })` take all I/O as injected
@@ -70,7 +68,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.bind` | listen address (default `0.0.0.0` with a config, `127.0.0.1` without one) |
 | `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: scheme of `editorUrl` on briefs and session rows; `null` = none. Other values → config error |
 | `hosts.<name>.ssh` | used here only for `editorUrl`: the Remote-SSH alias of that host (must be letters, digits, `._@-`) |
-| `web.ui` | static UI: a directory path, or `"classic"` (= `web/public`); unset/`null` → `web/ui/dist` when built (has `index.html`), else `web/public` |
+| `web.ui` | static UI: a directory path; unset/`null` (or the retired `"classic"`) → `web/ui/dist`, a "not built" placeholder until it has an `index.html` |
 | `web.quickReplies` | composer chips: `["text", { "label", "text" }]` (default Continue/Yes/No/1/2); `{ label, kind: "text", value }` is accepted too, `kind: "key"` entries are skipped (the key chips are built in) |
 | `web.models` | New session model picker: `[{ id, label }]` or bare ids; id `""` = no `--model` (Claude's default); ids are letters, digits and `._[]-`. Default: Default, Fable 5.1 `claude-fable-5-1`, Opus 5.5 `claude-opus-5-5`, Sonnet 5 `claude-sonnet-5`, Haiku 4.5 `claude-haiku-4-5-20251001` |
 | `web.autoName` | `{ enabled, intervalMinutes }`, default `{ false, 5 }` (opt-in): the periodic naming pass and the targeted pass after a spawn (see Auto-naming); `false` also makes a nameless spawn pass `-n fw-hhmmss` |
@@ -383,31 +381,17 @@ the model-free extraction (so a brief exists as soon as someone looks), never th
 
 ## UI (`ui/`, React)
 
-Feature parity with the classic UI below, plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
+The list and session detail (Chat | Term, composer with quick replies and key chips), plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
 size for the whole UI, theme (colour palette: Default / Earth / Dusk, `fleet.palette`), light/dark mode, terminal text,
 progress notes, and the fleet's Start directories — `spawnDirs`, saved to every host) and a Details panel (the session brief,
 then session details): same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
 paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,
 `fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`,
-`fleet.spawnHost`, `fleet.spawnDirLabel.<host>`; React only: `fleet.spawnModel`), so switching UIs keeps preferences. Built with
+`fleet.spawnHost`, `fleet.spawnDirLabel.<host>`, `fleet.spawnModel`; the old vanilla UI's keys, so its preferences carried over). Built with
 React 19 + Tailwind v4 + shadcn/ui; markdown is parsed to an AST and rendered as React elements
 (no `innerHTML`, only `http(s)` links). A 404 whose error starts with `unknown session` means the
 session is gone; any other 404 from `messages` means there is no transcript yet. Structure and conventions: [ui/README.md](./ui/README.md). Dev: `npm --prefix ui run dev`
 proxies `/api` to a running server (`FLEET_WEB_URL`, default `http://127.0.0.1:7777`).
-
-## Classic UI (`public/`)
-
-- Dark theme, system font for chrome, monospace for terminal text, safe-area insets, PWA manifest.
-- **List** (`#/`): all sessions across hosts, filter chips (All / Needs you / Busy / Idle), search,
-  unreachable-host banner, `+` opens the New-session sheet (host, directory radio built from that
-  host's `spawnDirs` labels, name, first prompt). Polls `/api/fleet` every 5s while visible. The
-  last fleet is kept in `localStorage` (`fleet.snapshot`, ignored after 6h) and painted before the
-  first poll returns.
-- **Detail** (`#/s/<host>/<id>`): Chat | Term toggle (choice in `localStorage`), one poll loop at a
-  time. Chat polls `messages` every 3s and renders markdown (`public/markdown.js`, DOM-only, no
-  `innerHTML`, only `http(s)` links). Term polls `peek` every 2s. Shared composer with quick-reply
-  chips from `/api/settings` plus Esc / Enter / ↑ / ↓ keys. The ⋯ menu also has
-  "Auto-name (host) → Run now" (`POST …/autoname`) and "Close session" (two taps, `POST …/kill`).
 
 ## Running as a service
 

@@ -113,7 +113,7 @@ export function SessionScreen({
   const session = findSession(fleet, host, id)
   const hostEntry = fleet?.hosts.find((h) => h.name === host) ?? null
 
-  // View prefs (localStorage keys shared with the classic UI). Text size, terminal text and
+  // View prefs (localStorage). Text size, terminal text and
   // progress notes are global (the Settings screen).
   const [mode, setMode] = usePersistentState<DetailMode>('fleet.detailMode', 'chat', parseMode)
   const [termLines, setTermLines] = usePersistentState<number>('fleet.termLines', 200, parseSize(TERM_LINES))

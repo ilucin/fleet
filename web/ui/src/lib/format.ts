@@ -54,7 +54,7 @@ export function sessionSubtitle(s: Pick<Session, 'title'>): string {
 
 export const HOST_COLOR_SLOTS = 4
 
-/** Stable colour slot 0..3 per host name, whatever the host is called (same hash as the classic UI). */
+/** Stable colour slot 0..3 per host name, whatever the host is called. */
 export function hostColorSlot(host: string | null | undefined): number {
   let hash = 0
   for (const ch of String(host || '')) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) >>> 0

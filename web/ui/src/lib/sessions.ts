@@ -4,7 +4,7 @@ import type { FleetResponse, Session, SessionStatus } from '@/api/types'
 export type StatusKey = SessionStatus
 export interface StatusMeta {
   key: StatusKey
-  /** Human label, as in the classic UI. */
+  /** Human label. */
   label: string
 }
 
@@ -62,7 +62,7 @@ export function matchesSearch(s: Session, query: string): boolean {
     .includes(q)
 }
 
-/** Most recent activity first (a flat list across hosts, like the classic UI). */
+/** Most recent activity first (a flat list across hosts). */
 export function byLastActivity(a: Session, b: Session): number {
   return (b.updated_at || 0) - (a.updated_at || 0)
 }
@@ -93,7 +93,7 @@ export function findSession(fleet: FleetResponse | null | undefined, host: strin
   return entry?.sessions?.find((s) => s.session_id === id) ?? null
 }
 
-/** Hash route of a session's detail screen: `#/s/<host>/<session_id>` (same as the classic UI). */
+/** Hash route of a session's detail screen: `#/s/<host>/<session_id>`. */
 export function sessionHref(s: Pick<Session, 'host' | 'session_id'>): string {
   return `/s/${encodeURIComponent(s.host)}/${encodeURIComponent(s.session_id)}`
 }

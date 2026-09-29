@@ -1,5 +1,5 @@
 // localStorage that never throws (private mode, blocked storage, quota). Keys are
-// namespaced `fleet.*`; the new UI shares `fleet.snapshot` with the classic one.
+// namespaced `fleet.*`.
 
 export const storage = {
   get(key: string): string | null {

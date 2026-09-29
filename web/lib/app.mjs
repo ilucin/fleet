@@ -1,5 +1,5 @@
 // HTTP server: /api/* goes to the API handler (lib/api.mjs), everything else is served
-// as static files from `uiDir` (web/ui/dist when built, else web/public; config.web.ui).
+// as static files from `uiDir` (web/ui/dist, or config.web.ui).
 import http from 'node:http';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -14,7 +14,7 @@ const PLACEHOLDER_HTML = `<!doctype html>
 <title>fleet-web</title>
 <style>body{font:16px -apple-system,system-ui,sans-serif;background:#111;color:#eee;
 display:grid;place-items:center;height:100vh;margin:0}</style>
-</head><body><p>fleet-web: no UI found (API is at /api/)</p></body></html>
+</head><body><p>fleet-web: the web UI is not built — run <code>fleet web build</code> (API is at /api/)</p></body></html>
 `;
 
 /** Does an If-None-Match header (possibly a list, possibly `*`) match `etag`? Weak comparison. */
@@ -30,8 +30,7 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
 /**
  * Cache policy for a static request path. Build tools emit content-hashed file names
  * under /assets/ (Vite: `index-R-dVrV7d.js`): a new build means a new name, so those can
- * be cached for good. Everything else (index.html, manifest, icons, the classic UI's
- * files) is `no-cache`: always revalidated, cheap with the ETag → 304.
+ * be cached for good. Everything else (index.html, manifest, icons) is `no-cache`: always revalidated, cheap with the ETag → 304.
  */
 export function cacheControlFor(urlPath) {
   return /^\/assets\/(?:[^/]+\/)*[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(urlPath) ? IMMUTABLE : 'no-cache';

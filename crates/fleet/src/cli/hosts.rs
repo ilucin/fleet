@@ -568,7 +568,7 @@ pub fn built_ui(web: &Path) -> Option<PathBuf> {
 pub const UI_BUILD_HINT: &str =
     "npm --prefix web/ui ci && npm --prefix web/ui run build   (or: fleet web build)";
 
-/// Copy the web app: the server + classic UI, then only the *built* React UI
+/// Copy the web app: the server, then only the *built* React UI
 /// (`ui/dist`) — never its sources or node_modules.
 fn install_web(r: &Remote, dir: &Path) -> Result<()> {
     let remote_ui = format!("{}/ui", config::INSTALLED_WEB_DIR);
@@ -591,7 +591,7 @@ fn install_web(r: &Remote, dir: &Path) -> Result<()> {
     match &dist {
         Some(d) => sync_dir(r, d, &remote_dist, &[])?,
         None => eprintln!(
-            "fleet: the web UI is not built ({}/ui/dist missing) — {} gets the classic UI only; build it with:\n  {UI_BUILD_HINT}",
+            "fleet: the web UI is not built ({}/ui/dist missing) — {} gets no UI until it is; build it with:\n  {UI_BUILD_HINT}",
             tools::tildify(&dir.display().to_string()),
             r.name
         ),
@@ -605,7 +605,7 @@ fn install_web(r: &Remote, dir: &Path) -> Result<()> {
             if dist.is_some() {
                 ", with ui/dist"
             } else {
-                ", classic UI only"
+                ", no UI (not built)"
             }
         );
     }

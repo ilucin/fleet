@@ -10,7 +10,7 @@ import { swipeIntent } from '@/lib/gestures'
 import { restoreText } from '@/lib/outbox'
 import { cn } from '@/lib/utils'
 
-/** Built-in key chips (not configurable), as in the classic UI. */
+/** Built-in key chips (not configurable). */
 const KEY_CHIPS: { key: SessionKey; label: string; icon?: ReactNode }[] = [
   { key: 'Escape', label: 'Esc' },
   { key: 'Enter', label: 'Enter', icon: <CornerDownLeftIcon /> },

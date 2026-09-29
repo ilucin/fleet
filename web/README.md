@@ -2,12 +2,10 @@
 
 HTTP API + mobile-first PWA for supervising and steering Claude Code sessions across your
 hosts. The server is Node ≥ 22 with zero npm dependencies and no build step; no auth (keep it on
-a private network such as a Tailscale tailnet). Two UIs:
-
-- `ui/` — the new React + shadcn/ui app (**built**: `npm --prefix ui ci && npm --prefix ui run build`,
-  or `fleet web build`; output `ui/dist/`, gitignored). See [ui/README.md](./ui/README.md).
-- `public/` — the classic vanilla-JS UI, no build. Served when `ui/dist` is not built, or with
-  `web.ui: "classic"` / `FLEET_WEB_UI=classic`. Design, config mapping and the full API: [ARCHITECTURE.md](./ARCHITECTURE.md).
+a private network such as a Tailscale tailnet). The UI is `ui/`, a React + shadcn/ui app
+(**built**: `npm --prefix ui ci && npm --prefix ui run build`, or `fleet web build`; output
+`ui/dist/`, gitignored) — see [ui/README.md](./ui/README.md). Design, config mapping and the full
+API: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Each host runs the same `server.mjs`. It lists its own sessions with `fleet list --json` and,
 when asked for the whole fleet, merges in the other hosts' servers over HTTP — any host's URL
@@ -28,7 +26,7 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path, or `"classic"`), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
+`web.ui` (a path), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `grouping.host`, `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
@@ -68,7 +66,7 @@ else is `no-cache` + ETag.
 
 ## Service / deploy
 
-`fleet install --host <name>` copies the web app to a remote host (the server, `public/` and
+`fleet install --host <name>` copies the web app to a remote host (the server and
 only the *built* `ui/dist` — never `ui/` sources or `node_modules`; build first) and
 `fleet web install-service` sets it up as a service (launchd, logs to
 `~/Library/Logs/fleet.web.log`, node pinned via `web.node` or a stable Homebrew install); see the CLI docs. Prefer running it from

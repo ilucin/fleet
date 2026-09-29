@@ -89,7 +89,7 @@
   --host-3: #b8386a;
 }
 
-/* Dark — the default; colours from the classic UI (web/public/style.css). */
+/* Dark — the default. */
 .dark {
   --background: #0b0c0e;
   --foreground: #e9ecef;

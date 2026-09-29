@@ -16,7 +16,6 @@ crates/fleet/          the `fleet` binary + library
 crates/fleet-desktop/  Fleet.app: Tauri 2 shell around the web UI (not a default member — use -p fleet-desktop)
 web/                   web server (server.mjs, lib/), Node >= 22, no npm deps
   ui/                  React + shadcn/ui PWA (npm, Vite build → ui/dist, gitignored) — see web/ui/README.md
-  public/              classic vanilla-JS PWA (no build; fallback / `web.ui: "classic"`)
 docs/                  setup, architecture, CLI reference, migration
 ```
 
@@ -70,7 +69,7 @@ never a real home directory, real config or live sessions.
   web `send`/`keys`/`spawn`) must never resolve an ambiguous target — error with candidates.
 - **Mutating tests against real tmux** use throwaway sessions named `fleet-test-*` and clean them
   up; never touch sessions you did not create.
-- The web **server** (`web/server.mjs`, `web/lib/`, `web/public/`) stays dependency-free (`node:`
+- The web **server** (`web/server.mjs`, `web/lib/`) stays dependency-free (`node:`
   built-ins only) and build-free. npm dependencies live only in `web/ui/`, whose build output
   (`web/ui/dist`) is what gets served and installed.
 - Update `docs/cli.md` when you change a command or flag, and `docs/architecture.md` when you
