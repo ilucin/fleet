@@ -19,6 +19,8 @@ import type {
   RenameResponse,
   SessionKey,
   Settings,
+  SpawnDirEntry,
+  SpawnDirsResponse,
   SpawnRequest,
   SpawnResponse,
   UploadResponse,
@@ -108,6 +110,11 @@ export const api = {
 
   spawn: (host: string, body: SpawnRequest, o: Opts = {}) =>
     request<SpawnResponse>(`${hostPath(host)}/spawn`, { ...o, method: 'POST', body }),
+  /** The host's Start directories (config `spawnDirs`) and whether its own paths exist. */
+  spawnDirs: (host: string, o: Opts = {}) => request<SpawnDirsResponse>(`${hostPath(host)}/spawn-dirs`, o),
+  /** Replace the host's list (400 `SpawnDirsError` when invalid); `dryRun` validates only. */
+  saveSpawnDirs: (host: string, spawnDirs: SpawnDirEntry[], { dryRun = false, ...o }: Opts & { dryRun?: boolean } = {}) =>
+    request<SpawnDirsResponse>(`${hostPath(host)}/spawn-dirs`, { ...o, method: 'PUT', body: { spawnDirs, ...(dryRun ? { dryRun } : {}) } }),
   autoname: (host: string, o: Opts = {}) =>
     request<AutoNameRun>(`${hostPath(host)}/autoname`, { ...o, method: 'POST', body: {} }),
 

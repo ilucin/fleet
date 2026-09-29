@@ -635,6 +635,26 @@ mod tests {
     }
 
     #[test]
+    fn patch_replaces_spawn_dirs_in_place() {
+        // The web UI's Settings → Start directories writes through `fleet config set spawnDirs`.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.json");
+        std::fs::write(&p, serde_json::to_string(&sample()).unwrap()).unwrap();
+        let keys = |raw: &Value| raw.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        let before = keys(&load_from(&p).raw);
+        let list = r#"[{"label":"Fleet","paths":{"laptop":"~/Code/fleet"}}]"#;
+        patch_at(&p, "spawnDirs", parse_value(list)).unwrap();
+        let l = load_from(&p);
+        assert_eq!(keys(&l.raw), before, "key order kept");
+        assert_eq!(l.raw["somethingNew"]["keep"], true);
+        assert_eq!(
+            l.config.spawn_dirs_for("laptop"),
+            vec![("Fleet".to_string(), "~/Code/fleet".to_string())]
+        );
+        assert!(!p.with_extension("json.tmp").exists());
+    }
+
+    #[test]
     fn patch_refuses_a_broken_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("config.json");

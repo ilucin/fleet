@@ -55,6 +55,44 @@ export interface SpawnDir {
   path: string
 }
 
+/** One Settings → Start directories entry: a label and a directory per host (config `spawnDirs`). */
+export interface SpawnDirEntry {
+  label: string
+  /** host name → directory on that host (absolute or `~/…`); a missing host = not offered there. */
+  paths: Record<string, string>
+}
+
+/** Whether the answering host's own path of one entry is a directory there (null: no path for it). */
+export interface SpawnDirCheck {
+  path: string
+  /** Absolute, `~` expanded. */
+  resolved: string
+  exists: boolean
+  isDir: boolean
+}
+
+/** GET/PUT /api/hosts/:host/spawn-dirs. */
+export interface SpawnDirsResponse {
+  host: string
+  /** This host + every host in its config. */
+  hosts: string[]
+  spawnDirs: SpawnDirEntry[]
+  /** Index-aligned with `spawnDirs`. */
+  checks: (SpawnDirCheck | null)[]
+  /** What the host offers now (`Host.spawnDirs`). */
+  offered: SpawnDir[]
+  limits: { maxEntries: number; maxLabel: number; maxPath: number }
+  /** PUT only: false for a dry run. */
+  saved?: boolean
+}
+
+/** A PUT spawn-dirs 400: `errors[].index` into the list sent; `host` = that host's path cell. */
+export interface SpawnDirsError {
+  error: string
+  errors: { index: number; field: 'label' | 'paths' | 'list'; host?: string; error: string }[]
+  checks: (SpawnDirCheck | null)[]
+}
+
 export interface Host {
   name: string
   ok: boolean

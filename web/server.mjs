@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
+import { configPath, loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
 import { run } from './lib/run.mjs';
 import { createFleetCli } from './lib/fleet-cli.mjs';
 import { createFleet } from './lib/fleet.mjs';
@@ -20,6 +20,7 @@ import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { createFiles } from './lib/files.mjs';
 import { createNotes } from './lib/notes.mjs';
+import { createSpawnDirsEditor } from './lib/spawn-dirs.mjs';
 import { createTouchedIndex } from './lib/touched.mjs';
 import { createBriefExtractor } from './lib/brief-extract.mjs';
 import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
@@ -112,6 +113,8 @@ const handleApi = createApi({
   uploader,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   notes: createNotes({ config: config.notes, home: os.homedir(), run }),
+  // Settings → Start directories: writes through `fleet config set`, hot-reloads config.spawnDirs.
+  spawnDirs: createSpawnDirsEditor({ config, configFile: config.configFile ?? configPath(process.env), cli }),
   briefs,
   grouper,
   name: NAME,

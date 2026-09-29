@@ -159,6 +159,18 @@ function spawnDirFor(entry, self, home) {
   return { label, path: path.normalize(abs) };
 }
 
+/**
+ * What this host offers for new sessions: the raw `spawnDirs` list → `[{ label, path }]`
+ * (absolute, `~` expanded); `[{ label: "Home", path: home }]` when none is for this host.
+ * Also used to hot-reload the list after a Settings edit (lib/spawn-dirs.mjs).
+ */
+export function spawnDirsFor(list, self, home = os.homedir()) {
+  if (list == null) list = [];
+  if (!Array.isArray(list)) throw new Error('config.spawnDirs must be an array');
+  const dirs = list.map((e) => spawnDirFor(e, self, home)).filter(Boolean);
+  return dirs.length ? dirs : [{ label: 'Home', path: home }];
+}
+
 /** `web.ui` / FLEET_WEB_UI shortcut for the vanilla UI in web/public. */
 export const CLASSIC_UI = 'classic';
 
@@ -241,10 +253,7 @@ export function normalizeConfig(
   const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
   const uiDir = resolveUiDir(uiRaw, { webRoot, home, fsImpl });
 
-  const spawnList = raw.spawnDirs == null ? [] : raw.spawnDirs;
-  if (!Array.isArray(spawnList)) throw new Error('config.spawnDirs must be an array');
-  let spawnDirs = spawnList.map((e) => spawnDirFor(e, self.trim(), home)).filter(Boolean);
-  if (spawnDirs.length === 0) spawnDirs = [{ label: 'Home', path: home }];
+  const spawnDirs = spawnDirsFor(raw.spawnDirs, self.trim(), home);
 
   let quickReplies = null;
   if (web.quickReplies != null) {

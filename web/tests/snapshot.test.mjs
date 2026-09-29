@@ -83,3 +83,21 @@ test('concurrent refreshes are de-duplicated and stop() cancels the timer', asyn
   snap.stop();
   assert.equal(clock.pending(), 0);
 });
+
+test('refresh({ fresh: true }) chains a new build behind one already in flight', async () => {
+  const clock = fakeClock();
+  let builds = 0;
+  let release;
+  const snap = createSnapshot({
+    build: () => (++builds === 1 ? new Promise((r) => (release = () => r({ n: 1 }))) : Promise.resolve({ n: builds })),
+    ...clock,
+  });
+  const first = snap.refresh();
+  const same = snap.refresh();
+  const fresh = snap.refresh({ fresh: true });
+  assert.equal(first, same, 'a plain refresh joins the one in flight');
+  await new Promise((r) => setImmediate(r)); // the build starts on the next tick
+  release();
+  assert.equal((await first).body.n, 1);
+  assert.equal((await fresh).body.n, 2, 'the fresh one started after the first finished');
+});

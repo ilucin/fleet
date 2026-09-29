@@ -3,6 +3,7 @@ import { ChevronLeftIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-r
 import { useLocation } from 'wouter'
 
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { SpawnDirsEditor } from '@/components/SpawnDirsEditor'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -21,7 +22,8 @@ const segItem =
 
 /**
  * `#/settings`: the viewer's global preferences — text size (scales the whole app), theme
- * (colour palette), mode (light/dark), terminal text, progress notes, send delay. Stored in this browser (localStorage). `screen` = the mobile page
+ * (colour palette), mode (light/dark), terminal text, progress notes, send delay. Stored in this browser (localStorage).
+ * Plus the fleet's Start directories (the New session form's list), stored in each host's config. `screen` = the mobile page
  * (back button, swipe back); `pane` = the desktop main pane (✕ / Esc back to `#/`).
  */
 export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
@@ -38,7 +40,7 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
   useSwipeBack(screenRef, back, !pane)
 
   const content = (
-    <div className="mx-auto w-full max-w-lg px-4 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto w-full max-w-lg px-4 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:max-w-2xl">
       <Section title="Appearance">
         <Stacked label="Text size" hint="Scales the whole app">
           <ToggleGroup
@@ -124,6 +126,9 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
       </Section>
 
       <p className="pt-4 text-xs text-dimmer">Saved in this browser; every session uses them.</p>
+      <Section title="Start directories">
+        <SpawnDirsEditor />
+      </Section>
       <FleetStatus />
       <ViewportInfo />
     </div>

@@ -27,10 +27,11 @@ phone ──http──▶ workstation:7777 (self=workstation) ──http──�
 ```
 server.mjs            wiring: config → deps → API → HTTP server → listen
 lib/config.mjs        shared fleet config loader + binary resolution
-lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`)
+lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `config set`, …)
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
+lib/spawn-dirs.mjs    Settings → Start directories: validate a `spawnDirs` list, write it via `fleet config set`, hot-reload
 lib/spawn.mjs         new tmux session + `claude [--model <id>] [-n <name>] '<prompt>'`, auto-accept folder trust
 lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux session/window or iTerm tab
 lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
@@ -154,6 +155,8 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/rename` | `{ title }` (trimmed, 1..64 chars, one line) | `{ ok: true, host, id, result, title, from, tmux, message, … }` — the `fleet rename --json` report. **409** `{ error, result: "held", held: "waiting", … }` when the session is waiting on a prompt (nothing typed); 400 bad title; 404 unknown session; 502/504 CLI failure / timeout. Proxied once to a peer like the other session actions |
 | POST | `/api/hosts/:host/spawn` | `{ name?, dir?, prompt?, model? }` | `{ ok, host, name, dir, tmuxSession, command, trusted, model }` |
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` | `{ ok: true, host, id, name, process, terminal }` |
+| GET | `/api/hosts/:host/spawn-dirs` | | `{ host, hosts: [names], spawnDirs: [{ label, paths: { host: dir } }], checks: [{ path, resolved, exists, isDir } \| null], offered: [{ label, path }], limits: { maxEntries, maxLabel, maxPath } }` — see **spawn-dirs** |
+| PUT | `/api/hosts/:host/spawn-dirs` | `{ spawnDirs: [{ label, paths }], dryRun? }` | the GET shape for the new list + `saved` (`false` on a dry run). 400 `{ error, errors: [{ index, field, host?, error }], checks }`; 502 when `fleet config set` failed |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
 | POST | `/api/hosts/:host/uploads` | `?name=<file name>`, the raw file as the body (any `content-type`) | `{ host, path, name, size }` — `path` is absolute on `:host`. 413 over `web.uploads.maxMB` (no partial file is left) |
@@ -208,6 +211,20 @@ so a client can pick from its own server's list for a peer. The UI sends no `nam
 the field stays for other clients.
 The session shows up in `/api/fleet` once Claude registers it; clients poll for a session whose
 `tmux_session` equals `tmuxSession`.
+
+**spawn-dirs** edits this host's `spawnDirs` (Settings → Start directories). GET reads the config
+file (a `{ label, path }` / bare-string entry is spelled out as a path for every configured host)
+and stats each of this host's paths (`~` expanded). PUT validates: ≤ 30 entries; labels 1–40
+chars, one line, unique ignoring case; paths absolute or `~/…`, ≤ 1024 chars, no control
+characters, `""` = not offered on that host, at least one per entry; **this host's** path must be
+an existing directory — other hosts' paths are stored as given (they are checked on their own
+host). A valid list is written with `fleet --local config set spawnDirs '<json>'` (the CLI owns the
+file: atomic tmp + rename, every other key and their order kept; writes are serialised), then
+`config.spawnDirs` is replaced in place, so `/api/fleet` and the spawn allow-list use it at once,
+and the merged snapshot is rebuilt before the response (a proxied save rebuilds the proxying
+server's too). `dryRun: true` validates and answers without writing. The UI writes one shared
+list to every host: a dry run on all reachable hosts first, the writes only when all pass.
+Editing the list is as powerful as spawning (it widens the allow-list) and has no auth either.
 
 **kill** closes a session for good: SIGTERM to Claude's `pid` (SIGKILL after 4s), then the
 terminal that hosted it. tmux: the whole tmux session when Claude's window was its only window
@@ -367,7 +384,7 @@ the model-free extraction (so a brief exists as soon as someone looks), never th
 
 Feature parity with the classic UI below, plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
 size for the whole UI, theme (colour palette: Default / Earth / Dusk, `fleet.palette`), light/dark mode, terminal text,
-progress notes) and a Details panel (the session brief,
+progress notes, and the fleet's Start directories — `spawnDirs`, saved to every host) and a Details panel (the session brief,
 then session details): same routes (hash routing `#/`, `#/s/<host>/<id>`), same polling (fleet 5s, messages 3s, peek 2s,
 paused while hidden) and the same `fleet.*` localStorage keys (`fleet.snapshot`, `fleet.filter`,
 `fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`,

@@ -1,6 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
-// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group`) are documented in one
+// contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group`,
+// `fleet config set`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -154,5 +155,22 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, 'fleet group --cached');
   }
 
-  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached };
+  /**
+   * Write one config key: `fleet --local config set <key> <json>` against `configFile`
+   * (FLEET_CONFIG). The CLI owns the config file: it rewrites the raw JSON atomically
+   * (tmp + rename), keeps every other key and refuses a file that does not parse.
+   * Resolves { stdout, stderr }; throws FleetCliError.
+   */
+  async function configSet({ key, value, configFile = null, timeoutMs: t = 10 * 1000 } = {}) {
+    const env = { ...process.env, NO_COLOR: '1' };
+    if (configFile) env.FLEET_CONFIG = configFile;
+    try {
+      const { stdout, stderr } = await run(bin, ['--local', 'config', 'set', String(key), JSON.stringify(value)], { timeout: t, env });
+      return { stdout: stdout ?? '', stderr: stderr ?? '' };
+    } catch (err) {
+      throw wrap(err, 'fleet config set', t);
+    }
+  }
+
+  return { bin, list, nameAll, nameOne, rename, groupRun, groupCached, configSet };
 }

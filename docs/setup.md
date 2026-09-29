@@ -175,6 +175,14 @@ fleet doctor
 Both machines get their own `~/.config/fleet/config.json`; each names itself in `self` and lists the
 others under `hosts`. `fleet install` checks that the architectures match.
 
+The directories a new session can start in (`spawnDirs`: a label with a path per host) are edited
+in the web app under **Settings → Start directories**: one row per label, a path field per host
+(empty = not offered there). Save checks every host's own paths, then writes the same list to
+each reachable host's config (through `fleet config set spawnDirs …`); the running servers use it
+at once, no restart. `fleet config set spawnDirs '<json>'` on each host does the same by hand.
+Editing this list is as powerful as spawning (it widens what spawn accepts), and like spawn it is
+unauthenticated — keep the web servers on a private network.
+
 Start the web app on each machine:
 
 ```sh

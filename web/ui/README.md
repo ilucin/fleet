@@ -59,6 +59,9 @@ src/
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
                       font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
+  lib/spawnDirs.ts    Settings → Start directories: the editable draft (DraftRow), fromDraft()/toDraft(), sameList(),
+                      validateDraft() (mirrors lib/spawn-dirs.mjs), moveRow(), hostPathErrors()/checksByPath() (a
+                      host's answer → its column), baseHost(), divergedHosts(), withOffered()
   lib/palettes.ts     colour palettes (Settings → Theme: Default / Earth / Dusk, `data-palette` on <html>, tokens in
                       index.css): PALETTES (picker swatches), parsePalette(), themeColor() (meta theme-color per mode)
   lib/notes.ts        notes explorer: buildTree(), notesHref() / parseNotesLocation() (`#/notes/<host>/<path>`),
@@ -275,7 +278,17 @@ src/
   font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
   it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`); Send
   delay (`fleet.sendDelay`, above). Per
-  viewer (localStorage), for every session.
+  viewer (localStorage), for every session. **Start directories** (`components/SpawnDirsEditor.tsx`)
+  is fleet-wide instead: the `spawnDirs` the New session form offers, one row per label with a
+  path field per host (hosts from `/api/fleet`; empty = not offered there), add / rename / delete /
+  move up-down. Loaded with `GET …/spawn-dirs` from every host (this server's list is the one
+  edited; a host with a different one is named). Each cell shows that host's own check (✓ is a
+  directory, ✗ missing / not a directory) from a debounced dry-run `PUT` of the draft; labels and
+  path syntax are checked as you type. Save (enabled when dirty and valid; Revert resets; the
+  browser asks before leaving with unsaved changes) dry-runs on every reachable host, then writes
+  the same list to each, lists per-host results (unreachable hosts skipped with a warning) and
+  patches the fleet snapshot with what each host now `offered`, so the New session form shows it
+  at once. Mobile: one card per entry; from `md` up a compact grid.
 - **Notes** (`#/notes[/<host>[/<path>]]`; ../ARCHITECTURE.md → notes): browse, search and read the
   markdown notes of any host with `web.notes.root` (hosts come from `/api/fleet` entries carrying
   `notes`; the last one used is `fleet.notesHost`). Reached from the notes button in the mobile

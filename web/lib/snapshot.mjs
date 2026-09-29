@@ -34,8 +34,13 @@ export function createSnapshot({
     timer?.unref?.();
   }
 
-  /** Rebuild now (de-duplicated). Resolves the new snapshot, or the old one if the build failed. */
-  function refresh() {
+  /**
+   * Rebuild now (de-duplicated). Resolves the new snapshot, or the old one if the build failed.
+   * `fresh`: the build must start after this call (a change was just made) — an in-flight
+   * one may predate it, so a new build is chained behind it.
+   */
+  function refresh({ fresh = false } = {}) {
+    if (refreshing && fresh) return refreshing.then(() => refresh());
     if (refreshing) return refreshing;
     refreshing = Promise.resolve()
       .then(build)

@@ -26,6 +26,7 @@ const UPLOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/uploads$/;
 const FILES_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/files\/(stat|raw|open)$/;
 const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenerate)?$/;
 const NOTES_ROUTE = /^\/api\/hosts\/([^/]+)\/notes\/(tree|search|file|raw)$/;
+const SPAWN_DIRS_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn-dirs$/;
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -51,6 +52,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   files       lib/files.mjs instance (files/stat|raw|open; absent → 501)
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
+ *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
@@ -73,6 +75,7 @@ export function createApi({
   files = null,
   briefs = null,
   notes = null,
+  spawnDirs = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -109,10 +112,20 @@ export function createApi({
     ? createSnapshot({ build: () => buildFleet({ force: true }), refreshMs: fleetRefreshMs, idleAfterMs: fleetIdleAfterMs, logError })
     : null;
 
-  /** After a mutation: drop the local cache and rebuild the merged snapshot behind it. */
-  function refreshFleet() {
+  /**
+   * After a mutation: drop the local cache and rebuild the merged snapshot behind it.
+   * `wait`: resolve once a build that started after this call is done (capped at `waitMs`),
+   * so the next /api/fleet already shows the change (a settings save, not a spawn).
+   */
+  function refreshFleet({ wait = false, waitMs = 3000 } = {}) {
     fleet.invalidate?.();
-    snapshot?.refresh().catch(() => {});
+    const p = snapshot?.refresh({ fresh: wait }).catch(() => {});
+    if (!wait || !p) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, waitMs);
+      timer.unref?.();
+      p.then(() => (clearTimeout(timer), resolve()));
+    });
   }
 
   async function handleFleet(url) {
@@ -423,6 +436,17 @@ export function createApi({
       });
     }
 
+    const sd = SPAWN_DIRS_ROUTE.exec(url.pathname);
+    if (sd) {
+      if (req.method !== 'GET' && req.method !== 'PUT') throw new HttpError('method not allowed', 405);
+      const r = await forHost({ req, url, host: decodeURIComponent(sd[1]), local: () => localSpawnDirs(req) });
+      // A peer saved its list: rebuild our merged snapshot so it advertises the new one.
+      if (req.method === 'PUT' && r.status === 200 && r.body?.saved && decodeURIComponent(sd[1]) !== config.self) {
+        await refreshFleet({ wait: true });
+      }
+      return r;
+    }
+
     const u = UPLOAD_ROUTE.exec(url.pathname);
     if (u) {
       if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
@@ -498,6 +522,19 @@ export function createApi({
     }
     if (action === 'file') return { status: 200, body: { host: config.self, ...(await notes.file(url.searchParams.get('path'))) } };
     return notes.raw(url.searchParams.get('path'));
+  }
+
+  async function localSpawnDirs(req) {
+    if (!spawnDirs) throw new HttpError('editing spawn directories is not available on this server', 501);
+    try {
+      if (req.method === 'GET') return { status: 200, body: await spawnDirs.get() };
+      const r = await spawnDirs.put(await readJsonBody(req));
+      if (r.body?.saved) await refreshFleet({ wait: true }); // the next /api/fleet shows the new list
+      return r;
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(err?.message ?? String(err), err?.status ?? 502);
+    }
   }
 
   /** A live session, or — for GET/PUT — a gone one whose brief file is still there (exact id). */

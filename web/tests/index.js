@@ -17,3 +17,4 @@ import './files.test.mjs';
 import './touched.test.mjs';
 import './briefs.test.mjs';
 import './notes.test.mjs';
+import './spawn-dirs.test.mjs';
