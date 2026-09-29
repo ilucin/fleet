@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createSpawner, isWithin, launchCommand, resolveAllowedDir, sanitizeName, shq, shqTyped, validateSpawnRequest } from '../lib/spawn.mjs';
@@ -91,6 +91,26 @@ test('spawner types --model when one was picked', async () => {
   const res = await sp.spawn({ name: 'fw-101010', dir: '/tmp', prompt: 'go', nameGiven: false, model: 'claude-haiku-4-5-20251001' });
   assert.deepEqual(calls[2], ['tmux', 'send-keys', '-t', 'fw-101010:', '-l', '--', "claude --model 'claude-haiku-4-5-20251001' 'go'"]);
   assert.equal(res.model, 'claude-haiku-4-5-20251001');
+});
+
+test('spawner passes a prompt too long to type via a file', async (t) => {
+  const promptDir = mkdtempSync(path.join(os.tmpdir(), 'fleet-prompts-'));
+  t.after(() => rmSync(promptDir, { recursive: true, force: true }));
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (args[0] === 'has-session') throw new Error('no such session');
+    return { stdout: '', stderr: '' };
+  };
+  const prompt = `Skeniraj šta je radila.\n\n${'č'.repeat(600)}\nit's done`;
+  const sp = createSpawner({ run, sleep: async () => {}, promptDir });
+  const res = await sp.spawn({ name: 'job', dir: '/tmp', prompt });
+  const [file] = readdirSync(promptDir);
+  assert.match(file, /^\d{8}-\d{6}-job\.md$/);
+  const full = path.join(promptDir, file);
+  assert.equal(readFileSync(full, 'utf8'), prompt);
+  assert.equal(res.command, `claude -n 'job' "$(cat '${full}')"`);
+  assert.deepEqual(calls[2], ['send-keys', '-t', 'job:', '-l', '--', res.command]);
 });
 
 test('spawner accepts the folder-trust prompt when it appears', async () => {

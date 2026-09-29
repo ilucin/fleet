@@ -40,14 +40,22 @@ export function defaultName(now = new Date()) {
   return `fw-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
 }
 
-/** Build the shell line typed into the new pane. */
-export function launchCommand({ launcher = 'claude', name, prompt, model }) {
+/**
+ * The longest line we type inline. A fresh pane's shell may still be sourcing its profile,
+ * so typed text can land in the tty's canonical-mode buffer, which macOS caps at 1024 bytes
+ * (MAX_CANON) — the rest is dropped and the command never runs. Longer prompts go via a file.
+ */
+export const TYPED_LINE_MAX = 900;
+
+/** Build the shell line typed into the new pane (`promptFile`: read the prompt from there). */
+export function launchCommand({ launcher = 'claude', name, prompt, model, promptFile }) {
   // No name → plain `claude`: it derives `<cwd>-9d` and the auto-namer (lib/autoname.mjs)
   // replaces that with a task-shaped name, tmux session included, once the session is idle.
   const parts = [launcher];
   if (model) parts.push('--model', shq(model));
   if (name) parts.push('-n', shq(name));
-  if (prompt && prompt.trim()) parts.push(shqTyped(prompt));
+  if (promptFile) parts.push(`"$(cat ${shq(promptFile)})"`);
+  else if (prompt && prompt.trim()) parts.push(shqTyped(prompt));
   return parts.join(' ');
 }
 
@@ -116,7 +124,18 @@ export async function resolveAllowedDir(dir, roots, { home = os.homedir() } = {}
   return real;
 }
 
-export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDelayMs = 400, sleep }) {
+/**
+ * `promptDir`: where prompts too long to type are written (like `fleet handoff` briefs,
+ * they are kept — the record of what the session was started with).
+ */
+export function createSpawner({
+  run,
+  tmux = 'tmux',
+  launcher = 'claude',
+  enterDelayMs = 400,
+  sleep,
+  promptDir = path.join(os.homedir(), '.claude', 'fleet-prompts'),
+}) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 
   async function tmuxHasSession(name) {
@@ -141,7 +160,17 @@ export function createSpawner({ run, tmux = 'tmux', launcher = 'claude', enterDe
       throw Object.assign(new Error(`tmux session "${name}" already exists`), { status: 409 });
     }
     await run(tmux, ['new-session', '-d', '-s', name, '-c', dir], { timeout: 8000 });
-    const command = launchCommand({ launcher, name: nameGiven ? name : null, prompt, model });
+    const launch = { launcher, name: nameGiven ? name : null, prompt, model };
+    let command = launchCommand(launch);
+    if (Buffer.byteLength(command) > TYPED_LINE_MAX) {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+      const promptFile = path.join(promptDir, `${stamp}-${name}.md`);
+      await fs.mkdir(promptDir, { recursive: true, mode: 0o700 });
+      await fs.writeFile(promptFile, prompt, { mode: 0o600 });
+      command = launchCommand({ ...launch, promptFile });
+    }
     // Give the login shell a moment to source its profile before typing into it.
     await wait(enterDelayMs);
     await run(tmux, ['send-keys', '-t', `${name}:`, '-l', '--', command], { timeout: 8000 });
