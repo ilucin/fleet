@@ -44,6 +44,15 @@ cd web && node server.mjs         # run the web server against your local config
 Tests use temp dirs and fixtures (`FLEET_CONFIG`, `FLEET_FIXTURE`, `HOME` pointing into a tempdir) —
 never a real home directory, real config or live sessions.
 
+## Git workflow
+
+- Commit and push straight to `main` as soon as a change works: no branches, no PRs. The user
+  tests every push right away in the desktop app.
+- Commit only your own files, because other sessions may have uncommitted work in the same tree.
+- If you hit a conflict because another session is changing the same thing (a rejected push, a
+  rebase conflict, overlapping edits), move your work into a git worktree. Rebase it onto `main`
+  there, then push.
+
 ## Rules
 
 - **Privacy: this repo is public.** Never commit personal config, IP addresses (including
