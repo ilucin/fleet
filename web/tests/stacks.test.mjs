@@ -81,6 +81,10 @@ function fakeHost(self, { dir }) {
         }
         return out({ ...view, markdown: opts.input, editedAt: UPDATED });
       }
+      case 'rename':
+        known(rest[0]);
+        assert.equal(rest[1], '--');
+        return out({ ...view, label: rest[2], editedAt: UPDATED });
       case 'rm':
         known(rest[0]);
         assert.equal(rest[1], '-f');
@@ -349,6 +353,20 @@ test('PUT stack: markdown on stdin, expectUpdated passed, conflict → 409 { err
   assert.equal((await call('PUT', `/api/hosts/laptop/stacks/${STACK_ID}`, { markdown: 'x'.repeat(64 * 1024 + 1) })).status, 400);
   assert.equal((await call('PUT', `/api/hosts/laptop/stacks/${STACK_ID}`, { markdown: 'x'.repeat(64 * 1024) })).status, 200, 'up to 64 kB (the body limit is raised)');
   assert.equal((await call('PUT', '/api/hosts/laptop/stacks/st-00000000', { markdown: 'x' })).status, 404);
+});
+
+test('POST stacks/:id/rename: the label as a positional after `--`; bad label → 400; unknown → 404', async (t) => {
+  const { call, host } = solo(t);
+  const ok = await call('POST', `/api/hosts/laptop/stacks/${STACK_ID}/rename`, { label: '  Auth rework  ' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.label, 'Auth rework');
+  assert.equal(ok.body.editorUrl.startsWith('vscode://file/'), true, 'the editor link is added like GET');
+  assert.deepEqual(host.stackCalls().at(-1), ['rename', STACK_ID, '--', 'Auth rework']);
+  for (const body of [{}, { label: 42 }, { label: '   ' }, { label: 'a\nb' }, { label: 'x'.repeat(81) }]) {
+    assert.equal((await call('POST', `/api/hosts/laptop/stacks/${STACK_ID}/rename`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await call('POST', '/api/hosts/laptop/stacks/st-00000000/rename', { label: 'x' })).status, 404);
+  assert.equal((await call('GET', `/api/hosts/laptop/stacks/${STACK_ID}/rename`)).status, 405);
 });
 
 test('DELETE stack → { removed }; POST stacks/sync → the sync report', async (t) => {

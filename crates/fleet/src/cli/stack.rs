@@ -462,6 +462,35 @@ pub fn add(q: &str, target: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// `fleet stack rename <stack> <label>`: the label (frontmatter `label:`, the header line
+/// follows). A human change, like `set`: `editedAt` is stamped. Nothing is typed anywhere.
+pub fn rename(q: &str, label: &str, json: bool) -> Result<()> {
+    let label = stack::clean_label(label).ok_or_else(|| {
+        Error::Other("the label must be one non-empty line (up to 80 characters)".into())
+    })?;
+    let c = Ctx::new()?;
+    c.sync()?;
+    let mut st = c.resolve(q)?;
+    let from = st.label();
+    if from == label {
+        return report_saved(&c, &st, json);
+    }
+    st.meta.insert("label".into(), Value::String(label.clone()));
+    st.meta
+        .insert("editedAt".into(), Value::String(brief::iso_now()));
+    c.save(&mut st)?;
+    if json {
+        return print_json(&c.view(&st));
+    }
+    println!(
+        "renamed stack {} → {} ({})",
+        from.dimmed(),
+        st.label().bold(),
+        st.id()
+    );
+    Ok(())
+}
+
 /// `fleet stack remove <stack> <target|session_id>`
 pub fn remove(q: &str, target: &str, json: bool) -> Result<()> {
     let c = Ctx::new()?;

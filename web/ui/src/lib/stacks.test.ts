@@ -2,7 +2,19 @@ import { expect, test } from 'vitest'
 
 import { ApiError } from '@/api/client'
 import type { StackMember } from '@/api/types'
-import { conflictUpdated, memberCounts, memberCountsText, memberLive, sortedMembers, stackErrorMessage, stacksKnown, stacksMissing } from './stacks'
+import {
+  conflictUpdated,
+  memberCounts,
+  memberCountsText,
+  memberLive,
+  shownStackLabel,
+  sortedMembers,
+  STACK_LABEL_TTL_MS,
+  stackErrorMessage,
+  stackLabelChanged,
+  stacksKnown,
+  stacksMissing,
+} from './stacks'
 
 const m = (session: string, over: Partial<StackMember> = {}): StackMember => ({
   session,
@@ -56,4 +68,22 @@ test('stacksKnown: rows from newer CLIs carry stack (null included)', () => {
   expect(stacksKnown({ stack: { id: 'st-1', label: 'x' } })).toBe(true)
   expect(stacksKnown({})).toBe(false)
   expect(stacksKnown(null)).toBe(false)
+})
+
+test('stackLabelChanged: trimmed, non-empty and different', () => {
+  expect(stackLabelChanged('  New name ', 'Old')).toBe(true)
+  expect(stackLabelChanged('Old', 'Old')).toBe(false)
+  expect(stackLabelChanged(' Old  ', 'Old')).toBe(false)
+  expect(stackLabelChanged('   ', 'Old')).toBe(false)
+  expect(stackLabelChanged('', null)).toBe(false)
+  expect(stackLabelChanged('First', null)).toBe(true)
+})
+
+test('shownStackLabel: pending wins while saving, then until the server catches up or the TTL ends', () => {
+  const at = 1_000_000
+  expect(shownStackLabel('Old', null, at)).toBe('Old')
+  expect(shownStackLabel('Old', { label: 'New', at, saving: true }, at + STACK_LABEL_TTL_MS * 2)).toBe('New')
+  expect(shownStackLabel('Old', { label: 'New', at, saving: false }, at + 1000)).toBe('New')
+  expect(shownStackLabel('New', { label: 'New', at, saving: false }, at + 1000)).toBe('New')
+  expect(shownStackLabel('Old', { label: 'New', at, saving: false }, at + STACK_LABEL_TTL_MS)).toBe('Old')
 })

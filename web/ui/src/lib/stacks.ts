@@ -70,3 +70,34 @@ export function conflictUpdated(err: unknown): string | null {
 export function memberSession(m: Pick<StackMember, 'host' | 'session'>, stackHost: string): { host: string; session_id: string } {
   return { host: m.host || stackHost, session_id: m.session }
 }
+
+/** Same cap as the server's stack rename (`POST …/stacks/:id/rename`). */
+export const MAX_STACK_LABEL = 80
+
+/** Is `next` (as typed) a label to save over `prev`? Trimmed, non-empty and different. */
+export function stackLabelChanged(next: string, prev: string | null | undefined): boolean {
+  const t = next.trim()
+  return t !== '' && t !== (prev ?? '').trim()
+}
+
+/** How long a saved rename's optimistic label may outlive the server's (a slow fleet snapshot). */
+export const STACK_LABEL_TTL_MS = 30_000
+
+/** An optimistic stack label (hooks/useStackLabels.ts). */
+export interface PendingStackLabel {
+  label: string
+  /** Epoch ms of the rename request. */
+  at: number
+  /** The POST is still in flight. */
+  saving: boolean
+}
+
+/**
+ * The label to draw: the pending one while its rename is in flight, and after it succeeded until
+ * the server's label catches up (or the TTL runs out); otherwise the server's.
+ */
+export function shownStackLabel(server: string, pending: PendingStackLabel | null | undefined, now = Date.now()): string {
+  if (!pending) return server
+  if (pending.saving) return pending.label
+  return pending.label !== server && now - pending.at < STACK_LABEL_TTL_MS ? pending.label : server
+}

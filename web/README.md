@@ -54,7 +54,7 @@ Resources and todos come from the transcript for free; the summary costs one
 editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
 
 **Session stacks** (sessions sharing one StackBrief file, owned by `fleet stack`): the server
-serves `/api/hosts/:host/stacks…` (list, show, edit with conflict check, delete, sync) and spawns
+serves `/api/hosts/:host/stacks…` (list, show, edit with conflict check, rename, delete, sync) and spawns
 siblings (`POST …/sessions/:id/stack/spawn` creates the stack around a session first — one
 Sonnet call — and `POST …/stacks/:id/spawn`), adding the new session to the stack once it
 registers. It runs `fleet stack sync` after a kill and every `web.stacks.syncMinutes` (default 2)

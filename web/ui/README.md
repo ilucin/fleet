@@ -220,8 +220,13 @@ src/
     its members taken out of the smart / repo groups (empty groups vanish; `withStackColumns`, before
     the sticky order — a new stack column starts first, then keeps its slot like any column). Header:
     layers icon, label, status dots, count, ⋯ → StackBrief / Spawn sibling. Stack columns take no
-    drops and cannot be renamed there (edit the label in the StackBrief). Mobile grouped list: the
-    same sections, ⋯ beside the section header.
+    drops; click the label to rename the stack (like a group: Enter or clicking away saves, Esc
+    cancels). Mobile grouped list: the same sections, ⋯ beside the section header.
+  - **Rename** (`POST …/stacks/:id/rename`, `useRenameStack` in hooks/useStackLabels.ts): the label is
+    editable in place on the board column, the session screen's bar (a click; a tap there opens the
+    sheet) and the Stack sheet's title (not while its markdown editor is open). Optimistic: the new
+    label shows on every chip / column / bar / sheet at once and wins over `session.stack.label` until
+    the fleet has it (≤ 30s); a failure rolls back with a toast.
   - **Session screen**: a slim bar under the header while the session is in a stack — label,
     "2 live · 1 closed" (loaded once, then every 60s), StackBrief, Spawn sibling. Not in one: Details →
     Session → **Spawn sibling…** (the form says it starts a new stack around this session, one Sonnet call).

@@ -71,7 +71,7 @@ const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenera
 const NOTES_ROUTE = /^\/api\/hosts\/([^/]+)\/notes\/(tree|search|file|raw)$/;
 const SPAWN_DIRS_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn-dirs$/;
 const STACKS_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks(\/sync)?$/;
-const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn)?$/;
+const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn|\/rename)?$/;
 const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/stack\/spawn$/;
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
@@ -592,13 +592,14 @@ export function createApi({
 
     const sk = STACK_ROUTE.exec(url.pathname);
     if (sk) {
-      const [, rawHost, rawId, spawn] = sk;
-      const allowed = spawn ? ['POST'] : ['GET', 'PUT', 'DELETE'];
+      const [, rawHost, rawId, sub] = sk;
+      const spawn = sub === '/spawn';
+      const allowed = sub ? ['POST'] : ['GET', 'PUT', 'DELETE'];
       if (!allowed.includes(req.method)) throw new HttpError('method not allowed', 405);
       const id = decodeURIComponent(rawId);
       if (!STACK_ID_RE.test(id)) throw new HttpError(`invalid stack id: ${id}`, 400);
       const host = decodeURIComponent(rawHost);
-      const action = spawn ? 'spawn' : req.method;
+      const action = spawn ? 'spawn' : sub === '/rename' ? 'rename' : req.method;
       const r = await forHost({
         req,
         url,
@@ -717,6 +718,13 @@ export function createApi({
     if (action === 'DELETE') {
       const body = await stacks.remove(id);
       refreshFleet();
+      return { status: 200, body };
+    }
+    if (action === 'rename') {
+      const label = validateStackLabel((await readJsonBody(req))?.label);
+      if (!label) throw new HttpError('label must be one non-empty line', 400);
+      const body = await stacks.rename(id, label);
+      refreshFleet(); // the label shows on session rows
       return { status: 200, body };
     }
     // PUT

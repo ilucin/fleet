@@ -267,6 +267,7 @@ export function createStacks({
       }
     },
     remove: (id) => call('fleet stack rm', () => cli.stackRemove(id)),
+    rename: (id, label) => call('fleet stack rename', () => cli.stackRename(id, label)),
     ensure: (sessionId, opts) => call('fleet stack ensure', () => cli.stackEnsure(sessionId, opts)),
     /** POST …/stacks/sync: like `sync`, errors mapped to HttpError. */
     syncNow: (reason = 'manual') => call('fleet stack sync', () => sync(reason)),

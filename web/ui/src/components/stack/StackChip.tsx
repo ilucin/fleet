@@ -1,6 +1,7 @@
 import { LayersIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
+import { useStackLabel } from '@/hooks/useStackLabels'
 import { openStackSheet } from '@/hooks/useStackUi'
 import { cn } from '@/lib/utils'
 
@@ -10,8 +11,9 @@ import { cn } from '@/lib/utils'
  */
 export function StackChip({ session: s, className }: { session: Session; className?: string }) {
   const st = s.stack
+  // A rename in flight shows here at once (hooks/useStackLabels.ts).
+  const { label } = useStackLabel(s.host, st?.id, st?.label || st?.id || '')
   if (!st?.id) return null
-  const label = st.label || st.id
   return (
     <button
       type="button"

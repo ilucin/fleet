@@ -174,6 +174,9 @@ export const api = {
       method: 'PUT',
       body: { markdown, ...(expectUpdated ? { expectUpdated } : {}) },
     }),
+  /** Rename a stack (400 bad label, 404 unknown stack, 501 / router 404 on servers without stacks). */
+  renameStack: (host: string, id: string, label: string, o: Opts = {}) =>
+    request<StackView>(`${hostPath(host)}/stacks/${enc(id)}/rename`, { ...o, method: 'POST', body: { label } }),
   deleteStack: (host: string, id: string, o: Opts = {}) =>
     request<{ removed: string }>(`${hostPath(host)}/stacks/${enc(id)}`, { ...o, method: 'DELETE' }),
   /** A sibling of `sessionId`: its stack (created first when it has none — one model call), then a new session in its cwd. */

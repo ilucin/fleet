@@ -509,6 +509,14 @@ enum StackCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Rename a stack (its label; the StackBrief header follows)
+    Rename {
+        stack: String,
+        /// The new label (one line, up to 80 characters)
+        label: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Edit the StackBrief in $VISUAL / $EDITOR (saved as a human edit)
     Edit {
         stack: String,
@@ -903,6 +911,7 @@ fn run(cli: Cli) -> Result<i32> {
                 target,
                 json,
             } => stack_cmds::remove(&stack, &target, json)?,
+            StackCmd::Rename { stack, label, json } => stack_cmds::rename(&stack, &label, json)?,
             StackCmd::Edit { stack, json } => {
                 let t = target(cli.host.as_deref(), cli.local, Scope::SelfHost)?;
                 return stack_cmds::edit(&t, &stack, json);

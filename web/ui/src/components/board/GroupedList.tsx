@@ -4,6 +4,7 @@ import { ChevronRightIcon, LayersIcon } from 'lucide-react'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { SessionRow } from '@/components/SessionRow'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
+import { useStackLabel } from '@/hooks/useStackLabels'
 import { parseIdList, type BoardColumn } from '@/lib/groups'
 import { sessionKey } from '@/lib/shortcuts'
 import { storage } from '@/lib/storage'
@@ -38,7 +39,7 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
               <span className="min-w-0 flex-1">
                 <span className={cn('flex min-w-0 items-center gap-1.5 text-[0.9375rem] font-semibold', c.ungrouped && 'text-muted-foreground')}>
                   {c.stack ? <LayersIcon aria-label="Session stack" className="size-3.5 shrink-0 text-primary" /> : null}
-                  <span className="min-w-0 truncate">{c.label}</span>
+                  <ColumnLabel column={c} />
                 </span>
                 {c.description ? <span className="block truncate text-xs text-dimmer">{c.description}</span> : null}
               </span>
@@ -64,4 +65,10 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
       })}
     </div>
   )
+}
+
+/** A section's name — a stack's optimistic label while a rename is in flight (hooks/useStackLabels.ts). */
+function ColumnLabel({ column: c }: { column: BoardColumn }) {
+  const { label } = useStackLabel(c.stack?.host, c.stack?.id, c.label)
+  return <span className="min-w-0 truncate">{label}</span>
 }

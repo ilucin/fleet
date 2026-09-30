@@ -6,7 +6,9 @@ import { BoardCard } from '@/components/board/BoardCard'
 import { InlineEdit, InlineField } from '@/components/InlineEdit'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
+import { useRenameStack, useStackLabel } from '@/hooks/useStackLabels'
 import { PENDING_PREFIX, memberId, type BoardColumn, type GroupEdit } from '@/lib/groups'
+import { MAX_STACK_LABEL, stackLabelChanged } from '@/lib/stacks'
 import { sessionKey } from '@/lib/shortcuts'
 import { cn } from '@/lib/utils'
 
@@ -16,7 +18,7 @@ const GROUP_LABEL_MAX = 48
 /** Our drags carry this type, so text, links or files dragged over the board are ignored. */
 const DRAG_TYPE = 'application/x-fleet-board'
 
-/** A column that is a group: sessions can be dropped on it, it can be renamed (not Ungrouped, not a session stack). */
+/** A column that is a group: sessions can be dropped on it, it can be renamed through `onEdit` (not Ungrouped, not a session stack — a stack renames through its own route, StackColumnTitle). */
 const isGroup = (c: BoardColumn) => !c.ungrouped && c.source !== 'stack'
 
 type Drag = { kind: 'session'; session: Session; from: string } | { kind: 'column'; id: string }
@@ -39,7 +41,7 @@ export interface BoardColumnsProps {
 /**
  * The board's Kanban columns. Drag a card onto another column to move the session there (or
  * onto "New group" to start one), drag a column's header to reorder the columns, click a
- * column's name to rename it. "+ New group" at the end makes an empty column (a group of the
+ * column's name to rename it (a stack column renames the stack). "+ New group" at the end makes an empty column (a group of the
  * user's: it stays until "Delete group"). Ungrouped takes no drops and stays last.
  */
 export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, editable, onEdit, onMoveColumn }: BoardColumnsProps) {
@@ -133,13 +135,17 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
             >
               <div className="flex min-w-0 items-center gap-2">
                 {c.stack ? <LayersIcon aria-label="Session stack" className="size-3.5 shrink-0 text-primary" /> : null}
-                <ColumnTitle
-                  column={c}
-                  editable={editable && isGroup(c)}
-                  editing={renaming === c.id}
-                  onEditing={(on) => setRenaming(on ? c.id : null)}
-                  onRename={(label) => onEdit({ op: 'rename', id: c.id, label })}
-                />
+                {c.stack ? (
+                  <StackColumnTitle stack={c.stack} label={c.label} editing={renaming === c.id} onEditing={(on) => setRenaming(on ? c.id : null)} />
+                ) : (
+                  <ColumnTitle
+                    column={c}
+                    editable={editable && isGroup(c)}
+                    editing={renaming === c.id}
+                    onEditing={(on) => setRenaming(on ? c.id : null)}
+                    onRename={(label) => onEdit({ op: 'rename', id: c.id, label })}
+                  />
+                )}
                 <StatusSummaryDots summary={c.summary} />
                 <span className="rounded-md bg-muted px-1.5 text-[0.6875rem] text-muted-foreground tabular-nums">{c.sessions.length}</span>
                 {c.stack ? <StackColumnMenu stack={c.stack} label={c.label} sessions={c.sessions} className="-my-1 -mr-1.5" /> : null}
@@ -267,6 +273,43 @@ function ColumnTitle({
         label="Group name"
         hint="Rename group"
         maxLength={GROUP_LABEL_MAX}
+      />
+    </h2>
+  )
+}
+
+/**
+ * A stack column's name: the stack's label (optimistic while a rename is in flight); click it to
+ * rename the stack (`POST …/stacks/:id/rename`, hooks/useStackLabels.ts) — never a group edit.
+ */
+function StackColumnTitle({
+  stack,
+  label: server,
+  editing,
+  onEditing,
+}: {
+  stack: { id: string; host: string }
+  label: string
+  editing: boolean
+  onEditing: (on: boolean) => void
+}) {
+  const { label, saving } = useStackLabel(stack.host, stack.id, server)
+  const rename = useRenameStack()
+  return (
+    <h2 className="flex min-w-0 flex-1">
+      <InlineEdit
+        value={label}
+        editing={editing}
+        onEdit={saving ? undefined : () => onEditing(true)}
+        onCommit={(text) => {
+          onEditing(false)
+          if (stackLabelChanged(text, label)) void rename(stack.host, stack.id, text)
+        }}
+        onCancel={() => onEditing(false)}
+        className={cn('text-sm font-semibold', saving && 'opacity-70')}
+        label="Stack name"
+        hint="Rename stack"
+        maxLength={MAX_STACK_LABEL}
       />
     </h2>
   )

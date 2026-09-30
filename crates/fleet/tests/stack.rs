@@ -561,3 +561,50 @@ fn edit_under_dry_run_and_remote_dispatch() {
     let text = stdout(&out);
     assert!(text.contains("stack show x --json"), "{text}");
 }
+
+#[test]
+fn rename_changes_the_label_everywhere_and_refuses_an_empty_one() {
+    let t = T::new();
+    let v = t.json(&["stack", "ensure", A, "--no-llm", "--json"]);
+    let id = v["id"].as_str().unwrap().to_string();
+    let r = t.json(&["stack", "rename", &id, "  **Auth rework**  ", "--json"]);
+    assert_eq!(r["label"], "Auth rework", "cleaned like --label");
+    assert!(r["editedAt"].is_string(), "a human change");
+    let file = std::fs::read_to_string(t.env.path(&format!("stacks/{id}.md"))).unwrap();
+    assert!(file.contains("\nlabel: Auth rework\n"), "{file}");
+    assert!(
+        file.contains("**Auth rework** (`"),
+        "the header follows: {file}"
+    );
+    // Rows and the label rung of `<stack>` see the new name.
+    let rows = t.json(&["list", "--json"]);
+    let row = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["session_id"] == A)
+        .unwrap();
+    assert_eq!(row["stack"]["label"], "Auth rework");
+    assert_eq!(
+        t.json(&["stack", "show", "auth", "--json"])["id"],
+        id.as_str()
+    );
+    // Empty / whitespace: exit 1, nothing written.
+    let out = t
+        .cmd()
+        .args(["stack", "rename", &id, "   "])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("one non-empty line"),
+        "{}",
+        stderr(&out)
+    );
+    let out = t
+        .cmd()
+        .args(["stack", "rename", "nope", "x"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+}

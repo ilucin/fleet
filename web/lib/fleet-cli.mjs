@@ -253,6 +253,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   const stackSet = (id, markdown, expectUpdated = null) =>
     stack(['set', id, ...(expectUpdated ? [`--expect-updated=${expectUpdated}`] : [])], { input: markdown });
   const stackRemove = (id) => stack(['rm', id, '-f']);
+  /** Rename: the label is a positional, so `--` keeps one starting with "-" out of clap's flags. */
+  const stackRename = (id, label) => stack(['rename', id, '--', label]);
   /** The session's stack, created around it when it has none (may call the model: 150 s). */
   const stackEnsure = (sessionId, { label = null } = {}) =>
     stack(['ensure', sessionId, ...(label ? [`--label=${label}`] : [])], { timeoutMs: 150 * 1000 });
@@ -274,6 +276,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     stackShow,
     stackSet,
     stackRemove,
+    stackRename,
     stackEnsure,
     stackAdd,
     stackSync,

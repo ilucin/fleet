@@ -158,7 +158,7 @@ A **stack** is a set of sessions (on one host) that share one context file, the 
 - **See what a sibling did:** `fleet stack show <stack>` (the StackBrief; `--json` for members with `live` / `status` / `briefPath`), then `fleet brief <session>` for that sibling's brief, or read the transcript path listed under Sessions.
 - **Spawn a sibling:** `fleet stack spawn <this session> "<prompt>" [--name <n>] [--model <id>]` — a new session in the same cwd and stack (the stack is created around this session first when it has none — one Sonnet call). It starts a new agent: **confirm with the user like `spawn`**. It waits until the sibling registers and adds it; `--no-wait` prints the `fleet stack add` to run later. `<this session>` is your own title, name or session-id prefix as `fleet list` shows it (match your cwd and first prompt there).
 - **Overview:** `fleet stack list` (stacks on this host, live/closed counts); `fleet list --json` rows carry `stack: { id, label } | null`.
-- Membership changes: `fleet stack add <stack> <session>`, `fleet stack remove <stack> <session>`; `fleet stack sync` marks gone sessions closed (it also runs on its own). `fleet stack set <stack>` saves markdown from stdin; `fleet stack rm <stack> -f` deletes a stack — only when the user asks. Add `-H <host>` for a stack on another host.
+- Membership changes: `fleet stack add <stack> <session>`, `fleet stack remove <stack> <session>`; `fleet stack sync` marks gone sessions closed (it also runs on its own). `fleet stack rename <stack> "<label>"` renames a stack (when the user asks); `fleet stack set <stack>` saves markdown from stdin; `fleet stack rm <stack> -f` deletes a stack — only when the user asks. Add `-H <host>` for a stack on another host.
 
 ## Session names
 

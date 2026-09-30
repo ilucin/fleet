@@ -3,6 +3,7 @@ import { EllipsisIcon, GitForkIcon, LayersIcon } from 'lucide-react'
 import type { Session } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { useStackLabel } from '@/hooks/useStackLabels'
 import { openSiblingSpawn, openStackSheet } from '@/hooks/useStackUi'
 import { cn } from '@/lib/utils'
 
@@ -15,7 +16,8 @@ export interface StackColumnMenuProps {
 }
 
 /** ⋯ on a stack column / section header: StackBrief (the sheet), Spawn sibling. */
-export function StackColumnMenu({ stack, label, sessions, className }: StackColumnMenuProps) {
+export function StackColumnMenu({ stack, label: server, sessions, className }: StackColumnMenuProps) {
+  const { label } = useStackLabel(stack.host, stack.id, server)
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
