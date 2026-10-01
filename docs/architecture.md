@@ -515,7 +515,9 @@ absolute, no `~`), `gitRoot` (the checkout root — repo or linked worktree — 
 null outside git), `editor` (`web.editor` of the answering server) and `editorUrl`; session rows in
 `/api/fleet` carry `editorUrl` for their cwd. `worktrees` lists the git checkouts the session works
 in — `[{ path, display, branch, linked, editorUrl }]`, the cwd's first, then the checkouts of the
-File / Spec resources (deduped by root) — each with its own `editorUrl`. The link targets `gitRoot`, else `absCwd`:
+directories the transcript records the session in (its entries' `cwd`, kept in the brief's `dirs`
+frontmatter key) and of the File / Spec resources; a directory's checkout is the nearest ancestor
+with a `.git`, deduped by root — each with its own `editorUrl`. The link targets `gitRoot`, else `absCwd`:
 `vscode://file/<path>` when the session is on the machine the browser runs on, else
 `vscode://vscode-remote/ssh-remote+<hosts.<host>.ssh><path>` (Remote-SSH with **that** server's ssh
 alias for the host). The browser's machine is read from the request: a loopback address is the

@@ -35,9 +35,8 @@ import { readDelta } from './brief-extract.mjs';
 export const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const HOUR_MS = 60 * 60 * 1000;
 const GIT_TTL_MS = 60 * 1000;
-/** Distinct resource directories looked up for the Worktrees list per GET (cached like the cwd's). */
-const MAX_WORKTREE_DIRS = 20;
-const WORKTREE_DIR_RE = /\/(?:\.claude\/worktrees|\.worktrees|worktrees)\/[^/]/;
+/** Checkouts looked up with git for the Worktrees list per GET (cached like the cwd's). */
+const MAX_WORKTREE_ROOTS = 20;
 
 // ------------------------------------------------------------------ storage
 
@@ -281,6 +280,12 @@ export function createBriefs({
         changed = true;
       }
     }
+    // Where it worked (the Worktrees list), kept so a gone session still shows them.
+    const dirs = ext?.dirs ?? [];
+    if (dirs.length && JSON.stringify(dirs) !== JSON.stringify(brief.meta.dirs ?? [])) {
+      brief.meta.dirs = dirs;
+      changed = true;
+    }
     // Where the session lives: informational, written along with the next content change.
     if (self) brief.meta.host = self;
     if (cwd) brief.meta.cwd = cwd;
@@ -439,9 +444,10 @@ export function createBriefs({
   }
 
   /**
-   * The git checkouts the session works in: its cwd's first, then those of the files and specs
-   * in Resources (a session often edits a worktree it never cd'd into). Deduped by root, at most
-   * MAX_WORKTREE_DIRS distinct directories looked up. → [{ path (absolute), display, branch, linked }].
+   * The git checkouts the session works in: its cwd's first, then those of the directories it
+   * was in (`meta.dirs`), then those of the files and specs in Resources (a session often edits
+   * a worktree it never cd'd into). Deduped by root, at most
+   * MAX_WORKTREE_ROOTS checkouts looked up. → [{ path (absolute), display, branch, linked }].
    */
   async function worktreesOf(brief, absCwd, gi) {
     const roots = new Map();
@@ -452,17 +458,42 @@ export function createBriefs({
     };
     add(gi);
     const dirs = new Set();
+    for (const d of Array.isArray(brief.meta.dirs) ? brief.meta.dirs : []) if (typeof d === 'string' && path.isAbsolute(d)) dirs.add(path.normalize(d));
     for (const r of brief.resources) {
       if (!r.path || (r.kind !== 'File' && r.kind !== 'Spec')) continue;
       const p = r.path.startsWith('~/') ? path.join(home, r.path.slice(2)) : path.isAbsolute(r.path) ? r.path : absCwd ? path.join(absCwd, r.path) : null;
       if (p) dirs.add(path.dirname(path.normalize(p)));
     }
-    for (const dir of [...dirs].slice(0, MAX_WORKTREE_DIRS)) {
-      // Inside a known checkout and not under a worktrees dir of it: the same checkout.
-      const known = [...roots.keys()].some((root) => (dir === root || dir.startsWith(`${root}/`)) && !WORKTREE_DIR_RE.test(dir.slice(root.length)));
-      if (known) continue;
-      if (exists(dir)) add(await gitFor(dir));
+    // The nearest directory with a `.git` (a dir: main checkout, a file: linked worktree) is the
+    // checkout root — found without running git, so many files cost one lookup per checkout.
+    const seen = new Map(); // dir → root | null
+    const rootOf = (dir) => {
+      const trail = [];
+      let d = dir;
+      let root = null;
+      for (;;) {
+        if (seen.has(d)) {
+          root = seen.get(d);
+          break;
+        }
+        trail.push(d);
+        if (exists(path.join(d, '.git'))) {
+          root = d;
+          break;
+        }
+        const up = path.dirname(d);
+        if (up === d) break;
+        d = up;
+      }
+      for (const t of trail) seen.set(t, root);
+      return root;
+    };
+    const found = new Set();
+    for (const dir of dirs) {
+      const root = rootOf(dir);
+      if (root && !roots.has(root)) found.add(root);
     }
+    for (const root of [...found].slice(0, MAX_WORKTREE_ROOTS)) add(await gitFor(root));
     return [...roots.values()];
   }
 

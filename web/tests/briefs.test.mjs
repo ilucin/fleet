@@ -24,7 +24,7 @@ import {
   removedResourceKeys,
   serializeBrief,
 } from '../lib/brief-format.mjs';
-import { createBriefExtractor, extractUrls, readDelta } from '../lib/brief-extract.mjs';
+import { createBriefExtractor, extractUrls, ingestLine, readDelta } from '../lib/brief-extract.mjs';
 import { buildPrompt, createBriefStore, createBriefs, createClaudeAsk, displayPath, gitInfo } from '../lib/briefs.mjs';
 import { normalizeConfig, DEFAULT_BRIEFS, briefsDir } from '../lib/config.mjs';
 import { editorUrl, editorViewer, withBriefEditor } from '../lib/editor.mjs';
@@ -498,36 +498,49 @@ test('briefs: GET serves an empty skeleton, then no-model extraction', async (t)
   assert.deepEqual(live.worktrees, [{ path: s.cwd, display: displayPath(s.cwd, null, s.home), branch: 'fix-login', linked: false }]);
 });
 
-test('briefs: worktrees — the cwd checkout first, then those of the files it wrote, deduped', async (t) => {
+test('briefs: worktrees — the cwd checkout first, then where it worked and the files it wrote, deduped', async (t) => {
   const s = setup(t, { settings: { enabled: false } });
   const wt = path.join(s.cwd, '.worktrees', 'feat');
+  const nested = path.join(s.cwd, 'repos', 'lib');
   const other = path.join(s.home, 'Code', 'other');
-  for (const d of [path.join(wt, 'src'), other]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [path.join(wt, 'src'), path.join(nested, 'src'), other, path.join(s.cwd, '.git')]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(wt, '.git'), 'gitdir: ../../.git/worktrees/feat\n');
+  fs.mkdirSync(path.join(nested, '.git'));
+  fs.mkdirSync(path.join(other, '.git'));
   const calls = [];
   s.state.git = (dir) => {
     calls.push(dir);
     if (dir.startsWith(wt)) return { branch: 'feat', toplevel: wt, linked: true, worktree: wt };
+    if (dir.startsWith(nested)) return { branch: 'main', toplevel: nested, linked: false, worktree: null };
     if (dir.startsWith(other)) return { branch: null, toplevel: other, linked: false, worktree: null };
     return { branch: 'main', toplevel: s.cwd, linked: false, worktree: null };
   };
-  const md = `---\nsession: ${SID}\ncwd: ${s.cwd}\n---\n## Summary\nx\n\n## Resources\n- File: \`src/a.ts\`\n- File: \`.worktrees/feat/src/b.ts\`\n- File: \`.worktrees/feat/src/c.ts\`\n- Spec: \`~/Code/other/SPEC.md\`\n- File: \`~/gone/x.ts\`\n`;
+  // A nested repo it only cd'd into (dirs), a worktree it wrote files in, a spec elsewhere.
+  const md = `---\nsession: ${SID}\ncwd: ${s.cwd}\ndirs: ${JSON.stringify([s.cwd, path.join(nested, 'src')])}\n---\n## Summary\nx\n\n## Resources\n- File: \`src/a.ts\`\n- File: \`.worktrees/feat/src/b.ts\`\n- File: \`.worktrees/feat/c.ts\`\n- Spec: \`~/Code/other/SPEC.md\`\n- File: \`~/gone/x.ts\`\n`;
   const view = await s.svc.put(SID, md);
   assert.deepEqual(
     view.worktrees.map((w) => [w.display, w.branch, w.linked]),
     [
       [displayPath(s.cwd, null, s.home), 'main', false],
+      [displayPath(nested, null, s.home), 'main', false],
       [displayPath(wt, null, s.home), 'feat', true],
       ['~/Code/other', null, false],
     ],
   );
-  assert.equal(view.worktrees[1].path, wt);
-  assert.ok(!calls.includes(path.join(s.cwd, 'src')), 'a dir inside a known checkout is not looked up');
-  assert.equal(calls.filter((c) => c === path.join(wt, 'src')).length, 1, 'one lookup per directory');
+  assert.equal(view.worktrees[2].path, wt);
+  assert.deepEqual(calls.slice(1).sort(), [nested, other, wt].sort(), 'one git call per checkout, on its root');
 
   const cfg = { self: 'laptop', editor: 'vscode', sshHosts: {} };
   const body = withBriefEditor(view, 'laptop', cfg);
-  assert.equal(body.worktrees[1].editorUrl, `vscode://file${wt}`);
-  assert.equal(withBriefEditor(view, 'nas', cfg).worktrees[1].editorUrl, null, 'no ssh alias');
+  assert.equal(body.worktrees[2].editorUrl, `vscode://file${wt}`);
+  assert.equal(withBriefEditor(view, 'nas', cfg).worktrees[2].editorUrl, null, 'no ssh alias');
+});
+
+test('brief extraction: the working directories the transcript records, first-seen order', () => {
+  const st = { items: new Map(), dirs: new Set(), pending: new Map(), tasks: new Map(), seq: 0, skipPath: /^\/tmp\// };
+  for (const cwd of ['/w/a', '/w/a/wt/x', '/w/a', '/tmp/scratch', 'relative']) ingestLine(st, JSON.stringify({ type: 'user', cwd, message: { content: 'hi' } }));
+  ingestLine(st, JSON.stringify({ type: 'assistant', cwd: '/w/side', isSidechain: true, message: { content: [] } }));
+  assert.deepEqual([...st.dirs], ['/w/a', '/w/a/wt/x']);
 });
 
 test('briefs: buildPrompt caps the fed-back brief; displayPath', () => {

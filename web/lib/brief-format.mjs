@@ -14,6 +14,8 @@
 //   dismissed: ["key", …]        resources the user deleted; never re-added
 //   git: <line>                  the auto `Git:` resource line last written (set: legacy auto
 //                                `Branch:` / `Worktree:` lines have been migrated)
+//   dirs: ["/abs", …]            working directories the session was in (server-only, an
+//                                unknown key to the CLI; feeds the Worktrees list)
 //   ---
 //   ## Summary / ## Resources / ## Todos   (any other `## ` section is kept, after Todos;
 //                                           a legacy `## Plan` reads as Todos)

@@ -10,6 +10,7 @@
 //   assistant text: GitHub PR/issue, claude.ai artifact and other http(s) links    → PR/Issue/Artifact/Link
 //   user prompts: GitHub PR/issue and artifact links (what the work is about)      → PR/Issue/Artifact
 // Todos: the latest TodoWrite list, or the task list built from TaskCreate / TaskUpdate calls.
+// Dirs: the working directories the session's entries record (`cwd`; a `cd` in Bash moves it).
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +24,8 @@ export const MAX_SCAN_BYTES = 16 * 1024 * 1024;
 /** Most recent items kept per kind. */
 export const PER_KIND = { PR: 20, Issue: 20, Artifact: 20, Spec: 10, File: 30, Link: 15 };
 const MAX_PENDING = 500;
+/** Working directories kept per session (the oldest are dropped past this). */
+export const MAX_DIRS = 30;
 const MAX_SESSIONS = 200;
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const GH_CREATE_RE = /\bgh\s+(?:pr|issue)\s+create\b/;
@@ -63,7 +66,7 @@ export function extractUrls(text, kinds = null) {
 }
 
 function newState(file, skipPath) {
-  return { file, skipPath, offset: 0, size: 0, mtimeMs: 0, seq: 0, items: new Map(), pending: new Map(), todos: null, tasks: new Map(), taskSeq: 0 };
+  return { file, skipPath, offset: 0, size: 0, mtimeMs: 0, seq: 0, items: new Map(), dirs: new Set(), pending: new Map(), todos: null, tasks: new Map(), taskSeq: 0 };
 }
 
 function addItem(state, item) {
@@ -90,6 +93,13 @@ export function ingestLine(state, line, home = os.homedir()) {
   }
   if (!entry || typeof entry !== 'object' || entry.isSidechain) return;
   const content = entry.message?.content;
+  if (typeof entry.cwd === 'string' && entry.cwd.startsWith('/') && !entry.cwd.includes('\0') && !(state.skipPath ?? TEMP_PATH_RE).test(`${entry.cwd}/`)) {
+    const d = path.normalize(entry.cwd);
+    if (!state.dirs.has(d)) {
+      state.dirs.add(d); // first-seen order: where the session started, then where it went
+      if (state.dirs.size > MAX_DIRS) state.dirs.delete(state.dirs.values().next().value);
+    }
+  }
 
   if (entry.type === 'assistant' && Array.isArray(content)) {
     for (const block of content) {
@@ -211,7 +221,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
     }
   }
 
-  /** → { file, size, offset, resources, todos } or null without a transcript. */
+  /** → { file, size, offset, resources, todos, dirs } or null without a transcript. */
   async function refresh(session) {
     const id = session?.session_id;
     if (!id) return null;
@@ -252,7 +262,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
       st.size = stat.size;
       st.mtimeMs = stat.mtimeMs;
     }
-    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), todos: todosFromState(st) };
+    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), todos: todosFromState(st), dirs: [...st.dirs] };
   }
 
   return {
