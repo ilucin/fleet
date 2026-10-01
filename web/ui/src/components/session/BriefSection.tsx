@@ -19,7 +19,7 @@ import {
   StickyNoteIcon,
 } from 'lucide-react'
 
-import type { BriefResource } from '@/api/types'
+import type { BriefResource, BriefWorktree } from '@/api/types'
 import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -106,8 +106,10 @@ export function BriefSection({ host, brief: st, fileLinks, onContinue, desktop =
   const busy = st.generating || st.regenerating
   const todos = briefTodos(b?.parsed)
   const progress = todoProgress(todos)
-  const groups = groupResources(resources)
-  const empty = !!b && !b.exists && !summary && !todos.length && !groups.length
+  const worktrees = b?.worktrees ?? []
+  // The Worktrees list includes the cwd's checkout: the Git line would say it twice.
+  const groups = groupResources(resources).filter((g) => !(worktrees.length && g.kind === 'Git'))
+  const empty = !!b && !b.exists && !summary && !todos.length && !groups.length && !worktrees.length
 
   const regenerateButton = (label: string, className?: string) => (
     <Button variant="outline" className={cn('h-9 px-3', className)} disabled={busy || !b} onClick={() => void st.regenerate()}>
@@ -228,9 +230,10 @@ export function BriefSection({ host, brief: st, fileLinks, onContinue, desktop =
             </Part>
           ) : null}
 
-          {groups.length ? (
+          {groups.length || worktrees.length ? (
             <Part title="Resources">
               <div className="space-y-3">
+                {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} /> : null}
                 {groups.map((g) => (g.kind === 'File' ? <FilesGroup key="files" g={g} fileLinks={fileLinks} /> : <Group key={g.kind ?? 'notes'} g={g} fileLinks={fileLinks} />))}
               </div>
             </Part>
@@ -345,6 +348,38 @@ function FilesGroup({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }
           ))}
         </ul>
       ) : null}
+    </div>
+  )
+}
+
+/** The checkouts the session works in, each with an "open in editor" button (hidden on touch-first screens). */
+function WorktreesGroup({ worktrees, editor }: { worktrees: BriefWorktree[]; editor: string | null | undefined }) {
+  const label = editor === 'cursor' ? 'Cursor' : 'VSC'
+  return (
+    <div>
+      <h5 className="pb-1 text-xs font-medium text-muted-foreground">
+        Worktrees
+        {worktrees.length > 1 ? <span className="pl-1 text-dimmer tabular-nums">{worktrees.length}</span> : null}
+      </h5>
+      <ul className="space-y-1">
+        {worktrees.map((w) => (
+          <li key={w.path} className={cn(rowClass, 'items-center')}>
+            <FolderGit2Icon className="size-4 shrink-0 text-dimmer" />
+            <span className="min-w-0 flex-1 font-mono text-[0.8125rem] [overflow-wrap:anywhere]" title={w.path}>
+              <span className={cn('select-all', w.branch ? 'text-foreground' : 'text-dimmer')}>{w.branch ?? 'detached'}</span>
+              <span className="text-muted-foreground"> · {w.linked ? 'worktree' : 'repo'} </span>
+              <span className="text-muted-foreground select-all">{w.display}</span>
+            </span>
+            {w.editorUrl ? (
+              <Button asChild variant="outline" size="sm" className="h-7 shrink-0 rounded-md px-2 text-xs pointer-coarse:hidden">
+                <a href={w.editorUrl} title={`Open ${w.display} in ${editor === 'cursor' ? 'Cursor' : 'VS Code'}`}>
+                  {label}
+                </a>
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

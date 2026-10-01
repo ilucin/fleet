@@ -35,6 +35,9 @@ import { readDelta } from './brief-extract.mjs';
 export const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const HOUR_MS = 60 * 60 * 1000;
 const GIT_TTL_MS = 60 * 1000;
+/** Distinct resource directories looked up for the Worktrees list per GET (cached like the cwd's). */
+const MAX_WORKTREE_DIRS = 20;
+const WORKTREE_DIR_RE = /\/(?:\.claude\/worktrees|\.worktrees|worktrees)\/[^/]/;
 
 // ------------------------------------------------------------------ storage
 
@@ -435,8 +438,36 @@ export function createBriefs({
     return path.isAbsolute(abs) ? path.normalize(abs) : null;
   }
 
+  /**
+   * The git checkouts the session works in: its cwd's first, then those of the files and specs
+   * in Resources (a session often edits a worktree it never cd'd into). Deduped by root, at most
+   * MAX_WORKTREE_DIRS distinct directories looked up. → [{ path (absolute), display, branch, linked }].
+   */
+  async function worktreesOf(brief, absCwd, gi) {
+    const roots = new Map();
+    const add = (g) => {
+      if (g?.toplevel && !roots.has(g.toplevel)) {
+        roots.set(g.toplevel, { path: g.toplevel, display: displayPath(g.toplevel, null, home), branch: g.branch ?? null, linked: Boolean(g.linked ?? g.worktree) });
+      }
+    };
+    add(gi);
+    const dirs = new Set();
+    for (const r of brief.resources) {
+      if (!r.path || (r.kind !== 'File' && r.kind !== 'Spec')) continue;
+      const p = r.path.startsWith('~/') ? path.join(home, r.path.slice(2)) : path.isAbsolute(r.path) ? r.path : absCwd ? path.join(absCwd, r.path) : null;
+      if (p) dirs.add(path.dirname(path.normalize(p)));
+    }
+    for (const dir of [...dirs].slice(0, MAX_WORKTREE_DIRS)) {
+      // Inside a known checkout and not under a worktrees dir of it: the same checkout.
+      const known = [...roots.keys()].some((root) => (dir === root || dir.startsWith(`${root}/`)) && !WORKTREE_DIR_RE.test(dir.slice(root.length)));
+      if (known) continue;
+      if (exists(dir)) add(await gitFor(dir));
+    }
+    return [...roots.values()];
+  }
+
   /** What the API serves for one brief. `editorUrl` is the API layer's (lib/editor.mjs). */
-  function view(id, brief, { exists: had, session = null, absCwd = null, gi = null } = {}) {
+  function view(id, brief, { exists: had, session = null, absCwd = null, gi = null, worktrees = [] } = {}) {
     const resources = brief.resources.map((r) => ({ kind: r.kind, label: r.label, url: r.url, path: r.path, text: r.text, branch: r.branch ?? null, linked: r.linked ?? null }));
     return {
       host: self,
@@ -451,6 +482,7 @@ export function createBriefs({
       },
       absCwd,
       gitRoot: gi?.toplevel ?? null,
+      worktrees,
       updated: brief.meta.updated ?? null,
       editedAt: brief.meta.editedAt ?? null,
       generatedAt: brief.meta.generatedAt ?? null,
@@ -489,7 +521,7 @@ export function createBriefs({
           ({ brief } = await load(id));
         }
       }
-      return view(id, brief, { exists: had, session, absCwd, gi });
+      return view(id, brief, { exists: had, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi) });
     },
 
     /** PUT: a human edit. Deleted resource lines are remembered as dismissed. */
@@ -509,7 +541,7 @@ export function createBriefs({
       const { brief } = await load(id);
       const absCwd = absCwdOf(brief, session);
       const gi = absCwd && exists(absCwd) ? await gitFor(absCwd) : null;
-      return view(id, brief, { exists: true, session, absCwd, gi });
+      return view(id, brief, { exists: true, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi) });
     },
 
     /**

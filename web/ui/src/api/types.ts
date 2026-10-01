@@ -491,6 +491,22 @@ export interface Brief {
    * gitRoot preferred over absCwd. null: no editor, no path, or no ssh alias for that host.
    */
   editorUrl?: string | null
+  /** The git checkouts the session works in (its cwd's first, then those of its files). Older servers omit it. */
+  worktrees?: BriefWorktree[]
+}
+
+/** One checkout in Brief.worktrees. */
+export interface BriefWorktree {
+  /** The checkout root on the session's host, absolute. */
+  path: string
+  /** `path` with `~` for the home dir. */
+  display: string
+  /** null when detached. */
+  branch: string | null
+  /** true = a linked worktree, false = the main checkout. */
+  linked: boolean
+  /** "Open in editor" link for `path` (see Brief.editorUrl); null = no button. */
+  editorUrl?: string | null
 }
 
 /** POST …/brief/regenerate (202). */

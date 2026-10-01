@@ -31,7 +31,8 @@ export function editorUrl(config, host, absPath) {
 }
 
 /**
- * Fill `editor` / `editorUrl` into a GET/PUT brief body (gitRoot preferred over absCwd). A peer
+ * Fill `editor` / `editorUrl` into a GET/PUT brief body (gitRoot preferred over absCwd) and into
+ * each of its `worktrees`. A peer
  * too old to send `absCwd` still has the session's cwd in the frontmatter (`cwd:`), used when
  * it is absolute.
  */
@@ -42,7 +43,9 @@ export function withBriefEditor(body, host, config) {
     const cwd = parseFrontmatter(body.markdown).meta.cwd;
     if (typeof cwd === 'string' && cwd.startsWith('/')) target = cwd;
   }
-  return { ...body, editor: config.editor ?? null, editorUrl: editorUrl(config, host, target) };
+  const out = { ...body, editor: config.editor ?? null, editorUrl: editorUrl(config, host, target) };
+  if (Array.isArray(body.worktrees)) out.worktrees = body.worktrees.map((w) => ({ ...w, editorUrl: editorUrl(config, host, w?.path ?? null) }));
+  return out;
 }
 
 /** Each session row of a fleet host gets `editorUrl` (its cwd; no git lookup — the brief has the root). */

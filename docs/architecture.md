@@ -332,7 +332,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths }` (≤ 200, as written in chat, `:line` allowed) → per path: resolved absolute path, `exists`, `isFile`, size, mtime, `kind` (markdown/text/image/pdf/other); the UI links only existing files |
 | GET | `/api/hosts/:host/sessions/:id/files/raw?path=…[&download=1]` | the file itself, streamed (also through a peer); text/markdown over 5 MB only as a download |
 | POST | `/api/hosts/:host/sessions/:id/files/open` | `{ path }` → opens it with its default app **on that host** (`open` / `xdg-open`; runnable files are revealed in their folder instead) |
-| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
+| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, worktrees, editor, editorUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
 | GET | `/api/hosts/:host/notes/{tree,search,file,raw}` | the notes explorer (`web.notes`): the file list, `?q=` search with snippets + match ranges, `?path=` one note (frontmatter split, encrypted blocks withheld), `?path=` an image; 501 when the host has no `web.notes.root` |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` → a human edit (sets `editedAt`) → the same shape |
 | GET | `/api/hosts/:host/stacks` | `fleet --local stack list --json` → `{ host, stacks: [StackView + editorUrl] }` ([session stacks](#session-stacks); `editorUrl` for `absCwd`, built like briefs' via `lib/editor.mjs`) |
@@ -512,7 +512,9 @@ callsLastHour, maxCallsPerHour, generating, lastRun }`.
 **Open in editor.** GET/PUT brief bodies carry `absCwd` (the session's directory on its host,
 absolute, no `~`), `gitRoot` (the checkout root — repo or linked worktree — containing it, absolute;
 null outside git), `editor` (`web.editor` of the answering server) and `editorUrl`; session rows in
-`/api/fleet` carry `editorUrl` for their cwd. The link targets `gitRoot`, else `absCwd`:
+`/api/fleet` carry `editorUrl` for their cwd. `worktrees` lists the git checkouts the session works
+in — `[{ path, display, branch, linked, editorUrl }]`, the cwd's first, then the checkouts of the
+File / Spec resources (deduped by root) — each with its own `editorUrl`. The link targets `gitRoot`, else `absCwd`:
 `vscode://file/<path>` when the session is on the answering server's own host (`self`), else
 `vscode://vscode-remote/ssh-remote+<hosts.<host>.ssh><path>` (Remote-SSH with **that** server's ssh
 alias for the host); `cursor://…` alike for `web.editor: "cursor"`; `null` when `web.editor` is null,

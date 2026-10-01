@@ -494,7 +494,40 @@ test('briefs: GET serves an empty skeleton, then no-model extraction', async (t)
   const git = live.parsed.resources.find((r) => r.kind === 'Git');
   assert.deepEqual([git.branch, git.linked, git.label], ['fix-login', false, 'fix-login']);
   assert.match(live.continuePrompt, /^Continue the work of session aaaaaaaa-.* on laptop in /);
-  assert.deepEqual(Object.keys(live).sort(), ['absCwd', 'continuePrompt', 'editedAt', 'enabled', 'exists', 'generatedAt', 'generatedThrough', 'generating', 'gitRoot', 'host', 'id', 'markdown', 'parsed', 'updated']);
+  assert.deepEqual(Object.keys(live).sort(), ['absCwd', 'continuePrompt', 'editedAt', 'enabled', 'exists', 'generatedAt', 'generatedThrough', 'generating', 'gitRoot', 'host', 'id', 'markdown', 'parsed', 'updated', 'worktrees']);
+  assert.deepEqual(live.worktrees, [{ path: s.cwd, display: displayPath(s.cwd, null, s.home), branch: 'fix-login', linked: false }]);
+});
+
+test('briefs: worktrees — the cwd checkout first, then those of the files it wrote, deduped', async (t) => {
+  const s = setup(t, { settings: { enabled: false } });
+  const wt = path.join(s.cwd, '.worktrees', 'feat');
+  const other = path.join(s.home, 'Code', 'other');
+  for (const d of [path.join(wt, 'src'), other]) fs.mkdirSync(d, { recursive: true });
+  const calls = [];
+  s.state.git = (dir) => {
+    calls.push(dir);
+    if (dir.startsWith(wt)) return { branch: 'feat', toplevel: wt, linked: true, worktree: wt };
+    if (dir.startsWith(other)) return { branch: null, toplevel: other, linked: false, worktree: null };
+    return { branch: 'main', toplevel: s.cwd, linked: false, worktree: null };
+  };
+  const md = `---\nsession: ${SID}\ncwd: ${s.cwd}\n---\n## Summary\nx\n\n## Resources\n- File: \`src/a.ts\`\n- File: \`.worktrees/feat/src/b.ts\`\n- File: \`.worktrees/feat/src/c.ts\`\n- Spec: \`~/Code/other/SPEC.md\`\n- File: \`~/gone/x.ts\`\n`;
+  const view = await s.svc.put(SID, md);
+  assert.deepEqual(
+    view.worktrees.map((w) => [w.display, w.branch, w.linked]),
+    [
+      [displayPath(s.cwd, null, s.home), 'main', false],
+      [displayPath(wt, null, s.home), 'feat', true],
+      ['~/Code/other', null, false],
+    ],
+  );
+  assert.equal(view.worktrees[1].path, wt);
+  assert.ok(!calls.includes(path.join(s.cwd, 'src')), 'a dir inside a known checkout is not looked up');
+  assert.equal(calls.filter((c) => c === path.join(wt, 'src')).length, 1, 'one lookup per directory');
+
+  const cfg = { self: 'laptop', editor: 'vscode', sshHosts: {} };
+  const body = withBriefEditor(view, 'laptop', cfg);
+  assert.equal(body.worktrees[1].editorUrl, `vscode://file${wt}`);
+  assert.equal(withBriefEditor(view, 'nas', cfg).worktrees[1].editorUrl, null, 'no ssh alias');
 });
 
 test('briefs: buildPrompt caps the fed-back brief; displayPath', () => {
