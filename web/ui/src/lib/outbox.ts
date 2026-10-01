@@ -3,7 +3,7 @@
 //
 // Model: at most ONE message counts down at a time (`pending`). Sending another while one is
 // pending flushes the first right away (→ `queued`) and starts a new window for the second, so
-// Esc / Undo always cancels the most recent message and order is kept. Queued messages are
+// Backspace / Undo always cancels the most recent message and order is kept. Queued messages are
 // POSTed one at a time, oldest first (`sending`), then `sent` (kept until the transcript shows
 // them) or `failed` (inline error, Retry / Edit).
 import type { Message } from '@/api/types'
@@ -99,7 +99,7 @@ export function schedule(
 /** The pending message (at most one). */
 export const pendingItem = (items: OutboxItem[]): OutboxItem | null => items.find((it) => it.state === 'pending') ?? null
 
-/** Esc / Undo: drop the pending message; its text goes back to the composer. */
+/** Backspace / Undo: drop the pending message; its text goes back to the composer. */
 export function cancelPending(items: OutboxItem[]): { items: OutboxItem[]; cancelled: OutboxItem | null } {
   const p = pendingItem(items)
   if (!p) return { items, cancelled: null }
@@ -281,7 +281,7 @@ export class Outbox {
     return id
   }
 
-  /** Esc / Undo: the pending message, removed (null when none). */
+  /** Backspace / Undo: the pending message, removed (null when none). */
   cancel(): OutboxItem | null {
     const { items, cancelled } = cancelPending(this.items)
     this.set(items)

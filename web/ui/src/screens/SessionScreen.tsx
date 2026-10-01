@@ -48,7 +48,7 @@ import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { tailAnchor } from '@/lib/outbox'
 import { findSession, statusMeta, withoutSession } from '@/lib/sessions'
 import { stacksKnown } from '@/lib/stacks'
-import { isPlainEscape, withHint } from '@/lib/shortcuts'
+import { isUndoBackspace, withHint } from '@/lib/shortcuts'
 import { STATUS_TEXT } from '@/lib/styles'
 import { cn } from '@/lib/utils'
 
@@ -342,8 +342,8 @@ export function SessionScreen({
   }
   const retryFailed = (itemId: number) => box.retry(itemId, tailAnchor(chatRef.current?.messages))
 
-  // Esc cancels the pending message before anything else handles Esc (blur, close the pane /
-  // flyout, cancel an edit) — capture phase, only while one counts down, not over a dialog.
+  // Backspace cancels the pending message (not while it edits text: in a non-empty field it
+  // deletes as usual) — capture phase, only while one counts down, not over a dialog.
   const undoRef = useRef(undo)
   useEffect(() => {
     undoRef.current = undo
@@ -351,7 +351,7 @@ export function SessionScreen({
   useEffect(() => {
     if (!hasPending) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e) || e.defaultPrevented) return
+      if (!isUndoBackspace(e, e.target) || e.defaultPrevented) return
       if (document.querySelector('[role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]')) return
       e.preventDefault()
       e.stopPropagation()

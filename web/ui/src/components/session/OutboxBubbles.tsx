@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 
 export interface OutboxBubblesProps {
   items: OutboxItem[]
-  /** Desktop wording ("Esc to cancel"). */
+  /** Desktop wording ("⌫ to cancel"). */
   desktop?: boolean
   onUndo: () => void
   onRetry: (id: number) => void
@@ -57,7 +57,7 @@ function Status({ item, desktop, onUndo, onRetry, onEdit }: Omit<OutboxBubblesPr
         <>
           <Ring item={item} />
           <Countdown item={item} />
-          {desktop ? <span className="text-dimmer">· Esc to cancel</span> : null}
+          {desktop ? <span className="text-dimmer">· ⌫ to cancel</span> : null}
           <button type="button" className={actionClass} onClick={onUndo}>
             <Undo2Icon /> Undo
           </button>
@@ -98,14 +98,14 @@ function Status({ item, desktop, onUndo, onRetry, onEdit }: Omit<OutboxBubblesPr
 
 /**
  * Optimistic user bubbles for messages in the outbox: pending (countdown ring + "Sending in 3s",
- * Esc / Undo), sending…, sent (until the transcript shows the real one), failed (Retry / Edit).
+ * Backspace / Undo), sending…, sent (until the transcript shows the real one), failed (Retry / Edit).
  */
 export function OutboxBubbles({ items, desktop = false, onUndo, onRetry, onEdit, variant = 'chat' }: OutboxBubblesProps) {
   const strip = variant === 'strip'
   const shown = strip ? items.filter((it) => it.state !== 'sent') : items
   const pending = items.find((it) => it.state === 'pending')
   const announce = pending
-    ? `Sending in ${Math.round(((pending.dueAt ?? pending.createdAt) - pending.createdAt) / 1000)} seconds, ${desktop ? 'press Escape' : 'tap Undo'} to cancel`
+    ? `Sending in ${Math.round(((pending.dueAt ?? pending.createdAt) - pending.createdAt) / 1000)} seconds, ${desktop ? 'press Backspace' : 'tap Undo'} to cancel`
     : ''
   const live = (
     <div className="sr-only" aria-live="polite" aria-atomic>

@@ -267,16 +267,17 @@ src/
   two follow-up polls after steering. Keys go out at once (a toast per result).
 - **Send with undo** (`lib/outbox.ts`, `hooks/useOutbox.ts`): a message (typed or a quick reply) never
   blocks the composer — it clears at once and the message shows as a dashed **pending** bubble with a
-  countdown ring (text only with reduced motion), "Sending in 3s", "Esc to cancel" (desktop) and
-  **Undo**; screen readers hear "Sending in 3 seconds, press Escape to cancel" once. Settings → Chat →
+  countdown ring (text only with reduced motion), "Sending in 3s", "⌫ to cancel" (desktop) and
+  **Undo**; screen readers hear "Sending in 3 seconds, press Backspace to cancel" once. Settings → Chat →
   Send delay: Off / 3 s (default) / 5 s (`fleet.sendDelay`); Off still shows the optimistic bubble.
   - One message counts down at a time: sending another flushes the first immediately and starts
-    its own window, so Esc / Undo always cancels the most recent one. POSTs go one at a time, in
+    its own window, so Backspace / Undo always cancels the most recent one. POSTs go one at a time, in
     order, as keepalive fetches.
-  - Esc / Undo puts the text back in the composer — before anything typed since (blank line
-    between), caret at the end, focused. While a message is pending, Esc cancels it before any
-    other Esc behaviour (blur, close the pane / flyout / Settings, cancel an inline edit) — a
-    capture-phase listener; not while a dialog or drawer is open.
+  - Backspace / Undo puts the text back in the composer — before anything typed since (blank
+    line between), caret at the end, focused. While a message is pending, a bare Backspace
+    cancels it unless it edits text: outside a text field or in an empty one (the composer right
+    after a send); in a non-empty field it deletes as usual. A capture-phase listener; not while
+    a dialog or drawer is open. Esc keeps its usual meaning (blur, close the pane / flyout).
   - After the delay: "Sending…", then "Sent" until the next poll brings the real message; the
     optimistic bubble is then dropped. Matching: in order, the first user message after the
     transcript's last user message at send time (or, when that has scrolled out / the chat was

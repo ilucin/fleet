@@ -9,6 +9,7 @@ import {
   isDesktopApp,
   isMacPlatform,
   isPlainEscape,
+  isUndoBackspace,
   isSubmitChord,
   isTypingTarget,
   keyLabel,
@@ -226,4 +227,16 @@ test('isPlainEscape: bare Esc only', () => {
   expect(isPlainEscape({ key: 'Escape', metaKey: true })).toBe(false)
   expect(isPlainEscape({ key: 'Escape', isComposing: true })).toBe(false)
   expect(isPlainEscape({ key: 'Enter' })).toBe(false)
+})
+
+test('isUndoBackspace: bare Backspace outside text fields or in an empty one', () => {
+  const field = (tagName: string, value: string) => ({ tagName, value }) as unknown as EventTarget
+  expect(isUndoBackspace({ key: 'Backspace' }, null)).toBe(true)
+  expect(isUndoBackspace({ key: 'Backspace' }, field('TEXTAREA', ''))).toBe(true)
+  expect(isUndoBackspace({ key: 'Backspace' }, field('TEXTAREA', 'typing'))).toBe(false)
+  expect(isUndoBackspace({ key: 'Backspace' }, field('INPUT', 'x'))).toBe(false)
+  expect(isUndoBackspace({ key: 'Backspace' }, { isContentEditable: true, textContent: 'x' } as unknown as EventTarget)).toBe(false)
+  expect(isUndoBackspace({ key: 'Backspace', metaKey: true }, null)).toBe(false)
+  expect(isUndoBackspace({ key: 'Backspace', isComposing: true }, null)).toBe(false)
+  expect(isUndoBackspace({ key: 'Escape' }, null)).toBe(false)
 })

@@ -187,9 +187,21 @@ export function isSubmitChord(e: KeyLike): boolean {
   return e.key === 'Enter' && !!(e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && !e.isComposing
 }
 
-/** A bare Esc (no modifiers, not composing) — e.g. cancel a pending send. */
+/** A bare Esc (no modifiers, not composing). */
 export function isPlainEscape(e: KeyLike): boolean {
   return e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing
+}
+
+/**
+ * Backspace that cancels a pending message: unmodified, and not one that edits text — outside a
+ * text field, or in an empty one (the composer right after a send).
+ */
+export function isUndoBackspace(e: KeyLike, target: EventTarget | null): boolean {
+  if (e.key !== 'Backspace' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing) return false
+  const el = target as { tagName?: string; value?: string; isContentEditable?: boolean; textContent?: string | null } | null
+  if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA') return !el.value
+  if (el?.isContentEditable) return !el.textContent
+  return true
 }
 
 export interface ShortcutHelp {
@@ -221,7 +233,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
       { action: 'close', label: 'Close session (press twice; the open one, else the cursor row)' },
       { keys: [['Enter'], ['mod', 'Enter']], label: 'Send (in the composer)' },
       { keys: [['shift', 'Enter']], label: 'New line' },
-      { keys: [['Esc']], label: 'Cancel a pending send (back into the composer)' },
+      { keys: [['Backspace']], label: 'Cancel a pending send (back into the composer)' },
       { keys: [['Esc']], label: 'Leave the field / close the session pane' },
     ],
   },
