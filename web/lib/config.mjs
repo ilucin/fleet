@@ -3,7 +3,7 @@
 // Path: $FLEET_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/fleet/config.json.
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
-//     web: { port, bind, dir, ui, editor, quickReplies, models: [ { id, label } ],
+//     web: { port, bind, dir, ui, editor, editorSsh, quickReplies, models: [ { id, label } ],
 //            autoName: { enabled, intervalMinutes },
 //            grouping: { enabled, intervalMinutes }, uploads: { dir, maxMB, retentionDays },
 //            briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, … },
@@ -191,7 +191,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
 
 /**
  * Turn the raw shared config into what the server needs:
- *   { self, port, bind, peers: { name: url }, sshHosts: { name: ssh }, editor, hosts: [names], fleetBin, tmux, claude,
+ *   { self, port, bind, peers: { name: url }, sshHosts: { name: ssh }, hostAddrs: { name: hostname }, editor, editorSsh, hosts: [names], fleetBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
@@ -214,8 +214,16 @@ export function normalizeConfig(
   if (!isObject(hosts)) throw new Error('config.hosts must be an object of name -> { ssh, web }');
   const peers = {};
   const sshHosts = {}; // name → ssh destination (the "Open in editor" Remote-SSH links)
+  const hostAddrs = {}; // name → the hostname of its web url (which machine a browser is on)
   for (const [name, host] of Object.entries(hosts)) {
     if (isObject(host) && typeof host.ssh === 'string' && host.ssh.trim()) sshHosts[name] = host.ssh.trim();
+    if (isObject(host) && typeof host.web === 'string') {
+      try {
+        hostAddrs[name] = new URL(host.web).hostname.replace(/^\[|\]$/g, '');
+      } catch {
+        // validated below for peers; a bad url on self just isn't matched
+      }
+    }
     if (name === self.trim()) continue; // never peer with yourself
     if (!isObject(host)) throw new Error(`config.hosts.${name} must be an object`);
     if (host.web == null) continue; // host without a web server: not a peer
@@ -245,6 +253,8 @@ export function normalizeConfig(
     if (web.editor !== null && !EDITORS.includes(web.editor)) throw new Error(`config.web.editor must be ${EDITORS.map((e) => `"${e}"`).join(', ')} or null: ${web.editor}`);
     editor = web.editor;
   }
+  // web.editorSsh: the ssh destination other machines use for this one in editor links.
+  const editorSsh = typeof web.editorSsh === 'string' && web.editorSsh.trim() ? web.editorSsh.trim() : null;
 
   const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
   const uiDir = resolveUiDir(uiRaw, { webRoot, home });
@@ -429,7 +439,9 @@ export function normalizeConfig(
     bind,
     peers,
     sshHosts,
+    hostAddrs,
     editor,
+    editorSsh,
     hosts: [self.trim(), ...Object.keys(peers)],
     fleetBin: resolveFleetBin(raw, { env, home, fsImpl }),
     tmux: resolveBinary('tmux', { explicit: env.FLEET_TMUX || raw.tmux, env, home, fsImpl }),

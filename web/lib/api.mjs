@@ -14,7 +14,7 @@ import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 import { DEFAULT_MODELS } from './config.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
-import { editorUrl, withBriefEditor, withSessionEditors } from './editor.mjs';
+import { editorUrl, editorViewer, withBriefEditor, withSessionEditors } from './editor.mjs';
 import {
   STACK_BODY_LIMIT,
   STACK_ID_RE,
@@ -153,8 +153,8 @@ export function createApi({
     const peerHosts = await Promise.all(
       peerNames.map((n) => fetchPeerHost(n, config.peers[n], { timeoutMs: peerFleetTimeoutMs })),
     );
-    // Editor links are this server's to build: its `web.editor` and its ssh aliases for peers.
-    return { self: config.self, hosts: [selfHost, ...peerHosts].map((h) => withSessionEditors(h, config)) };
+    // Editor links are added per request (handleFleet): they depend on where the browser is.
+    return { self: config.self, hosts: [selfHost, ...peerHosts] };
   }
 
   // The merged fleet, served stale-while-revalidate so a page load never waits on
@@ -179,14 +179,18 @@ export function createApi({
     });
   }
 
-  async function handleFleet(url) {
+  async function handleFleet(req, url) {
+    // Editor links are this server's to build: its `web.editor` and its ssh aliases, for the
+    // machine the browser is on.
+    const ec = editorViewer(config, req);
+    const withEditors = (body) => ({ ...body, hosts: body.hosts.map((h) => withSessionEditors(h, ec)) });
     if (url.searchParams.get('local') === '1') {
       // Peers poll this: the local host (2s TTL cache), never the merged snapshot.
-      const selfHost = withSessionEditors({ ...(await fleet.localHost()), spawnDirs: config.spawnDirs, ...notesInfo() }, config);
-      return { status: 200, body: { self: config.self, hosts: [selfHost] } };
+      const selfHost = { ...(await fleet.localHost()), spawnDirs: config.spawnDirs, ...notesInfo() };
+      return { status: 200, body: withEditors({ self: config.self, hosts: [selfHost] }) };
     }
-    if (snapshot) return { status: 200, body: await snapshot.get() };
-    return { status: 200, body: { ...(await buildFleet()), snapshotAt: Date.now() } };
+    if (snapshot) return { status: 200, body: withEditors(await snapshot.get()) };
+    return { status: 200, body: withEditors({ ...(await buildFleet()), snapshotAt: Date.now() }) };
   }
 
   async function resolveLocalSession(id) {
@@ -460,7 +464,7 @@ export function createApi({
 
     if (url.pathname === '/api/fleet') {
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
-      return handleFleet(url);
+      return handleFleet(req, url);
     }
 
     if (url.pathname === '/api/groups') {
@@ -577,7 +581,7 @@ export function createApi({
       });
       // The serving host knows only its absolute paths; the editor link (local folder vs
       // Remote-SSH with our alias for that host) is built here, for proxied bodies too.
-      if (!regen && r.status === 200) return { ...r, body: withBriefEditor(r.body, host, config) };
+      if (!regen && r.status === 200) return { ...r, body: withBriefEditor(r.body, host, editorViewer(config, req)) };
       return r;
     }
 
@@ -587,7 +591,7 @@ export function createApi({
       if (req.method !== (sync ? 'POST' : 'GET')) throw new HttpError('method not allowed', 405);
       const host = decodeURIComponent(rawHost);
       const r = await forHost({ req, url, host, local: () => localStacks({ action: sync ? 'sync' : 'list', req }) });
-      return r.status === 200 ? { ...r, body: withStacksEditor(r.body, host, config) } : r;
+      return r.status === 200 ? { ...r, body: withStacksEditor(r.body, host, editorViewer(config, req)) } : r;
     }
 
     const sk = STACK_ROUTE.exec(url.pathname);
@@ -609,8 +613,8 @@ export function createApi({
         local: () => (spawn ? localStackSpawn({ req, stackId: id }) : localStacks({ action, id, req })),
       });
       if (r.status !== 200 || action === 'DELETE') return r;
-      if (spawn) return { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, config) } };
-      return { ...r, body: withStackEditor(r.body, host, config) };
+      if (spawn) return { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, editorViewer(config, req)) } };
+      return { ...r, body: withStackEditor(r.body, host, editorViewer(config, req)) };
     }
 
     const ssp = SESSION_STACK_SPAWN_ROUTE.exec(url.pathname);
@@ -619,7 +623,7 @@ export function createApi({
       const host = decodeURIComponent(ssp[1]);
       const id = decodeURIComponent(ssp[2]);
       const r = await forHost({ req, url, host, timeoutMs: STACK_SPAWN_PROXY_MS, local: () => localStackSpawn({ req, sessionId: id }) });
-      return r.status === 200 ? { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, config) } } : r;
+      return r.status === 200 ? { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, editorViewer(config, req)) } } : r;
     }
 
     const n = NOTES_ROUTE.exec(url.pathname);
@@ -630,8 +634,8 @@ export function createApi({
       const r = await forHost({ req, url, host, streamResponse: action === 'raw', local: () => localNotes(action, url) });
       // Editor links are built by the server the browser asked (its `web.editor` and ssh aliases).
       if (r.status === 200 && r.body && !r.stream) {
-        if (action === 'tree') return { ...r, body: { ...r.body, editorUrl: editorUrl(config, host, r.body.rootAbs) } };
-        if (action === 'file') return { ...r, body: { ...r.body, editorUrl: editorUrl(config, host, r.body.abs) } };
+        if (action === 'tree') return { ...r, body: { ...r.body, editorUrl: editorUrl(editorViewer(config, req), host, r.body.rootAbs) } };
+        if (action === 'file') return { ...r, body: { ...r.body, editorUrl: editorUrl(editorViewer(config, req), host, r.body.abs) } };
       }
       return r;
     }

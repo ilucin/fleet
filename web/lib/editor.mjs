@@ -1,9 +1,13 @@
 // "Open in editor" links (`web.editor`: "vscode" | "cursor" | null). The browser follows them,
-// so they are built for the machine the browser most likely runs on — the one whose server it
-// asked: a session on this server's own host opens as a local folder (`vscode://file/<path>`),
-// a session on another host through Remote-SSH with that host's ssh alias from this server's
-// config (`vscode://vscode-remote/ssh-remote+<alias><path>`). A proxied response carries only
-// the peer's absolute paths; the server that received the request fills in the link.
+// so they are built for the machine the browser runs on (editorViewer: loopback = this host, a
+// peer's web address = that peer): a session on that machine opens as a local folder
+// (`vscode://file/<path>`), a session on another host through Remote-SSH with that host's ssh
+// alias from this server's config (`vscode://vscode-remote/ssh-remote+<alias><path>`) — for this
+// server's own host `web.editorSsh`, else `<user>@<the address the browser used>`. A proxied
+// response carries only the peer's absolute paths; the server that received the request fills
+// in the link.
+
+import os from 'node:os';
 
 import { parseFrontmatter } from './brief-format.mjs';
 
@@ -28,6 +32,43 @@ export function editorUrl(config, host, absPath) {
   const alias = config.sshHosts?.[host] ?? null;
   if (typeof alias !== 'string' || !SSH_ALIAS_RE.test(alias)) return null;
   return `${editor}://vscode-remote/ssh-remote+${alias}${encodePath(absPath)}`;
+}
+
+const LOOPBACK_RE = /^(?:127\.\d+\.\d+\.\d+|::1)$/;
+
+/**
+ * The config to build editor links with for this request: `self` becomes the host the browser is
+ * on (null when it is none of ours — a phone), and this server's host gets an ssh destination
+ * when the browser is elsewhere. Without a request (or a socket address): `config` as is.
+ */
+export function editorViewer(config, req, { user = safeUser() } = {}) {
+  const addr = String(req?.socket?.remoteAddress ?? '').replace(/^::ffff:/, '');
+  if (!config || !addr || LOOPBACK_RE.test(addr)) return config;
+  const viewer = Object.entries(config.hostAddrs ?? {}).find(([, a]) => a === addr)?.[0] ?? null;
+  if (viewer === config.self) return config;
+  let selfSsh = config.sshHosts?.[config.self] ?? config.editorSsh ?? null;
+  if (!selfSsh && user) {
+    const hostname = hostnameOf(req?.headers?.host);
+    if (hostname) selfSsh = `${user}@${hostname}`;
+  }
+  return { ...config, self: viewer, sshHosts: { ...config.sshHosts, ...(selfSsh ? { [config.self]: selfSsh } : {}) } };
+}
+
+function hostnameOf(hostHeader) {
+  if (typeof hostHeader !== 'string' || !hostHeader) return null;
+  try {
+    return new URL(`http://${hostHeader}`).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeUser() {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return null;
+  }
 }
 
 /**

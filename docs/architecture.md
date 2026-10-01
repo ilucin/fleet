@@ -119,6 +119,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
 | `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: the scheme of the "Open in editor" link the API puts on briefs and session rows (`editorUrl`, see [Session briefs](#session-briefs)); `null` = no link (the UI hides the button) |
+| `web.editorSsh` | ssh destination other machines use for **this** host in those links (e.g. the alias in the laptop's `~/.ssh/config`); default `<user>@<the hostname the browser used>` |
 | `web.ui` | static UI directory to serve instead of the bundled one; unset → `web/ui/dist`. The old `"classic"` value (the removed vanilla UI) is ignored |
 | `web.quickReplies` | composer chips: strings or `{ label, text }` |
 | `web.models` | New session model picker: `[{ id, label }]` or bare ids (`""` = Claude's default, no `--model`); default Default, Fable 5.1, Opus 5.5, Sonnet 5, Haiku 4.5 |
@@ -515,13 +516,16 @@ null outside git), `editor` (`web.editor` of the answering server) and `editorUr
 `/api/fleet` carry `editorUrl` for their cwd. `worktrees` lists the git checkouts the session works
 in — `[{ path, display, branch, linked, editorUrl }]`, the cwd's first, then the checkouts of the
 File / Spec resources (deduped by root) — each with its own `editorUrl`. The link targets `gitRoot`, else `absCwd`:
-`vscode://file/<path>` when the session is on the answering server's own host (`self`), else
+`vscode://file/<path>` when the session is on the machine the browser runs on, else
 `vscode://vscode-remote/ssh-remote+<hosts.<host>.ssh><path>` (Remote-SSH with **that** server's ssh
-alias for the host); `cursor://…` alike for `web.editor: "cursor"`; `null` when `web.editor` is null,
+alias for the host). The browser's machine is read from the request: a loopback address is the
+answering server's own host, an address equal to a host's `web` url hostname is that host, anything
+else (a phone) is none of them. For a session on the answering server's own host seen from another
+machine the ssh destination is `web.editorSsh`, else `<server user>@<the hostname the browser
+used>`. `cursor://…` alike for `web.editor: "cursor"`; `null` when `web.editor` is null,
 there is no absolute path, or the host has no usable `ssh` alias. A proxied request is answered by
 the peer (which knows only its own absolute paths) and the server that received it fills in
-`editor` / `editorUrl` from its own config — so the link is built for the machine whose server
-the browser asked, which is assumed to be the machine the browser (and the editor) runs on.
+`editor` / `editorUrl` from its own config and the request's address.
 `fleet brief <target> --open` does the same from the CLI: `code <path>` here, `code --remote
 ssh-remote+<ssh dest> <path>` for a session on another host (`cursor` with `web.editor: "cursor"`).
 

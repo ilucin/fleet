@@ -27,7 +27,7 @@ import {
 import { createBriefExtractor, extractUrls, readDelta } from '../lib/brief-extract.mjs';
 import { buildPrompt, createBriefStore, createBriefs, createClaudeAsk, displayPath, gitInfo } from '../lib/briefs.mjs';
 import { normalizeConfig, DEFAULT_BRIEFS, briefsDir } from '../lib/config.mjs';
-import { editorUrl, withBriefEditor } from '../lib/editor.mjs';
+import { editorUrl, editorViewer, withBriefEditor } from '../lib/editor.mjs';
 import { run } from '../lib/run.mjs';
 import { createApi } from '../lib/api.mjs';
 import { createHttpServer } from '../lib/app.mjs';
@@ -791,6 +791,25 @@ test('briefs: legacy Branch / Worktree auto lines migrate to one Git line on the
 });
 
 // ------------------------------------------------------------------ editor links
+
+test('editor: links are built for the machine the browser is on', () => {
+  const cfg = { self: 'workstation', editor: 'vscode', sshHosts: { laptop: 'lt' }, hostAddrs: { laptop: '100.0.0.1', workstation: '100.0.0.2' }, editorSsh: null };
+  const req = (addr, host = '100.0.0.2:7777') => ({ socket: { remoteAddress: addr }, headers: { host } });
+  const url = (r, host, p = '/w/p') => editorUrl(editorViewer(cfg, r, { user: 'me' }), host, p);
+  // On the server's own machine (loopback, or its own tailnet address): local folders.
+  assert.equal(url(req('127.0.0.1'), 'workstation'), 'vscode://file/w/p');
+  assert.equal(url(req('::ffff:100.0.0.2'), 'workstation'), 'vscode://file/w/p');
+  assert.equal(url(req('::1'), 'laptop'), 'vscode://vscode-remote/ssh-remote+lt/w/p');
+  // From the laptop: its own sessions are local, the server's go over ssh to the address it used.
+  assert.equal(url(req('100.0.0.1'), 'laptop'), 'vscode://file/w/p');
+  assert.equal(url(req('::ffff:100.0.0.1'), 'workstation'), 'vscode://vscode-remote/ssh-remote+me@100.0.0.2/w/p');
+  // web.editorSsh wins over the guess; an unknown machine (a phone) gets ssh links for all.
+  assert.equal(editorUrl(editorViewer({ ...cfg, editorSsh: 'ws' }, req('100.0.0.1')), 'workstation', '/p'), 'vscode://vscode-remote/ssh-remote+ws/p');
+  assert.equal(url(req('100.0.0.9'), 'laptop'), 'vscode://vscode-remote/ssh-remote+lt/w/p');
+  assert.equal(url(req('100.0.0.9', '[fd00::1]:7777'), 'workstation'), null, 'an IPv6 literal is not a usable destination');
+  // No request: the config as is.
+  assert.equal(editorViewer(cfg, null), cfg);
+});
 
 test('editor: local folder vs Remote-SSH, cursor, off, and unusable input', () => {
   const cfg = { self: 'laptop', editor: 'vscode', sshHosts: { workstation: 'workstation', odd: 'bad alias; rm' } };
