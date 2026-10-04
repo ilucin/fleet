@@ -57,6 +57,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <!-- Attach opens an iTerm tab through AppleScript. -->
+  <key>NSAppleEventsUsageDescription</key><string>Fleet opens iTerm tabs attached to your tmux sessions.</string>
   <!-- The Fleet server is plain http on the tailnet (100.x.y.z), which ATS would block. -->
   <key>NSAppTransportSecurity</key>
   <dict>

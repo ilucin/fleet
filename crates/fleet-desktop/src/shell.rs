@@ -1,6 +1,7 @@
 //! The window chrome: no macOS title bar, the traffic lights overlaid on the
 //! page's own top bar. The page learns it is inside the app from an
-//! initialization script (`data-shell="desktop"` + CSS variables), not IPC.
+//! initialization script (`data-shell="desktop"`, `data-attach="iterm"` when it opens
+//! `fleet://attach` links, + CSS variables), not IPC.
 
 use tauri::Url;
 
@@ -22,6 +23,7 @@ pub fn script(fullscreen: bool) -> String {
     format!(
         "(function(){{var d=document.documentElement;if(!d)return;\
 d.dataset.shell='desktop';d.classList.add('shell-desktop');\
+d.dataset.attach='iterm';\
 d.dataset.fullscreen='{fullscreen}';\
 d.style.setProperty('--titlebar-inset-left','{inset}px');\
 d.style.setProperty('--titlebar-height','{TITLEBAR_HEIGHT_PX}px');}})();"
@@ -56,6 +58,7 @@ mod tests {
         let s = script(false);
         assert!(s.contains("d.dataset.shell='desktop'"));
         assert!(s.contains("classList.add('shell-desktop')"));
+        assert!(s.contains("d.dataset.attach='iterm'"));
         assert!(s.contains("'--titlebar-inset-left','88px'"));
         assert!(s.contains("'--titlebar-height','56px'"));
         assert!(s.contains("fullscreen='false'"));

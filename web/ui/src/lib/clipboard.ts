@@ -1,4 +1,5 @@
 // Copying text, and the `fleet enter` command that attaches to a session's tmux session.
+// Fleet.app can also run it: a `fleet://attach` link opens an iTerm tab on this Mac.
 
 import { toast } from 'sonner'
 
@@ -20,6 +21,17 @@ export function attachCommand(host: string, tmuxSession: string): string {
 export function sessionAttachCommand(s: Pick<Session, 'host' | 'backend' | 'tmux_session'> | null | undefined): string | null {
   if (!s || s.backend !== 'tmux' || !s.tmux_session) return null
   return attachCommand(s.host, s.tmux_session)
+}
+
+/** The `fleet://attach` link Fleet.app turns into an iTerm tab; null where the attach command is. */
+export function sessionAttachLink(s: Pick<Session, 'host' | 'backend' | 'tmux_session'> | null | undefined): string | null {
+  if (!s || s.backend !== 'tmux' || !s.tmux_session) return null
+  return `fleet://attach?${new URLSearchParams({ host: s.host, session: s.tmux_session })}`
+}
+
+/** Inside a Fleet.app that opens `fleet://attach` links (its initialization script sets `data-attach`). */
+export function canAttachInApp(doc: { documentElement?: { dataset?: Record<string, string | undefined> } | null } | undefined = globalThis.document): boolean {
+  return doc?.documentElement?.dataset?.attach === 'iterm'
 }
 
 /**

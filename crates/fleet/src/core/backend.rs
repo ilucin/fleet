@@ -511,26 +511,21 @@ pub fn launch_command(dir: &str, prompt: Prompt, name: Option<&str>, launcher: &
     format!("cd {} && {}", shq(dir), run_command(prompt, name, launcher))
 }
 
-/// Spawn a fresh session and return a human description of where it landed.
-pub fn spawn(
-    backend: Backend,
-    dir: &str,
-    prompt: Prompt,
-    name: Option<&str>,
-    tmux_session: Option<&str>,
-    window: bool,
-    launcher: &str,
-) -> Result<String> {
-    let line = launch_command(dir, prompt, name, launcher);
-    match backend {
-        Backend::Iterm => {
-            // A fresh tab's shell is still sourcing the login profile (which on
-            // this stack loads secrets), so a single `write text` — text plus its
-            // implicit newline in one chunk — can land before the prompt is ready
-            // and never submit. Type without a newline, let the shell settle, then
-            // send a bare Enter, the same reliable two-write dance `send` uses.
-            osa(
-                r#"on run argv
+/// The shell line that attaches to a host's tmux session: `fleet -H <host> enter <session>`.
+pub fn attach_command(host: &str, tmux_session: &str) -> String {
+    format!("fleet -H {} enter -- {}", shq(host), shq(tmux_session))
+}
+
+/// Open a new iTerm tab (a window with `window`, or when none is open) and run `line` in it.
+pub fn iterm_run(line: &str, window: bool) -> Result<()> {
+    deny_fixture()?;
+    // A fresh tab's shell is still sourcing the login profile (which on
+    // this stack loads secrets), so a single `write text` — text plus its
+    // implicit newline in one chunk — can land before the prompt is ready
+    // and never submit. Type without a newline, let the shell settle, then
+    // send a bare Enter, the same reliable two-write dance `send` uses.
+    osa(
+        r#"on run argv
   set theCmd to item 1 of argv
   set makeWindow to (item 2 of argv is "1")
   tell application "iTerm2"
@@ -548,8 +543,25 @@ pub fn spawn(
     end tell
   end tell
 end run"#,
-                &[&line, if window { "1" } else { "0" }],
-            )?;
+        &[line, if window { "1" } else { "0" }],
+    )?;
+    Ok(())
+}
+
+/// Spawn a fresh session and return a human description of where it landed.
+pub fn spawn(
+    backend: Backend,
+    dir: &str,
+    prompt: Prompt,
+    name: Option<&str>,
+    tmux_session: Option<&str>,
+    window: bool,
+    launcher: &str,
+) -> Result<String> {
+    let line = launch_command(dir, prompt, name, launcher);
+    match backend {
+        Backend::Iterm => {
+            iterm_run(&line, window)?;
             Ok(format!(
                 "spawned iTerm {}",
                 if window { "window" } else { "tab" }
@@ -649,6 +661,18 @@ fn tmux_spawn_args(session: &str, dir: &str, exists: bool) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attach_command_quotes_both_words() {
+        assert_eq!(
+            attach_command("workstation", "api"),
+            "fleet -H 'workstation' enter -- 'api'"
+        );
+        assert_eq!(
+            attach_command("laptop", "it's"),
+            r"fleet -H 'laptop' enter -- 'it'\''s'"
+        );
+    }
 
     #[test]
     fn tmux_spawn_targets_the_session_exactly() {

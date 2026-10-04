@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { attachCommand, sessionAttachCommand, shellQuote } from './clipboard'
+import { attachCommand, canAttachInApp, sessionAttachCommand, sessionAttachLink, shellQuote } from './clipboard'
 
 describe('shellQuote', () => {
   test('safe words stay plain', () => {
@@ -31,5 +31,21 @@ describe('sessionAttachCommand', () => {
     expect(sessionAttachCommand({ host: 'laptop', backend: 'iterm', tmux_session: null })).toBeNull()
     expect(sessionAttachCommand({ host: 'laptop', backend: 'tmux', tmux_session: '' })).toBeNull()
     expect(sessionAttachCommand(null)).toBeNull()
+  })
+})
+
+describe('sessionAttachLink', () => {
+  test('encodes host and tmux session for tmux sessions only', () => {
+    expect(sessionAttachLink({ host: 'workstation', backend: 'tmux', tmux_session: 'a b&c' })).toBe('fleet://attach?host=workstation&session=a+b%26c')
+    expect(sessionAttachLink({ host: 'laptop', backend: 'iterm', tmux_session: null })).toBeNull()
+    expect(sessionAttachLink(null)).toBeNull()
+  })
+})
+
+describe('canAttachInApp', () => {
+  test('reads data-attach', () => {
+    expect(canAttachInApp({ documentElement: { dataset: { shell: 'desktop', attach: 'iterm' } } })).toBe(true)
+    expect(canAttachInApp({ documentElement: { dataset: { shell: 'desktop' } } })).toBe(false)
+    expect(canAttachInApp(undefined)).toBe(false)
   })
 })

@@ -12,7 +12,29 @@ pub enum Action {
     Allow,
     /// Hand it to the OS: the default browser for http(s), the registered app otherwise.
     Open,
+    /// `fleet://attach?host=<h>&session=<tmux session>`: open an iTerm tab attached to it.
+    Attach {
+        host: String,
+        session: String,
+    },
     Deny,
+}
+
+/// The app's own `fleet://` links: only `attach`, with a host and a session.
+fn fleet_link(url: &Url) -> Action {
+    if url.host_str() != Some("attach") {
+        return Action::Deny;
+    }
+    let q = |k: &str| {
+        url.query_pairs()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.into_owned())
+            .filter(|v| !v.is_empty())
+    };
+    match (q("host"), q("session")) {
+        (Some(host), Some(session)) => Action::Attach { host, session },
+        _ => Action::Deny,
+    }
 }
 
 fn same_origin(a: &Url, b: &Url) -> bool {
@@ -30,6 +52,7 @@ pub fn navigation(url: &Url, server: &Url) -> Action {
         "http" | "https" if same_origin(url, server) => Action::Allow,
         "http" | "https" => Action::Open,
         s if OS_SCHEMES.contains(&s) => Action::Open,
+        "fleet" => fleet_link(url),
         _ => Action::Deny,
     }
 }
@@ -105,5 +128,29 @@ mod tests {
         assert_eq!(new_window(&u("https://example.com/")), Action::Open);
         assert_eq!(new_window(&u("vscode://file/tmp")), Action::Open);
         assert_eq!(new_window(&u("file:///tmp")), Action::Deny);
+    }
+
+    #[test]
+    fn fleet_attach_links_carry_host_and_session() {
+        let server = u("http://127.0.0.1:7777/");
+        assert_eq!(
+            navigation(&u("fleet://attach?host=workstation&session=a%20b"), &server),
+            Action::Attach {
+                host: "workstation".into(),
+                session: "a b".into()
+            }
+        );
+        let deny = [
+            "fleet://attach?host=workstation",
+            "fleet://attach?host=&session=x",
+            "fleet://run?host=h&session=x",
+        ];
+        for d in deny {
+            assert_eq!(navigation(&u(d), &server), Action::Deny, "{d}");
+        }
+        assert_eq!(
+            new_window(&u("fleet://attach?host=h&session=x")),
+            Action::Deny
+        );
     }
 }

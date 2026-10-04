@@ -154,6 +154,17 @@ fn open_external(target: &str) {
     }
 }
 
+/// Open an iTerm tab running `fleet -H <host> enter <session>` (off the UI thread:
+/// the AppleScript waits for the new tab's shell).
+fn attach(host: &str, session: &str) {
+    let line = fleet::core::backend::attach_command(host, session);
+    std::thread::spawn(move || {
+        if let Err(e) = fleet::core::backend::iterm_run(&line, false) {
+            eprintln!("fleet-desktop: attach ({line}): {e}");
+        }
+    });
+}
+
 fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let item =
         |id: &str, label: &str, accel: &str| MenuItem::with_id(app, id, label, true, Some(accel));
@@ -285,6 +296,10 @@ fn build_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
             Action::Allow => true,
             Action::Open => {
                 open_external(url.as_str());
+                false
+            }
+            Action::Attach { host, session } => {
+                attach(&host, &session);
                 false
             }
             Action::Deny => false,

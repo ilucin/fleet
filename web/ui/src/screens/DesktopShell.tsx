@@ -45,7 +45,7 @@ import { useSessionList } from '@/hooks/useSessionList'
 import { useTheme } from '@/hooks/useTheme'
 import { openTitleEditor, startEditing, useSessionTitle } from '@/hooks/useTitles'
 import { editorLabel } from '@/lib/brief'
-import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
+import { canAttachInApp, copyWithToast, sessionAttachCommand, sessionAttachLink } from '@/lib/clipboard'
 import { boardOrder } from '@/lib/groups'
 import { notesHref, parseNotesLocation } from '@/lib/notes'
 import { PALETTES } from '@/lib/palettes'
@@ -391,6 +391,7 @@ export function DesktopShell() {
   // --- palette actions -----------------------------------------------------------
   const paletteSessions = useMemo(() => allSessions(fleet).sort(byLastActivity), [fleet])
   const attachCmd = sessionAttachCommand(selectedSession)
+  const attachLink = canAttachInApp() ? sessionAttachLink(selectedSession) : null
   const editorUrl = selectedSession?.editorUrl ?? null
   const editorText = editorLabel(null, editorUrl)
   // ⌘K jumps to notes too: the first notes host's tree, fetched while the palette is open.
@@ -443,6 +444,9 @@ export function DesktopShell() {
           : [{ id: 'sidebar', label: sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar', icon: <PanelLeftIcon />, shortcut: shortcutHint('sidebar'), run: toggleSidebar }]),
         ...(selectedSession && selectedKey
           ? [{ id: 'rename', label: 'Rename session…', icon: <PencilIcon />, shortcut: shortcutHint('rename'), keywords: ['title', 'name'], run: () => startEditing('header', selectedKey) }]
+          : []),
+        ...(attachLink
+          ? [{ id: 'attach', label: 'Attach in iTerm', icon: <SquareTerminalIcon />, keywords: ['tmux', 'terminal', 'enter'], run: () => window.location.assign(attachLink) }]
           : []),
         ...(attachCmd
           ? [{ id: 'copy-attach', label: 'Copy attach command', icon: <CopyIcon />, keywords: ['tmux', 'terminal', 'enter', attachCmd], run: () => void copyWithToast(attachCmd) }]

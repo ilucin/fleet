@@ -22,7 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { autoNameSummary, autoNameToast } from '@/lib/autoname'
 import { editorLabel } from '@/lib/brief'
-import { copyWithToast, sessionAttachCommand } from '@/lib/clipboard'
+import { canAttachInApp, copyWithToast, sessionAttachCommand, sessionAttachLink } from '@/lib/clipboard'
 import type { DetailMode } from '@/lib/chat'
 import { ctxLevel, ctxSummary, relTime, shortCwd } from '@/lib/format'
 import { withHint } from '@/lib/shortcuts'
@@ -186,6 +186,7 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
   const s = p.session
   const { title } = useSessionTitle(s, `${p.host}/${p.id}`)
   const attachCmd = sessionAttachCommand(s)
+  const attachLink = canAttachInApp() ? sessionAttachLink(s) : null
   const lastRunHint = lastRun?.at
     ? `last run ${relTime(lastRun.at)} ago · ${autoNameSummary(lastRun)}`
     : autoName
@@ -297,11 +298,24 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
             ) : null}
             {s ? (
               <div className="py-1.5">
-                <Row label="Attach command" hint={attachCmd ? 'Run in a terminal on any fleet host' : 'Only for tmux sessions — this one is an iTerm tab'}>
-                  <Button variant="outline" className="h-9 px-3" disabled={!attachCmd} aria-label="Copy attach command" onClick={() => attachCmd && void copyWithToast(attachCmd)}>
-                    <CopyIcon />
-                    Copy
-                  </Button>
+                <Row
+                  label={attachLink ? 'Attach' : 'Attach command'}
+                  hint={attachCmd ? (attachLink ? 'Opens an iTerm tab attached to its tmux session' : 'Run in a terminal on any fleet host') : 'Only for tmux sessions — this one is an iTerm tab'}
+                >
+                  <div className="flex gap-1.5">
+                    <Button variant={attachLink ? 'ghost' : 'outline'} className="h-9 px-3" disabled={!attachCmd} aria-label="Copy attach command" title="Copy attach command" onClick={() => attachCmd && void copyWithToast(attachCmd)}>
+                      <CopyIcon />
+                      Copy
+                    </Button>
+                    {attachLink ? (
+                      <Button asChild className="h-9 px-3">
+                        <a href={attachLink} title={attachCmd ?? undefined}>
+                          <SquareTerminalIcon />
+                          Attach
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
                 </Row>
                 {attachCmd ? (
                   <code className="block rounded-md bg-muted px-2.5 py-2 font-mono text-xs break-all text-muted-foreground select-all">{attachCmd}</code>
