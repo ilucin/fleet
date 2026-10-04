@@ -724,8 +724,15 @@ pub fn add_member(stack: &mut Stack, m: Member) -> bool {
 
 /// Reconcile one stack's members with the live `rows`: gone → `closed = now` (once), live →
 /// `name` refreshed from the display title (and re-opened if it had been marked closed — a
-/// resumed session). → whether anything changed.
-pub fn sync_stack(stack: &mut Stack, rows: &[Session], now: &str, paths: &Paths) -> bool {
+/// resumed session). A `dormant` one (left by a reboot, waiting for `fleet restore`) is
+/// neither: it stays as it was. → whether anything changed.
+pub fn sync_stack(
+    stack: &mut Stack,
+    rows: &[Session],
+    dormant: &HashSet<String>,
+    now: &str,
+    paths: &Paths,
+) -> bool {
     let live: HashMap<&str, &Session> = rows
         .iter()
         .filter_map(|r| r.session_id.as_deref().map(|id| (id, r)))
@@ -748,6 +755,7 @@ pub fn sync_stack(stack: &mut Stack, rows: &[Session], now: &str, paths: &Paths)
                         .filter(|t| !t.is_empty());
                 }
             }
+            None if dormant.contains(&m.session) => {}
             None => {
                 if m.closed.is_none() {
                     m.closed = Some(now.to_string());
@@ -764,13 +772,14 @@ pub fn sync_stack(stack: &mut Stack, rows: &[Session], now: &str, paths: &Paths)
 pub fn sync(
     dir: &Path,
     rows: &[Session],
+    dormant: &HashSet<String>,
     now: &str,
     paths: &Paths,
     write: bool,
 ) -> Result<Vec<String>> {
     let mut changed = Vec::new();
     for mut s in load_all(dir) {
-        if sync_stack(&mut s, rows, now, paths) {
+        if sync_stack(&mut s, rows, dormant, now, paths) {
             if write {
                 save(dir, &mut s, now, paths)?;
             }
@@ -929,6 +938,8 @@ pub struct ViewCtx<'a> {
     /// The name rows are tagged with (the caller's name for this host).
     pub host_label: &'a str,
     pub rows: &'a [Session],
+    /// Session ids dormant on this machine (`snapshot::dormant_session_ids`).
+    pub dormant: &'a HashSet<String>,
     pub paths: &'a Paths,
     /// The stack file.
     pub path: &'a Path,
@@ -956,6 +967,10 @@ pub fn view(stack: &Stack, c: &ViewCtx) -> Value {
             let brief_path = c.paths.brief_path(&m.session);
             if let Value::Object(o) = &mut v {
                 o.insert("live".into(), json!(row.is_some()));
+                o.insert(
+                    "dormant".into(),
+                    json!(row.is_none() && c.dormant.contains(&m.session)),
+                );
                 o.insert("status".into(), json!(row.map(|r| r.status.clone())));
                 o.insert("briefPath".into(), json!(brief_path.display().to_string()));
                 o.insert("briefExists".into(), json!(brief_path.is_file()));
@@ -1477,12 +1492,18 @@ mod tests {
         s.members
             .push(member_for(&row(SID2, "login-tests"), "laptop", NOW, &p).unwrap());
         let rows = vec![row(SID, "renamed-one")];
-        assert!(sync_stack(&mut s, &rows, LATER, &p));
+        assert!(sync_stack(&mut s, &rows, &none(), LATER, &p));
         assert_eq!(s.members[0].name.as_deref(), Some("renamed-one"));
         assert_eq!(s.members[0].closed, None);
         assert_eq!(s.members[1].closed.as_deref(), Some(LATER));
         // Nothing changed → no write.
-        assert!(!sync_stack(&mut s, &rows, "2026-09-29T12:00:00.000Z", &p));
+        assert!(!sync_stack(
+            &mut s,
+            &rows,
+            &none(),
+            "2026-09-29T12:00:00.000Z",
+            &p
+        ));
         assert_eq!(s.members[1].closed.as_deref(), Some(LATER), "closed once");
         let text = serialize_stack(&s, &p);
         assert!(
@@ -1491,8 +1512,54 @@ mod tests {
         );
         // Back (resumed): re-opened.
         let rows = vec![row(SID, "renamed-one"), row(SID2, "login-tests")];
-        assert!(sync_stack(&mut s, &rows, LATER, &p));
+        assert!(sync_stack(&mut s, &rows, &none(), LATER, &p));
         assert_eq!(s.members[1].closed, None);
+    }
+
+    fn none() -> HashSet<String> {
+        HashSet::new()
+    }
+
+    #[test]
+    fn sync_leaves_dormant_members_open() {
+        let p = paths();
+        let mut s = sample();
+        s.members
+            .push(member_for(&row(SID2, "login-tests"), "laptop", NOW, &p).unwrap());
+        // After a reboot nothing is live; SID2 is dormant, SID was closed on purpose.
+        let dormant: HashSet<String> = [SID2.to_string()].into();
+        assert!(sync_stack(&mut s, &[], &dormant, LATER, &p));
+        assert_eq!(s.members[0].closed.as_deref(), Some(LATER));
+        assert_eq!(s.members[1].closed, None, "dormant is not closed");
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("st.md");
+        let v = view(
+            &s,
+            &ViewCtx {
+                host_label: "laptop",
+                rows: &[],
+                dormant: &dormant,
+                paths: &p,
+                path: &path,
+            },
+        );
+        assert_eq!(v["members"][0]["dormant"], false);
+        assert_eq!(v["members"][1]["dormant"], true);
+        assert_eq!(v["members"][1]["live"], false);
+        // Resumed: live again, no longer dormant.
+        let rows = vec![row(SID2, "login-tests")];
+        let v = view(
+            &s,
+            &ViewCtx {
+                host_label: "laptop",
+                rows: &rows,
+                dormant: &dormant,
+                paths: &p,
+                path: &path,
+            },
+        );
+        assert_eq!(v["members"][1]["dormant"], false);
+        assert_eq!(v["members"][1]["live"], true);
     }
 
     #[test]
@@ -1502,7 +1569,11 @@ mod tests {
         let mut s = sample();
         save(d.path(), &mut s, NOW, &p).unwrap();
         let rows = vec![row(SID, "login-redirect")];
-        assert!(sync(d.path(), &rows, LATER, &p, true).unwrap().is_empty());
+        assert!(
+            sync(d.path(), &rows, &none(), LATER, &p, true)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             load(d.path(), "st-1a2b3c4d")
                 .unwrap()
@@ -1512,7 +1583,7 @@ mod tests {
             Some(NOW)
         );
         assert_eq!(
-            sync(d.path(), &[], LATER, &p, true).unwrap(),
+            sync(d.path(), &[], &none(), LATER, &p, true).unwrap(),
             ["st-1a2b3c4d"]
         );
         let back = load(d.path(), "st-1a2b3c4d").unwrap().unwrap();

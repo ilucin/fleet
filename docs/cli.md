@@ -113,7 +113,7 @@ With `-H <host>` every form runs on that host, where the files are.
 | `fleet stack rename <stack> <label> [--json]` | rename the stack: the label (one line, ≤ 80 chars, cleaned like `--label`) in the frontmatter, the header line follows; `editedAt` stamped. `--json`: the StackView |
 | `fleet stack edit <stack>` | the body in `$VISUAL` / `$EDITOR`, saved as a human edit (with `--expect-updated` semantics; on another host fetched with `stack show --json` and written back with `stack set`) |
 | `fleet stack set <stack> [--expect-updated <iso>] [--json]` | the markdown on stdin, saved as a human edit: authoritative for everything but the header and `## Sessions` (regenerated); the stored machine keys stay; a `label:` in its frontmatter renames the stack; `editedAt` stamped. A stale `--expect-updated` is exit 3, nothing written (with `--json` stdout still carries `{ error, id, updated }`, the stored timestamp) |
-| `fleet stack sync [--json]` | reconcile members with the live sessions: gone → `closed` (once), live → name refreshed; only changed files are rewritten. `--json`: `{ host, changed: [ids], stacks: [StackView…] }`. Also runs implicitly in `list`, `show` and after `spawn` / `add` / `remove` |
+| `fleet stack sync [--json]` | reconcile members with the live sessions: gone → `closed` (once; a session dormant after a reboot is left open), live → name refreshed; only changed files are rewritten. `--json`: `{ host, changed: [ids], stacks: [StackView…] }`. Also runs implicitly in `list`, `show` and after `spawn` / `add` / `remove` |
 | `fleet stack rm <stack> [-f] [--json]` | delete the stack's file (asks unless `-f`; `--json` needs `-f`) → `{ removed: id }` |
 
 **StackView** (`--json`; the web API serves it as-is):
@@ -125,7 +125,7 @@ With `-H <host>` every form runs on that host, where the files are.
   "contextLine": "You're running in the session stack with shared context: /abs/…/stacks/st-1a2b3c4d.md.",
   "members": [ { "session": "<uuid>", "host": "laptop", "name": "login-redirect", "added": "…", "closed": null,
                  "cwd": "~/Code/project", "firstPrompt": "…",
-                 "live": true, "status": "idle", "briefPath": "/abs/…/briefs/<uuid>.md", "briefExists": true } ],
+                 "live": true, "dormant": false, "status": "idle", "briefPath": "/abs/…/briefs/<uuid>.md", "briefExists": true } ],
   "markdown": "<whole file>", "body": "<without frontmatter>",
   "parsed": { "summary": "…", "resources": [ { "kind": "PR", "label": "…", "url": "…", "path": null, "text": "…", "branch": null, "linked": null } ],
               "notes": "…" } }
@@ -188,6 +188,9 @@ and keeps them stable across runs. State: `$FLEET_GROUPS_STATE`, else
 
 Group ids never change once created (a merge keeps the target's id); empty groups are dropped.
 `source` is `llm`, `fallback` or `manual` (made on the board); a `manual` group may have no members.
+A member that is dormant on its host after a reboot ([Session recovery](#session-recovery)) keeps
+its group and carries `"dormant": true` (the field is absent otherwise, and in `--cached`); a host
+whose dormant list can't be fetched has nothing pruned that run.
 
 ### Dashboard keys (`watch`)
 

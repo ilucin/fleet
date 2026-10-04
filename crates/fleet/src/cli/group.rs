@@ -4,7 +4,7 @@
 //! session. Without `--apply` the result is printed and the state file is left
 //! alone; `-n` builds the prompts but calls no model.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::time::Instant;
 
@@ -50,7 +50,94 @@ pub enum Edit {
     },
 }
 
+/// One host's dormant session ids; `None` = couldn't be read (nothing of that host is pruned).
+type DormantIds = Option<HashSet<String>>;
+
+/// The dormant session ids of every configured host (and of this machine under its own
+/// label), fetched in parallel: this machine reads its snapshot, a remote one answers
+/// `fleet restore --json` (only when `remotes`). A fixture never reaches a remote host.
+fn gather_dormant(remotes: bool) -> BTreeMap<String, DormantIds> {
+    use crate::core::hosts::{self, Target};
+    let cfg = config::get();
+    let fixture = crate::core::discovery::is_fixture();
+    let handles: Vec<_> = cfg
+        .ssh_host_names()
+        .into_iter()
+        .map(|name| {
+            let target = hosts::resolve(cfg, Some(&name), false, hosts::Scope::SelfHost);
+            std::thread::spawn(move || {
+                let ids = match target {
+                    Err(_) => None,
+                    Ok(Target::Local { .. }) => {
+                        crate::core::snapshot::dormant_session_ids_checked()
+                    }
+                    Ok(Target::Remote(_)) if fixture || !remotes => Some(HashSet::new()),
+                    Ok(Target::Remote(r)) => remote_dormant(&r),
+                };
+                (name, ids)
+            })
+        })
+        .collect();
+    let mut out: BTreeMap<String, DormantIds> =
+        handles.into_iter().filter_map(|h| h.join().ok()).collect();
+    out.entry(crate::cli::commands::host_label())
+        .or_insert_with(crate::core::snapshot::dormant_session_ids_checked);
+    out
+}
+
+/// `fleet restore --json` on `r` → its dormant session ids. A fleet too old to know
+/// `restore` has none; any other failure is unknown.
+fn remote_dormant(r: &crate::core::hosts::Remote) -> DormantIds {
+    use crate::core::hosts;
+    let c = hosts::capture_remote(
+        r,
+        &["restore".into(), "--json".into()],
+        hosts::remote_timeout(),
+    )
+    .ok()?;
+    if !c.ok() {
+        hosts::debug(&format!("[{}] dormant list: {}", r.name, c.why(r)));
+        return c
+            .stderr
+            .contains("unrecognized subcommand")
+            .then(HashSet::new);
+    }
+    dormant_ids_of(&serde_json::from_str(&c.stdout).ok()?)
+}
+
+/// The session ids in a `fleet restore --json` list (`dormant[].sessions[].sessionId`).
+fn dormant_ids_of(v: &serde_json::Value) -> DormantIds {
+    let list = v.get("dormant")?.as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|d| d.get("sessions").and_then(|s| s.as_array()))
+            .flatten()
+            .filter_map(|s| s.get("sessionId").and_then(|i| i.as_str()))
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+/// What the pass sees: the live sessions plus every answering host's dormant ones
+/// (fetched alongside, so a reboot doesn't cost the board its groups).
 fn observe(o: &GroupOpts) -> Result<(Observed, BTreeMap<String, String>)> {
+    let remotes = o.all_hosts || o.input.is_some();
+    let dormant = std::thread::spawn(move || gather_dormant(remotes));
+    let (mut obs, hosts) = observe_live(o)?;
+    let dormant = dormant.join().unwrap_or_default();
+    let answered: Vec<String> = obs.hosts_ok.iter().cloned().collect();
+    for h in answered {
+        // A host this config doesn't know has nothing dormant (as before).
+        let ids = dormant
+            .get(&h)
+            .cloned()
+            .unwrap_or_else(|| Some(HashSet::new()));
+        obs.add_dormant(&h, ids.as_ref());
+    }
+    Ok((obs, hosts))
+}
+
+fn observe_live(o: &GroupOpts) -> Result<(Observed, BTreeMap<String, String>)> {
     let mut hosts = BTreeMap::new();
     if let Some(src) = &o.input {
         let text = if src == "-" {
@@ -266,4 +353,32 @@ fn print(r: &Report, json: bool, path: &std::path::Path, dry: Option<bool>) -> R
         ),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn dormant_ids_come_from_a_restore_list() {
+        let v = json!({ "host": "workstation", "bootId": "1", "dormant": [
+            { "kind": "tmux", "target": "api", "name": "api", "sessions": [
+                { "sessionId": "s-1" }, { "sessionId": "s-2" } ] },
+            { "kind": "claude", "target": "s-3", "name": "x", "sessions": [ { "sessionId": "s-3" } ] },
+            { "kind": "tmux", "target": "shell", "name": "shell", "sessions": [] }
+        ]});
+        let ids = dormant_ids_of(&v).unwrap();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains("s-1") && ids.contains("s-3"));
+        assert_eq!(
+            dormant_ids_of(&json!({ "dormant": [] })),
+            Some(HashSet::new())
+        );
+        assert_eq!(
+            dormant_ids_of(&json!({ "error": "x" })),
+            None,
+            "unknown, not empty"
+        );
+    }
 }

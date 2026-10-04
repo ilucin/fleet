@@ -904,7 +904,17 @@ pub fn dormant_ids(s: &Snapshot) -> HashSet<String> {
 
 /// [`dormant_ids`] of this machine's [`current`] snapshot; empty when it can't be read.
 pub fn dormant_session_ids() -> HashSet<String> {
-    current().map(|s| dormant_ids(&s)).unwrap_or_default()
+    dormant_session_ids_checked().unwrap_or_default()
+}
+
+/// [`dormant_session_ids`], but `None` when the snapshot can't be read — so a caller that
+/// prunes on absence (grouping) can hold off instead. Empty in fixture mode unless a test
+/// names `$FLEET_SNAPSHOT` (a demo must not read the real state file).
+pub fn dormant_session_ids_checked() -> Option<HashSet<String>> {
+    if discovery::is_fixture() && std::env::var_os("FLEET_SNAPSHOT").is_none() {
+        return Some(HashSet::new());
+    }
+    current().ok().map(|s| dormant_ids(&s))
 }
 
 /// How many dormant entries this machine has (for the `list` footer and the dashboard).

@@ -33,6 +33,8 @@ struct Ctx {
     rows: Vec<Session>,
     /// `false` when the registry could not be read: nothing may be marked closed then.
     rows_ok: bool,
+    /// Session ids dormant on this machine (left by a reboot): never marked closed.
+    dormant: HashSet<String>,
     /// This machine's config `self` (what goes into the files).
     me: String,
     /// The name rows are tagged with (the caller's name for this host).
@@ -55,6 +57,7 @@ impl Ctx {
             paths: Paths::current(),
             rows,
             rows_ok,
+            dormant: crate::core::snapshot::dormant_session_ids(),
             me: config::get().self_name(),
             label: host_label(),
         })
@@ -69,6 +72,7 @@ impl Ctx {
         stack::sync(
             &self.dir,
             &self.rows,
+            &self.dormant,
             &brief::iso_now(),
             &self.paths,
             !hosts::dry_run(),
@@ -90,6 +94,7 @@ impl Ctx {
             &stack::ViewCtx {
                 host_label: &self.label,
                 rows: &self.rows,
+                dormant: &self.dormant,
                 paths: &self.paths,
                 path: &path,
             },

@@ -274,9 +274,28 @@ impl Item {
 pub struct Observed {
     pub hosts_ok: BTreeSet<String>,
     pub items: Vec<Item>,
+    /// `host/sessionId` of sessions dormant on their host (recorded before a reboot, not
+    /// resumed yet — `core::snapshot`): they keep their assignment, are never classified.
+    pub dormant: BTreeSet<String>,
 }
 
 impl Observed {
+    /// Record `host`'s dormant session ids. `None` = its dormant list couldn't be read: like
+    /// a host that didn't answer, none of its assignments are pruned this run.
+    pub fn add_dormant<'a, I>(&mut self, host: &str, ids: Option<I>)
+    where
+        I: IntoIterator<Item = &'a String>,
+    {
+        match ids {
+            Some(ids) => self
+                .dormant
+                .extend(ids.into_iter().map(|id| format!("{host}/{id}"))),
+            None => {
+                self.hosts_ok.remove(host);
+            }
+        }
+    }
+
     /// Parse a sessions document: a `list --json` array (every host present in
     /// it counts as answered) or a `/api/fleet`-shaped `{ hosts: [{ name, ok,
     /// sessions }] }` (hosts with `ok: false` are not observed).
@@ -796,11 +815,13 @@ where
     let live: HashMap<String, &Item> = obs.items.iter().map(|i| (i.key(), i)).collect();
     let names: HashMap<String, String> = obs.items.iter().map(|i| (i.key(), i.display())).collect();
 
-    // Drop what's gone (from hosts that answered) or points at a missing group.
+    // Drop what's gone (from hosts that answered) or points at a missing group. A dormant
+    // session (waiting for `fleet restore` after a reboot) isn't gone.
     let group_ids: HashSet<String> = state.groups.iter().map(|g| g.id.clone()).collect();
     let before = state.assignments.len();
     state.assignments.retain(|k, a| {
-        group_ids.contains(&a.group) && (!obs.hosts_ok.contains(&a.host) || live.contains_key(k))
+        group_ids.contains(&a.group)
+            && (!obs.hosts_ok.contains(&a.host) || live.contains_key(k) || obs.dormant.contains(k))
     });
     sum.pruned = before - state.assignments.len();
     if sum.pruned > 0 {
@@ -1236,6 +1257,10 @@ pub struct Member {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Not running: dormant on its host after a reboot (`fleet restore`). Present (and
+    /// `true`) only then, and only in a pass's report (not `--cached`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dormant: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1268,6 +1293,7 @@ pub fn view(state: &State, obs: Option<&Observed>) -> (Vec<GroupView>, Vec<Membe
     let names: HashMap<String, String> = obs
         .map(|o| o.items.iter().map(|i| (i.key(), i.display())).collect())
         .unwrap_or_default();
+    let dormant = |k: &str| obs.is_some_and(|o| o.dormant.contains(k)) && !names.contains_key(k);
     let mut groups: Vec<GroupView> = state
         .groups
         .iter()
@@ -1275,13 +1301,14 @@ pub fn view(state: &State, obs: Option<&Observed>) -> (Vec<GroupView>, Vec<Membe
             let mut members: Vec<Member> = state
                 .members_of(&g.id)
                 .into_iter()
-                .map(|a| Member {
-                    host: a.host.clone(),
-                    id: a.id.clone(),
-                    name: names
-                        .get(&format!("{}/{}", a.host, a.id))
-                        .cloned()
-                        .or_else(|| a.name.clone()),
+                .map(|a| {
+                    let key = format!("{}/{}", a.host, a.id);
+                    Member {
+                        host: a.host.clone(),
+                        id: a.id.clone(),
+                        name: names.get(&key).cloned().or_else(|| a.name.clone()),
+                        dormant: dormant(&key),
+                    }
                 })
                 .collect();
             members.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
@@ -1310,6 +1337,7 @@ pub fn view(state: &State, obs: Option<&Observed>) -> (Vec<GroupView>, Vec<Membe
                     host: i.host.clone(),
                     id: i.id.clone(),
                     name: Some(i.display()),
+                    dormant: false,
                 })
                 .collect()
         })
@@ -1352,6 +1380,7 @@ mod tests {
         Observed {
             hosts_ok: items.iter().map(|i| i.host.clone()).collect(),
             items,
+            ..Default::default()
         }
     }
 
@@ -1617,6 +1646,86 @@ mod tests {
         );
         assert_eq!(sum.pruned, 0);
         assert_eq!(state.groups.len(), 2);
+    }
+
+    #[test]
+    fn dormant_sessions_keep_their_group_and_are_flagged() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        // After a reboot: the workstation answers with nothing live, b1 is dormant there;
+        // the laptop's a2 is gone for good.
+        let items: Vec<Item> = fleet_items().into_iter().filter(|i| i.id == "a1").collect();
+        let mut o = obs(items);
+        o.hosts_ok.insert("workstation".into());
+        let b1 = vec!["b1".to_string()];
+        o.add_dormant("workstation", Some(&b1));
+        o.add_dormant("laptop", Some(&Vec::new()));
+        let sum = run_pass(
+            &mut state,
+            &o,
+            &PassOpts {
+                now: NOW + 1,
+                ..opts()
+            },
+            |_| panic!("a dormant session is not classified"),
+        );
+        assert_eq!(sum.pruned, 1, "only a2");
+        assert_eq!(sum.classified, 0);
+        assert!(state.assignments.contains_key("workstation/b1"));
+        assert_eq!(state.groups.len(), 2, "Team Reviews survives");
+        let (groups, ungrouped) = view(&state, Some(&o));
+        assert!(ungrouped.is_empty());
+        let reviews = groups.iter().find(|g| g.label == "Team Reviews").unwrap();
+        assert!(reviews.members[0].dormant);
+        assert_eq!(reviews.members[0].name.as_deref(), Some("review-alice"));
+        let v = serde_json::to_value(&groups).unwrap();
+        let board = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["label"] == "Fleet Board")
+            .unwrap();
+        assert!(
+            board["members"][0].get("dormant").is_none(),
+            "only when true"
+        );
+        assert_eq!(
+            serde_json::to_value(&reviews.members[0]).unwrap()["dormant"],
+            true
+        );
+        // Without a pass (`--cached`) nothing is flagged.
+        assert!(
+            !view(&state, None)
+                .0
+                .iter()
+                .flat_map(|g| &g.members)
+                .any(|m| m.dormant)
+        );
+    }
+
+    #[test]
+    fn a_host_whose_dormant_list_is_unknown_prunes_nothing() {
+        let mut state = State::default();
+        run_pass(&mut state, &obs(fleet_items()), &opts(), |_| {
+            Ok(ANSWER.into())
+        });
+        let mut o = obs(vec![]);
+        o.hosts_ok.insert("laptop".into());
+        o.hosts_ok.insert("workstation".into());
+        o.add_dormant::<&Vec<String>>("workstation", None);
+        let sum = run_pass(
+            &mut state,
+            &o,
+            &PassOpts {
+                now: NOW + 1,
+                ..opts()
+            },
+            |_| panic!(),
+        );
+        assert_eq!(sum.pruned, 2, "the laptop's two, not the workstation's");
+        assert!(state.assignments.contains_key("workstation/b1"));
     }
 
     #[test]

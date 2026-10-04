@@ -383,6 +383,13 @@ The web Board view shows sessions as columns of work streams, and nobody maintai
   clearly identical streams, fix a clearly wrong label — runs at most hourly, only after changes,
   and is capped at 2 merges + 2 renames per pass. Group ids never change; empty groups vanish;
   sessions of a host that didn't answer keep their group.
+- **Dormant sessions** (left by a reboot, see [Session recovery](#session-recovery)) count as
+  present: they keep their assignment (and so their group), are never sent to the model, and come
+  back with `"dormant": true` on their member object in a pass's report (`fleet group --json`, and
+  so `/api/groups`; absent otherwise, never set by `--cached`). The pass reads this machine's
+  snapshot and, for each other answering host, `fleet -H <host> restore --json` — in parallel with
+  the session fetch. A host whose dormant list can't be read is treated like a host that didn't
+  answer: none of its assignments are pruned that run (a fleet too old to have `restore` has none).
 - **Hand edits win.** Renaming a group on the Board locks its label (never renamed, never merged
   away); a session dragged to another group is a `manual` assignment the passes never touch.
   A group made on the Board (`manual`) stays even when empty, until the user deletes it.
@@ -625,7 +632,10 @@ whose session id is not among the live sessions gets `closed = now` (once); a li
 whose members changed are rewritten. It runs in `fleet stack list` / `show` / `sync` and after
 `spawn` / `add` / `remove`; the web server runs `stack sync` after a kill and every
 `web.stacks.syncMinutes` while any session is in a stack. Nothing is marked closed when the
-session registry can't be read. `fleet list` only stamps `stack: { id, label } | null` on each
+session registry can't be read, and a member dormant on this machine (left by a reboot,
+`snapshot::dormant_session_ids`) is not marked closed either — it is left as it was. StackView
+members carry `dormant: true|false` next to `live` (dormant = not live and in this machine's
+dormant set). `fleet list` only stamps `stack: { id, label } | null` on each
 row (read-only).
 
 **Generation** (creation only; `stacks.model`, default `sonnet`): one `core::naming::ask_claude`
@@ -697,7 +707,9 @@ first, so the first command after a reboot already sees the old boot as dormant.
 
 **For other views** (groups, stacks, the web Board): `core::snapshot::dormant_session_ids()` is the
 set of this machine's dormant session ids; for another host, `fleet -H <host> restore --json` and
-the `sessionId`s under `dormant[].sessions`. A dormant session should count as *present*, not gone.
+the `sessionId`s under `dormant[].sessions`. A dormant session counts as *present*, not gone:
+grouping keeps its assignment and flags the member `dormant: true` ([Smart
+grouping](#smart-grouping)); stack sync doesn't close it and StackView members carry `dormant`.
 
 ## Extension points
 

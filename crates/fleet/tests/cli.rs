@@ -478,3 +478,66 @@ fn group_falls_back_persists_with_apply_and_reads_back_cached() {
     );
     assert_eq!(std::fs::read_to_string(&state).unwrap(), before);
 }
+
+// `fleet group` after a reboot: a session dormant in this machine's snapshot keeps its
+// group (not pruned) and is flagged `dormant: true`; one gone for good is pruned.
+#[test]
+fn group_keeps_dormant_sessions() {
+    let env = common::Env::new();
+    env.write_config(&serde_json::json!({
+        "version": 1, "self": "laptop", "grouping": { "enabled": false }
+    }));
+    let state = env.path("state/groups.json");
+    let input = env.path("sessions.json");
+    let write_input = |ids: &[&str]| {
+        let rows: Vec<_> = ids
+            .iter()
+            .map(|id| serde_json::json!({ "session_id": id, "name": id, "cwd": "~/Code/project" }))
+            .collect();
+        std::fs::write(
+            &input,
+            serde_json::json!({ "hosts": [{ "name": "laptop", "ok": true, "sessions": rows }] })
+                .to_string(),
+        )
+        .unwrap();
+    };
+    let group = || {
+        let out = env
+            .cmd()
+            .env("FLEET_GROUPS_STATE", &state)
+            .env("FLEET_BOOT_ID", "boot-2")
+            .args(["group", "--apply", "--json", "--input"])
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("json")
+    };
+    write_input(&["a1", "a2", "a3"]);
+    let v = group();
+    assert_eq!(v["groups"][0]["members"].as_array().unwrap().len(), 3);
+
+    std::fs::write(
+        env.path("snapshot.json"),
+        serde_json::json!({
+            "version": 1, "host": "laptop", "bootId": "boot-2",
+            "tmux": [], "iterm": [],
+            "dormant": { "tmux": [], "iterm": [ { "sessionId": "a2", "name": "a2", "flags": [] } ] }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    write_input(&["a1"]);
+    let v = group();
+    assert_eq!(v["lastRun"]["pruned"], 1, "a3 only");
+    let members = v["groups"][0]["members"].as_array().unwrap();
+    assert_eq!(members.len(), 2);
+    let a2 = members.iter().find(|m| m["id"] == "a2").unwrap();
+    assert_eq!(a2["dormant"], true);
+    let a1 = members.iter().find(|m| m["id"] == "a1").unwrap();
+    assert!(a1.get("dormant").is_none());
+}
