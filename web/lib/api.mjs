@@ -678,7 +678,7 @@ export function createApi({
     if (!dormant) throw new HttpError('session recovery is not available on this server', 501);
     try {
       if (action === 'list') return { status: 200, body: await dormant.list() };
-      const check = validateDormantRequest(await readJsonBody(req), { allowDryRun: action === 'restore' });
+      const check = validateDormantRequest(await readJsonBody(req), { allowDryRun: action === 'restore', allowAll: action === 'forget' });
       if (action === 'forget') return { status: 200, body: await dormant.forget(check) };
       const report = await dormant.restore(check);
       const restored = Array.isArray(report?.restored) ? report.restored : [];

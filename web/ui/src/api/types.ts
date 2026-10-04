@@ -670,11 +670,23 @@ export interface DormantView {
   sessions: DormantSession[]
 }
 
+/**
+ * One recently closed entry (ended within a boot: Close, kill, /exit): a DormantView (`since` =
+ * `closedAt`) + `tmuxSession` when a Claude session's tmux pane outlived it (it resumes in a new
+ * window there). Never part of Resume all, never on the Board.
+ */
+export interface ClosedView extends DormantView {
+  closedAt: string | null
+  tmuxSession?: string
+}
+
 /** GET /api/hosts/:host/dormant. */
 export interface DormantResponse {
   host: string
   bootId: string | null
   dormant: DormantView[]
+  /** Recently closed sessions (servers / CLIs that know them). */
+  closed?: ClosedView[]
 }
 
 export interface RestoredEntry {

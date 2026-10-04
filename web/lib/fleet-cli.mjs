@@ -249,7 +249,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   /**
    * `fleet --local restore <args…> --json` (session recovery, docs/cli.md → Session recovery):
    * the dormant list (no args), a restore (`--` target / `--all`, `--dry-run`) or a forget
-   * (`--forget=<t>` / `--forget-all`). Resolves the parsed object. Throws FleetCliError carrying
+   * (`--forget=<t>` / `--forget-all`), `--closed` for the recently closed list. Resolves the parsed object. Throws FleetCliError carrying
    * `exitCode` (2 ambiguous, 3 no match, 1 a restore with failures), `report` (the JSON the CLI
    * printed before exiting non-zero), `missing` (the binary predates `restore`), `timedOut`.
    */
@@ -264,7 +264,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
       if (why && !e.timedOut) e.message = why.split('\n')[0];
       e.exitCode = typeof err?.code === 'number' ? err.code : null;
       e.report = tryObject(err?.stdout);
-      e.missing = !e.timedOut && /unrecognized subcommand|unexpected argument 'restore'|invalid subcommand/i.test(why);
+      // `--closed` is newer than `restore`: a CLI without it can't serve the closed list.
+      e.missing = !e.timedOut && /unrecognized subcommand|unexpected argument '(?:restore|--closed)'|invalid subcommand/i.test(why);
       throw e;
     }
     return parseObject(stdout, 'fleet restore');

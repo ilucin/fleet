@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
 import { CommandIcon, GaugeIcon, KeyboardIcon, NotebookTextIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
+import { ClosedSection } from '@/components/ClosedSection'
 import { DormantSection } from '@/components/DormantSection'
 import { HostDot } from '@/components/HostBadge'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
@@ -210,6 +211,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, searchRef, onSearch
           </div>
         ) : null}
         {fleet ? <DormantSection now={now} host={host} desktop className="mt-4" /> : null}
+        {fleet ? <ClosedSection now={now} host={host} desktop className="mt-3" /> : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1 border-t px-2 py-1.5 text-xs text-dimmer">

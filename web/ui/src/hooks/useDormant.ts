@@ -3,17 +3,22 @@ import { createContext, useContext } from 'react'
 import type { DormantMember, HostDormant } from '@/lib/dormant'
 
 export interface DormantState {
-  /** Hosts with dormant sessions (others left out), in fleet order. */
+  /** Hosts with dormant or recently closed sessions (others left out), in fleet order. */
   hosts: HostDormant[]
   /** Dormant Claude sessions by `host/sessionId` (the Board's dimmed cards). */
   index: Map<string, DormantMember>
   count: number
-  /** `host/target` (or `host/*` for all) of the requests in flight. */
+  /** Recently closed entries over every host. */
+  closedCount: number
+  /** `host/target` (or `host/*` for all; `host/closed/target` for a closed one) of the requests in flight. */
   busy: ReadonlySet<string>
   /** Bring one back (`target`: the tmux name or a session id). Starts agents. Toasts the result. */
   resume: (host: string, target: string) => Promise<void>
   resumeAll: (host: string) => Promise<void>
   forget: (host: string, target: string) => Promise<void>
+  /** A recently closed session: resume (starts agents) / forget. No "all" for these. */
+  resumeClosed: (host: string, target: string) => Promise<void>
+  forgetClosed: (host: string, target: string) => Promise<void>
   refresh: () => void
 }
 
@@ -21,10 +26,13 @@ const EMPTY: DormantState = {
   hosts: [],
   index: new Map(),
   count: 0,
+  closedCount: 0,
   busy: new Set(),
   resume: async () => {},
   resumeAll: async () => {},
   forget: async () => {},
+  resumeClosed: async () => {},
+  forgetClosed: async () => {},
   refresh: () => {},
 }
 

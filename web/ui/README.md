@@ -78,7 +78,8 @@ src/
                       (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
   lib/storage.ts      localStorage that never throws
   lib/dormant.ts      dormant sessions (a reboot left them): dormantIndex() / dormantMember() (Board cards, the server's
-                      `dormant` flag or the dormant list), dormantTitles() / dormantMeta(), restoreSummary(), dormantMissing()
+                      `dormant` flag or the dormant list), dormantTitles() / dormantMeta(), restoreSummary(), dormantMissing();
+                      recently closed: hostDormant() / hasEntries() / closedCount() / closedMeta()
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
   hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
@@ -106,14 +107,15 @@ src/
                       useNotesSearch() (debounced, aborts the previous), useNoteFile()
   hooks/useOutbox.ts  the session screen's Outbox: keepalive POSTs, flush on unmount / background, pagehide hand-off
   hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
-  hooks/useDormant.ts DormantContext / useDormant(): hosts with dormant sessions, index, resume / resumeAll / forget
+  hooks/useDormant.ts DormantContext / useDormant(): hosts with dormant / recently closed sessions, index, resume / resumeAll / forget, resumeClosed / forgetClosed
   providers/          DormantProvider (polls every reachable host's /dormant every 30s; restore / forget + toasts),
                       FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
                       PrefsProvider (text size → <html> font-size, terminal text, progress notes)
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
                       Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay,
-                      DormantSection (under the list / sidebar, last board column: Resume, Forget, Resume all; ArmButton)
+                      DormantSection (under the list / sidebar, last board column: Resume, Forget, Resume all; ArmButton),
+                      ClosedSection (under DormantSection in the list / sidebar, collapsed: recently closed, Resume / Forget)
   components/board/   Board (desktop Kanban + header), BoardColumns (columns, drag'n'drop, rename), BoardCard,
                       DormantCard (a dormant group member: dimmed, Resume),
                       GroupedList (mobile collapsible sections),

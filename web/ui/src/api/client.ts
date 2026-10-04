@@ -197,9 +197,10 @@ export const api = {
   /** Sessions a reboot left dormant on `host` (404 / 501 on servers or CLIs that predate session recovery). */
   dormant: (host: string, o: Opts = {}) => request<DormantResponse>(`${hostPath(host)}/dormant`, o),
   /** Bring one back (`target`: tmux name or session id) or every one (`all`). Starts agents. */
-  restoreDormant: (host: string, body: { target: string } | { all: true }, o: Opts = {}) =>
+  /** `closed: true`: a recently closed session (never with `all`). */
+  restoreDormant: (host: string, body: { target: string; closed?: true } | { all: true }, o: Opts = {}) =>
     request<RestoreResponse>(`${hostPath(host)}/dormant/restore`, { ...o, method: 'POST', body }),
-  forgetDormant: (host: string, body: { target: string } | { all: true }, o: Opts = {}) =>
+  forgetDormant: (host: string, body: { target: string; closed?: true } | { all: true; closed?: true }, o: Opts = {}) =>
     request<ForgetResponse>(`${hostPath(host)}/dormant/forget`, { ...o, method: 'POST', body }),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),

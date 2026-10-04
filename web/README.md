@@ -57,7 +57,10 @@ editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
 serves `GET /api/hosts/:host/dormant` and `POST …/dormant/restore` / `…/dormant/forget`
 (`{ target }` or `{ all: true }`); the UI lists them per host under the session list (Resume,
 Forget, Resume all) and dims dormant group members on the Board. Config `restore.onBoot: true`
-resumes everything once per boot when the server starts. Details: ARCHITECTURE.md → HTTP API.
+resumes everything once per boot when the server starts. Sessions closed within a boot come in
+the same list as `closed` (body `closed: true` on restore / forget) and show in a collapsed
+"Recently closed" section (Resume, Forget — no Resume all, not on the Board). Details:
+ARCHITECTURE.md → HTTP API.
 
 **Session stacks** (sessions sharing one StackBrief file, owned by `fleet stack`): the server
 serves `/api/hosts/:host/stacks…` (list, show, edit with conflict check, rename, delete, sync) and spawns

@@ -5,12 +5,12 @@ import { api, isAbortError } from '@/api/client'
 import { DormantContext, type DormantState } from '@/hooks/useDormant'
 import { useFleet } from '@/hooks/useFleet'
 import { usePoller } from '@/hooks/usePoller'
-import { dormantCount, dormantErrorMessage, dormantIndex, dormantMissing, restoreSummary, type HostDormant } from '@/lib/dormant'
+import { closedCount, dormantCount, dormantErrorMessage, dormantIndex, dormantMissing, hasEntries, hostDormant, restoreSummary, type HostDormant } from '@/lib/dormant'
 
-/** Dormant sessions change only on a reboot or a resume / forget (which refresh at once). */
+/** Dormant sessions change only on a reboot or a resume / forget (which refresh at once); closed ones as sessions end. */
 export const DORMANT_POLL_MS = 30_000
 
-/** Polls GET /api/hosts/:host/dormant for every reachable host; restore / forget with toasts. */
+/** Polls GET /api/hosts/:host/dormant (dormant + recently closed) for every reachable host; restore / forget with toasts. */
 export function DormantProvider({ children }: { children: ReactNode }) {
   const { fleet, refresh: refreshFleet } = useFleet()
   const hostNames = useMemo(() => (fleet?.hosts ?? []).filter((h) => h.ok).map((h) => h.name), [fleet])
@@ -24,11 +24,10 @@ export function DormantProvider({ children }: { children: ReactNode }) {
       const next = await Promise.all(
         names.map(async (host): Promise<HostDormant | null> => {
           try {
-            const r = await api.dormant(host, { signal })
-            return { host, views: Array.isArray(r.dormant) ? r.dormant : [] }
+            return hostDormant(host, await api.dormant(host, { signal }))
           } catch (err) {
             if (isAbortError(err)) throw err
-            if (dormantMissing(err)) return { host, views: [] } // older server / CLI: nothing to show
+            if (dormantMissing(err)) return hostDormant(host, {}) // older server / CLI: nothing to show
             return null // transient: keep what we had
           }
         }),
@@ -36,7 +35,7 @@ export function DormantProvider({ children }: { children: ReactNode }) {
       setHosts((prev) =>
         names
           .map((host, i) => next[i] ?? prev.find((h) => h.host === host) ?? null)
-          .filter((h): h is HostDormant => !!h && h.views.length > 0),
+          .filter((h): h is HostDormant => !!h && hasEntries(h)),
       )
     },
     [hostsKey],
@@ -62,8 +61,8 @@ export function DormantProvider({ children }: { children: ReactNode }) {
   )
 
   const restore = useCallback(
-    (host: string, body: { target: string } | { all: true }) =>
-      track(`${host}/${'all' in body ? '*' : body.target}`, async () => {
+    (host: string, body: { target: string; closed?: true } | { all: true }) =>
+      track(`${host}/${'all' in body ? '*' : `${body.closed ? 'closed/' : ''}${body.target}`}`, async () => {
         try {
           const s = restoreSummary(await api.restoreDormant(host, body))
           if (s.ok) toast.success(s.title, { description: s.description || undefined })
@@ -76,10 +75,10 @@ export function DormantProvider({ children }: { children: ReactNode }) {
   )
 
   const forget = useCallback(
-    (host: string, target: string) =>
-      track(`${host}/${target}`, async () => {
+    (host: string, target: string, closed = false) =>
+      track(`${host}/${closed ? 'closed/' : ''}${target}`, async () => {
         try {
-          const r = await api.forgetDormant(host, { target })
+          const r = await api.forgetDormant(host, closed ? { target, closed: true } : { target })
           toast.success(`Forgot ${r.forgotten.join(', ') || target}`, { description: 'It will not come back.' })
         } catch (err) {
           toast.error('Forget failed', { description: dormantErrorMessage(err) })
@@ -93,10 +92,13 @@ export function DormantProvider({ children }: { children: ReactNode }) {
       hosts,
       index: dormantIndex(hosts),
       count: dormantCount(hosts),
+      closedCount: closedCount(hosts),
       busy,
       resume: (host, target) => restore(host, { target }),
       resumeAll: (host) => restore(host, { all: true }),
-      forget,
+      forget: (host, target) => forget(host, target),
+      resumeClosed: (host, target) => restore(host, { target, closed: true }),
+      forgetClosed: (host, target) => forget(host, target, true),
       refresh,
     }),
     [hosts, busy, restore, forget, refresh],

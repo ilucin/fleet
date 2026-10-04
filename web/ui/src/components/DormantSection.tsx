@@ -69,7 +69,7 @@ export function ArmButton({
  */
 export function DormantSection({ now, host = null, desktop = false, className }: { now: number; host?: string | null; desktop?: boolean; className?: string }) {
   const { hosts, busy, resume, resumeAll, forget } = useDormant()
-  const shown = host ? hosts.filter((h) => h.host === host) : hosts
+  const shown = (host ? hosts.filter((h) => h.host === host) : hosts).filter((h) => h.views.length > 0)
   if (!shown.length) return null
   const size = desktop ? 'sm' : 'lg'
   return (

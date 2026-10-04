@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '@/api/client'
-import type { DormantView } from '@/api/types'
-import { dormantCount, dormantErrorMessage, dormantIndex, dormantMember, dormantMeta, dormantMissing, dormantTitles, restoreSummary } from '@/lib/dormant'
+import type { ClosedView, DormantView } from '@/api/types'
+import { closedCount, closedMeta, dormantCount, dormantErrorMessage, dormantIndex, dormantMember, dormantMeta, dormantMissing, dormantTitles, hasEntries, hostDormant, restoreSummary } from '@/lib/dormant'
 
 const NOW = Date.parse('2026-10-04T12:00:00Z')
 const tmux: DormantView = {
@@ -18,15 +18,15 @@ const lone: DormantView = { kind: 'claude', target: 'bbbb-2', name: 'Review PR',
 
 describe('dormant helpers', () => {
   it('indexes dormant Claude sessions by host/sessionId', () => {
-    const idx = dormantIndex([{ host: 'workstation', views: [tmux, lone] }])
+    const idx = dormantIndex([{ host: 'workstation', views: [tmux, lone], closed: [] }])
     expect([...idx.keys()]).toEqual(['workstation/aaaa-1', 'workstation/bbbb-2'])
     expect(idx.get('workstation/aaaa-1')).toEqual({ host: 'workstation', id: 'aaaa-1', title: 'Fix login', since: Date.parse('2026-10-04T09:00:00Z') })
     expect(idx.get('workstation/bbbb-2')?.title).toBe('Review PR')
-    expect(dormantCount([{ host: 'a', views: [tmux, lone] }, { host: 'b', views: [] }])).toBe(2)
+    expect(dormantCount([{ host: 'a', views: [tmux, lone], closed: [] }, { host: 'b', views: [], closed: [] }])).toBe(2)
   })
 
   it('a group member is dormant by the server flag or the dormant list', () => {
-    const idx = dormantIndex([{ host: 'laptop', views: [tmux] }])
+    const idx = dormantIndex([{ host: 'laptop', views: [tmux], closed: [] }])
     expect(dormantMember({ host: 'laptop', id: 'aaaa-1' }, idx)?.title).toBe('Fix login')
     expect(dormantMember({ host: 'laptop', id: 'cccc-3', dormant: true }, idx)).toEqual({ host: 'laptop', id: 'cccc-3', title: 'cccc-3', since: null })
     expect(dormantMember({ host: 'laptop', id: 'cccc-3' }, idx)).toBeNull()
@@ -55,5 +55,20 @@ describe('dormant helpers', () => {
     expect(partial.ok).toBe(false)
     expect(partial.description).toBe('1 Claude session resuming\nx: boom')
     expect(restoreSummary({ host: 'laptop', restored: [], failed: [] }).title).toBe('Nothing resumed')
+  })
+
+  it('recently closed: parsed beside dormant, own count and meta, never in the Board index', () => {
+    const closed: ClosedView = { ...lone, target: 'cccc-3', name: 'Old work', closedAt: '2026-10-04T10:00:00Z', since: '2026-10-04T10:00:00Z', tmuxSession: 'api', sessions: [{ sessionId: 'cccc-3', name: null, title: 'Old work', cwd: '~/Code/project' }] }
+    const h = hostDormant('laptop', { dormant: [], closed: [closed] })
+    expect(h).toEqual({ host: 'laptop', views: [], closed: [closed] })
+    expect(hostDormant('old', { dormant: [tmux] }).closed).toEqual([])
+    expect(hasEntries(h)).toBe(true)
+    expect(hasEntries(hostDormant('x', {}))).toBe(false)
+    expect(closedCount([h])).toBe(1)
+    expect(dormantCount([h])).toBe(0)
+    expect(dormantIndex([h]).size).toBe(0)
+    expect(closedMeta(closed, NOW)).toBe('in tmux api · ~/Code/project · closed 2h ago')
+    expect(closedMeta({ ...closed, tmuxSession: undefined, closedAt: null, since: null }, NOW)).toBe('not in tmux · ~/Code/project')
+    expect(closedMeta({ ...tmux, closedAt: '2026-10-04T11:00:00Z' }, NOW)).toBe('tmux · 1 window · 2 panes · closed 1h ago')
   })
 })

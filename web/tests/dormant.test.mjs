@@ -16,6 +16,7 @@ import { HttpError } from '../lib/http.mjs';
 import { ambiguityCandidates, createDormant, dormantHttpError, validateDormantRequest } from '../lib/dormant.mjs';
 
 const SID = 'aaaaaaaa-0000-0000-0000-000000000001';
+const SID_CLOSED = 'cccccccc-0000-0000-0000-000000000002';
 
 /** `fleet restore --json` (docs/cli.md → Session recovery). */
 function dormantList(host, bootId = '1727000000') {
@@ -25,6 +26,9 @@ function dormantList(host, bootId = '1727000000') {
     dormant: [
       { kind: 'tmux', target: 'fleet-test-a', name: 'fleet-test-a', since: '2026-10-01T10:00:00Z', windows: 1, panes: 2, sessions: [{ sessionId: SID, name: 'fix', title: 'Fix login', cwd: '~/Code/project' }] },
       { kind: 'tmux', target: 'fleet-test-b', name: 'fleet-test-b', since: '2026-10-01T10:00:00Z', windows: 1, panes: 1, sessions: [] },
+    ],
+    closed: [
+      { kind: 'claude', target: SID_CLOSED, name: 'Old work', since: '2026-10-02T10:00:00Z', closedAt: '2026-10-02T10:00:00Z', tmuxSession: 'fleet-test-c', windows: 1, panes: 1, sessions: [{ sessionId: SID_CLOSED, name: null, title: 'Old work', cwd: '~/Code/project' }] },
     ],
   };
 }
@@ -103,8 +107,8 @@ async function call(url, method = 'GET', body) {
 }
 
 test('validateDormantRequest: a one-line target or all: true; dryRun only for restore', () => {
-  assert.deepEqual(validateDormantRequest({ target: ' fleet-test-a ' }), { all: false, target: 'fleet-test-a', dryRun: false });
-  assert.deepEqual(validateDormantRequest({ all: true, dryRun: true }, { allowDryRun: true }), { all: true, target: null, dryRun: true });
+  assert.deepEqual(validateDormantRequest({ target: ' fleet-test-a ' }), { all: false, target: 'fleet-test-a', dryRun: false, closed: false });
+  assert.deepEqual(validateDormantRequest({ all: true, dryRun: true }, { allowDryRun: true }), { all: true, target: null, dryRun: true, closed: false });
   assert.equal(validateDormantRequest({ target: 'x', dryRun: true }).dryRun, false);
   for (const bad of [{}, null, { target: '' }, { target: 'a\nb' }, { target: 5 }, { target: 'x'.repeat(201) }, { all: true, target: 'x' }, { all: 'yes' }]) {
     assert.throws(() => validateDormantRequest(bad), (e) => e instanceof HttpError && e.status === 400, JSON.stringify(bad));
@@ -227,4 +231,53 @@ test('config: restore.onBoot defaults to false; a non-boolean is refused', () =>
   assert.equal(c.restore.markerFile, '/home/tester/.local/state/fleet/web-restored-boot');
   assert.equal(normalizeConfig({ ...base, restore: { onBoot: true } }, { env: {}, home: '/home/tester' }).restore.onBoot, true);
   assert.throws(() => normalizeConfig({ ...base, restore: { onBoot: 'yes' } }, { env: {}, home: '/home/tester' }), /restore\.onBoot/);
+});
+
+test('recently closed: closed: true → --closed on restore / forget; never with all on a restore', async (t) => {
+  assert.deepEqual(validateDormantRequest({ target: 'x', closed: true }), { all: false, target: 'x', dryRun: false, closed: true });
+  assert.deepEqual(validateDormantRequest({ all: true, closed: true }), { all: true, target: null, dryRun: false, closed: true });
+  assert.throws(() => validateDormantRequest({ all: true, closed: true }, { allowAll: false }), (e) => e.status === 400);
+  assert.throws(() => validateDormantRequest({ target: 'x', closed: 'yes' }), (e) => e.status === 400);
+  assert.deepEqual(ambiguityCandidates('"q" matches 2 recently closed sessions: a, b — be more specific'), ['a', 'b']);
+
+  const { calls, run } = fakeRun('laptop');
+  const d = createDormant({ cli: createFleetCli({ run }) });
+  await d.restore({ target: 'fleet-test-c', closed: true, dryRun: true });
+  await d.forget({ target: 'fleet-test-c', closed: true });
+  await d.forget({ all: true, closed: true });
+  await assert.rejects(d.restore({ all: true, closed: true }), (e) => e.status === 400);
+  assert.deepEqual(calls, [
+    ['--local', 'restore', '--json', '--dry-run', '--closed', '--', 'fleet-test-c'],
+    ['--local', 'restore', '--json', '--closed', '--forget=fleet-test-c'],
+    ['--local', 'restore', '--json', '--closed', '--forget-all'],
+  ]);
+
+  const { hosts, urls } = await startPair(t);
+  const list = await call(`${urls.laptop}/api/hosts/workstation/dormant`);
+  assert.equal(list.body.closed[0].tmuxSession, 'fleet-test-c', 'closed passes through');
+  const base = `${urls.laptop}/api/hosts/workstation/dormant`;
+  const ok = await call(`${base}/restore`, 'POST', { target: 'fleet-test-c', closed: true });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(hosts.workstation.calls.at(-1), ['--local', 'restore', '--json', '--closed', '--', 'fleet-test-c']);
+  assert.equal((await call(`${base}/restore`, 'POST', { all: true, closed: true })).status, 400);
+  const gone = await call(`${base}/forget`, 'POST', { all: true, closed: true });
+  assert.equal(gone.status, 200);
+  assert.deepEqual(hosts.workstation.calls.at(-1), ['--local', 'restore', '--json', '--closed', '--forget-all']);
+});
+
+test('recently closed: a CLI without --closed → 501; restore.onBoot ignores closed sessions', async (t) => {
+  const old = createFleetCli({ run: async () => { throw cliError(2, "error: unexpected argument '--closed' found"); } });
+  await assert.rejects(createDormant({ cli: old }).restore({ target: 'x', closed: true }), (e) => e.status === 501);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-dormant-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  const view = { host: 'laptop', bootId: '7', dormant: [], closed: dormantList('laptop').closed };
+  const run = async (bin, args) => {
+    calls.push(args);
+    return { stdout: JSON.stringify(view), stderr: '' };
+  };
+  const d = createDormant({ cli: createFleetCli({ run }) });
+  assert.equal(await d.restoreOnBoot({ markerFile: path.join(dir, 'marker') }), null);
+  assert.deepEqual(calls, [['--local', 'restore', '--json']], 'only the list — nothing restored');
 });

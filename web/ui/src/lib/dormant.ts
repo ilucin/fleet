@@ -1,13 +1,37 @@
 // Dormant sessions (a reboot left them; `fleet restore` brings them back) — pure helpers for the
 // Dormant section and the Board's dimmed cards. Unit-tested in dormant.test.ts.
 import { ApiError } from '@/api/client'
-import type { DormantView, GroupMember, RestoreResponse } from '@/api/types'
+import type { ClosedView, DormantView, GroupMember, RestoreResponse } from '@/api/types'
 import { relTime } from '@/lib/format'
 
 /** One host's answer to GET …/dormant (an empty list when it has none, or predates the route). */
 export interface HostDormant {
   host: string
   views: DormantView[]
+  /** Recently closed (ended within a boot) — never dormant, never on the Board. */
+  closed: ClosedView[]
+}
+
+/** The dormant / closed lists of one GET …/dormant answer (old servers send no `closed`). */
+export function hostDormant(host: string, r: { dormant?: unknown; closed?: unknown }): HostDormant {
+  return { host, views: Array.isArray(r.dormant) ? (r.dormant as DormantView[]) : [], closed: Array.isArray(r.closed) ? (r.closed as ClosedView[]) : [] }
+}
+
+/** Whether a host has anything for the Dormant or Recently closed section. */
+export const hasEntries = (h: HostDormant) => h.views.length > 0 || h.closed.length > 0
+
+export const closedCount = (hosts: HostDormant[]) => hosts.reduce((n, h) => n + h.closed.length, 0)
+
+/** "tmux · 2 windows · 3 panes · closed 2h ago" ("in tmux api · …" for a Claude session whose pane lives on). */
+export function closedMeta(v: ClosedView, now = Date.now()): string {
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+  const parts =
+    v.kind === 'tmux' ? ['tmux', plural(v.windows ?? 0, 'window'), plural(v.panes ?? 0, 'pane')] : v.tmuxSession ? [`in tmux ${v.tmuxSession}`] : ['not in tmux']
+  const cwd = v.sessions?.[0]?.cwd
+  if (cwd && v.kind !== 'tmux') parts.push(cwd)
+  const ago = relTime(sinceMs(v.closedAt ?? v.since), now)
+  if (ago) parts.push(`closed ${ago} ago`)
+  return parts.join(' · ')
 }
 
 /** A dormant Claude session as the Board shows it: resume it by its session id. */

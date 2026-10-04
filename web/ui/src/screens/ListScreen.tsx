@@ -4,6 +4,7 @@ import { useLocation } from 'wouter'
 
 import { GroupedList } from '@/components/board/GroupedList'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
+import { ClosedSection } from '@/components/ClosedSection'
 import { DormantSection } from '@/components/DormantSection'
 import { HostDot } from '@/components/HostBadge'
 import { NewSessionDrawer } from '@/components/NewSessionDrawer'
@@ -278,6 +279,7 @@ export function ListScreen() {
           ) : null}
 
           {fleet ? <DormantSection now={now} host={host} className="mt-6" /> : null}
+          {fleet ? <ClosedSection now={now} host={host} className="mt-4" /> : null}
         </div>
       </main>
 
