@@ -449,3 +449,188 @@ fn nothing_is_recorded_in_fixture_mode() {
     assert!(out.status.success());
     assert!(!env.path("snapshot.json").exists());
 }
+
+/// Start the fake claude in `pane` (a fresh session: no `--resume`).
+fn start_fake(r: &Rig, pane: &str) {
+    r.tmux(&["send-keys", "-t", pane, "-l", &r.s("bin/claude")]);
+    r.tmux(&["send-keys", "-t", pane, "Enter"]);
+}
+
+fn first_pane(r: &Rig, session: &str) -> String {
+    r.tmux(&[
+        "list-panes",
+        "-t",
+        &format!("={session}:"),
+        "-F",
+        "#{pane_id}",
+    ])
+    .lines()
+    .next()
+    .unwrap_or_default()
+    .to_string()
+}
+
+fn closed_names(v: &Value) -> Vec<String> {
+    v["closed"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{v}"))
+        .iter()
+        .map(|d| d["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn sessions_closed_within_a_boot_are_recently_closed_not_dormant() {
+    let Some(r) = Rig::new() else { return };
+    let one = r.s("work/one");
+    let two = r.s("work/two");
+
+    // --- two tmux sessions, each with a Claude pane.
+    for (name, dir) in [("fleet-test-c", &one), ("fleet-test-d", &two)] {
+        let out = r.fleet(&["tmux", "new", "-d", name, "-C", dir]);
+        assert!(out.status.success(), "{}", stderr(&out));
+        start_fake(&r, &first_pane(&r, name));
+    }
+    r.wait_for("both fakes to register", || r.registered().len() == 2);
+    r.json(&["list", "--json"]);
+    let v = r.json(&["restore", "--json"]);
+    assert_eq!(v["closed"], serde_json::json!([]), "{v}");
+
+    // --- close fleet-test-d (the tmux session goes): closed at once, not dormant.
+    let canon = |p: &str| std::fs::canonicalize(p).unwrap();
+    let reg_in = |dir: &str| {
+        r.registered()
+            .into_iter()
+            .find(|s| canon(s["cwd"].as_str().unwrap()) == canon(dir))
+            .unwrap_or_else(|| panic!("no fake in {dir}"))
+    };
+    let d_id = reg_in(&two)["sessionId"].as_str().unwrap().to_string();
+    let c_reg = reg_in(&one);
+    let c_id = c_reg["sessionId"].as_str().unwrap().to_string();
+    r.tmux(&["kill-session", "-t", "=fleet-test-d"]);
+    r.wait_for("the closed fake to exit", || r.registered().len() == 1);
+    r.json(&["list", "--json"]);
+    let v = r.json(&["restore", "--closed", "--json"]);
+    assert_eq!(closed_names(&v), ["fleet-test-d"]);
+    assert_eq!(v["dormant"], serde_json::json!([]));
+    let d = &v["closed"][0];
+    assert_eq!(d["kind"], "tmux");
+    assert_eq!(d["sessions"][0]["sessionId"], d_id.as_str());
+    assert!(
+        d["closedAt"].is_string() && d["since"] == d["closedAt"],
+        "{d}"
+    );
+
+    // --- /exit in fleet-test-c: claude ends, the pane's shell stays.
+    let pid = c_reg["pid"].as_i64().unwrap();
+    let _ = std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .output();
+    r.wait_for("the exited fake", || r.registered().is_empty());
+    r.json(&["list", "--json"]);
+    let v = r.json(&["restore", "--json"]);
+    assert_eq!(v["closed"].as_array().unwrap().len(), 2, "{v}");
+    let c = v["closed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["kind"] == "claude")
+        .unwrap();
+    assert_eq!(c["target"], c_id.as_str());
+    assert_eq!(c["tmuxSession"], "fleet-test-c");
+
+    // Closed is never part of --all, nor of the dormant hints.
+    let v = r.json(&["restore", "--all", "--json"]);
+    assert_eq!(v["restored"], serde_json::json!([]), "{v}");
+    let out = r.fleet(&["restore"]);
+    let text = stdout(&out);
+    assert!(text.contains("nothing dormant"), "{text}");
+    assert!(
+        text.contains("2 recently closed (fleet restore --closed)"),
+        "{text}"
+    );
+    let out = r.fleet(&["restore", "--closed"]);
+    assert!(stdout(&out).contains("fleet-test-d"), "{}", stdout(&out));
+    assert!(stdout(&out).contains("closed "), "{}", stdout(&out));
+    assert!(!stdout(&r.fleet(&["list"])).contains("dormant"));
+    let out = r.fleet(&["restore", "--closed", "zzz-nothing"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    let out = r.fleet(&["restore", "--closed", "--all"]);
+    assert!(!out.status.success(), "--closed --all is refused");
+
+    // --- the Claude session comes back in a new window of its live tmux session.
+    let out = r.fleet(&["-n", "restore", "--closed", &c_id]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("new-window -d -t '=fleet-test-c:'"),
+        "{}",
+        stdout(&out)
+    );
+    let v = r.json(&["restore", "--closed", &c_id, "--json"]);
+    let done = &v["restored"][0];
+    assert_eq!(done["session"], "fleet-test-c", "{v}");
+    assert_eq!(done["renamed"], false);
+    r.wait_for("the resumed claude", || {
+        r.registered()
+            .iter()
+            .any(|s| s["sessionId"] == c_id.as_str())
+    });
+    let windows = r.tmux(&[
+        "list-windows",
+        "-t",
+        "=fleet-test-c:",
+        "-F",
+        "#{window_index}",
+    ]);
+    assert_eq!(windows.lines().count(), 2, "{windows}");
+    assert_eq!(
+        r.launches().lines().last().unwrap_or_default(),
+        format!("--resume {c_id}")
+    );
+
+    // --- the whole tmux session comes back under its name.
+    let v = r.json(&["restore", "--closed", "fleet-test-d", "--json"]);
+    assert_eq!(v["restored"][0]["session"], "fleet-test-d", "{v}");
+    r.wait_for("the resumed claude", || {
+        r.registered()
+            .iter()
+            .any(|s| s["sessionId"] == d_id.as_str())
+    });
+    r.json(&["list", "--json"]);
+    assert_eq!(
+        r.json(&["restore", "--json"])["closed"],
+        serde_json::json!([])
+    );
+
+    // --- forget: close fleet-test-d again, then forget everything closed.
+    r.tmux(&["kill-session", "-t", "=fleet-test-d"]);
+    r.wait_for("the closed fake to exit", || r.registered().len() == 1);
+    r.json(&["list", "--json"]);
+    let v = r.json(&["restore", "--closed", "--forget-all", "--json"]);
+    assert_eq!(v["forgotten"], serde_json::json!(["fleet-test-d"]), "{v}");
+    assert_eq!(
+        r.json(&["restore", "--json"])["closed"],
+        serde_json::json!([])
+    );
+
+    // --- closed just before a reboot (within the grace period): dormant, not closed.
+    r.tmux(&["kill-session", "-t", "=fleet-test-c"]);
+    r.wait_for("the fakes to exit", || r.registered().is_empty());
+    r.json(&["list", "--json"]);
+    assert_eq!(
+        closed_names(&r.json(&["restore", "--json"])),
+        ["fleet-test-c"]
+    );
+    r.reboot("boot-2");
+    let v = r.json(&["restore", "--json"]);
+    assert_eq!(v["closed"], serde_json::json!([]), "{v}");
+    let names: Vec<&str> = v["dormant"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["fleet-test-c"]);
+    // The file keeps its closed list alongside (additive).
+    assert!(r.snapshot()["closed"].is_object());
+}

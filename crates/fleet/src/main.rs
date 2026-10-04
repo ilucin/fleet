@@ -340,10 +340,15 @@ enum Commands {
     Last,
 
     /// Sessions a reboot left dormant: list them (default), bring one or all back, or forget them
+    /// (--closed: the same for sessions closed recently, within a boot)
     Restore {
         /// Dormant tmux name (exact > prefix > substring), session id (prefix of 4+) or title
         #[arg(conflicts_with_all = ["all", "forget", "forget_all", "list"])]
         target: Option<String>,
+        /// Work on the recently closed sessions instead (ended within a boot: Close, kill,
+        /// /exit), kept for config restore.keepClosedDays
+        #[arg(long, conflicts_with = "all")]
+        closed: bool,
         /// List the dormant sessions (the default)
         #[arg(long, conflicts_with_all = ["all", "forget", "forget_all"])]
         list: bool,
@@ -356,7 +361,7 @@ enum Commands {
         /// Drop every dormant session
         #[arg(long)]
         forget_all: bool,
-        /// `{ host, bootId, dormant: [DormantView…] }`; with a target or --all
+        /// `{ host, bootId, dormant: [DormantView…], closed: [ClosedView…] }`; with a target or --all
         /// `{ host, restored: […], failed: […] }`; with --forget `{ host, forgotten: […] }`
         #[arg(long)]
         json: bool,
@@ -1024,6 +1029,7 @@ fn run(cli: Cli) -> Result<i32> {
         Commands::Last => tmux_cmds::last()?,
         Commands::Restore {
             target,
+            closed,
             list: _,
             all,
             forget,
@@ -1031,6 +1037,7 @@ fn run(cli: Cli) -> Result<i32> {
             json,
         } => restore::run(restore::RestoreOpts {
             target,
+            closed,
             all,
             forget,
             forget_all,

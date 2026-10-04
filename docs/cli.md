@@ -277,12 +277,22 @@ you bring it back or forget it. Within one boot, a session you close is closed �
 (except in the last 5 minutes before a reboot: a restart quits the terminals before the daemons,
 and those sessions must survive that). The `watch` header shows `· N dormant` while there are any.
 
+Sessions closed within a boot are kept separately as **recently closed** (`--closed`) for config
+`restore.keepClosedDays` (default 7, `0` = off; newest 50): a closed tmux session (one that had a
+Claude pane), a Claude session closed outside tmux, or a Claude session that exited while its
+tmux pane lived on (`/exit`). They show up at once, are never dormant — never part of `--all`,
+`restore.onBoot`, `fleet enter`, groups or stacks — and a reboot within 5 minutes of closing
+makes them dormant instead.
+
 | command | does |
 | --- | --- |
 | `fleet restore [--list] [--json]` | the dormant sessions on this host: tmux name (or the Claude title), windows/panes, Claude sessions, how long ago |
 | `fleet restore <target> [-n] [--json]` | bring one back. `<target>`: a dormant tmux name (exact > prefix > substring, like `enter`), a session id (whole, or a prefix of 4+ characters — a session inside a dormant tmux session restores that tmux session) or a Claude title (exact > prefix > substring) |
 | `fleet restore --all [-n] [--json]` | bring every dormant session back (a failure is reported and the rest still go) |
 | `fleet restore --forget <target> \| --forget-all [--json]` | drop dormant entries without restoring them |
+| `fleet restore --closed [--json]` | the recently closed sessions, newest first: title, cwd, `closed 2h ago` (text `fleet restore` ends with `N recently closed (fleet restore --closed)` when there are any) |
+| `fleet restore --closed <target> [-n] [--json]` | bring one closed session back (same targets and rules as above). A Claude session whose tmux session still exists comes back in a new window of it; otherwise as below. No `--closed --all` |
+| `fleet restore --closed --forget <target> \| --forget-all [--json]` | drop recently closed entries |
 
 What a restore does:
 
@@ -311,7 +321,10 @@ What a restore does:
 
 JSON shapes:
 
-- `restore [--list] --json` — `{ host, bootId, dormant: [DormantView…] }`, where DormantView =
+- `restore [--list] [--closed] --json` — `{ host, bootId, dormant: [DormantView…], closed:
+  [ClosedView…] }` (the same with or without `--closed`), where ClosedView = DormantView +
+  `closedAt` (ISO; `since` is the same) + `tmuxSession?` (a Claude session's tmux session that
+  outlived it), newest first, and DormantView =
   `{ kind: "tmux"|"claude", target, name, since, windows, panes, sessions: [{ sessionId, name,
   title, cwd }] }`. `target` is what `fleet restore <target>` takes (the tmux name, or the full
   session id); `name` is the tmux name or the Claude title; `since` is when it went down (ISO).
@@ -319,7 +332,7 @@ JSON shapes:
   panes, launched: [{ sessionId, title, line }], warnings, commands, dryRun }], failed: [{ target,
   error }] }`; exit 1 when anything failed. `session` is the tmux session it now lives in;
   `commands` every tmux command and launch line, in order.
-- `restore --forget …|--forget-all --json` — `{ host, forgotten: [name…] }`.
+- `restore [--closed] --forget …|--forget-all --json` — `{ host, forgotten: [name…] }`.
 
 ## Hosts
 
@@ -399,7 +412,7 @@ fleet init --yes --self laptop \
 | 0 | success |
 | 1 | error, bad usage |
 | 2 | tmux, `stack` and `restore` commands: ambiguous match (candidates are printed) |
-| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; `stack set`/`edit`: the StackBrief changed since it was opened; `stack`: no stack matches; `restore`: no dormant session matches; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
+| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; `stack set`/`edit`: the StackBrief changed since it was opened; `stack`: no stack matches; `restore`: no dormant (with `--closed`: recently closed) session matches; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
 | 4 | host unreachable |
 | 127 | a required tool (tmux, node) was not found |
 

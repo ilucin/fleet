@@ -224,6 +224,9 @@ pub struct Config {
     pub naming: NamingConfig,
     pub grouping: GroupingConfig,
     pub stacks: StacksConfig,
+    /// `restore` — session recovery (`onBoot` is the web server's; `keepClosedDays` ours).
+    /// Raw JSON, read leniently: a bad value here must not cost the rest of the config.
+    pub restore: Value,
 }
 
 impl Config {
@@ -290,6 +293,16 @@ impl Config {
                         .is_some_and(|s| !s.trim().is_empty())
             })
             .collect()
+    }
+
+    /// `restore.keepClosedDays`: how long a session closed within a boot stays in the
+    /// recently-closed list. Missing or not a number ≥ 0 → the default; 0 turns it off.
+    pub fn keep_closed_days(&self) -> f64 {
+        self.restore
+            .get("keepClosedDays")
+            .and_then(Value::as_f64)
+            .filter(|d| d.is_finite() && *d >= 0.0)
+            .unwrap_or(crate::core::snapshot::DEFAULT_KEEP_CLOSED_DAYS)
     }
 
     pub fn web_port(&self) -> u16 {

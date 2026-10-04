@@ -162,7 +162,9 @@ Notes:
   session — windows, panes, cwds, layout — and resumes every Claude session in it with
   `claude --resume <id>` and its original flags; `fleet enter <name>` does it on the fly. The web
   UI lists them under the sessions (Resume / Forget / Resume all), and `"restore": { "onBoot": true }`
-  in the workstation's config makes its web server resume them all once after each boot. See
+  in the workstation's config makes its web server resume them all once after each boot. Sessions
+  you closed yourself are not dormant: `fleet restore --closed` (and the web UI's collapsed
+  "Recently closed") brings one back for a week (`restore.keepClosedDays`). See
   [cli.md → Session recovery](cli.md#session-recovery).
 
 ## 6. fleet

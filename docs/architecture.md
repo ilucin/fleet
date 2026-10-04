@@ -141,7 +141,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `tui` | dashboard preferences: `rows` (`"1"`, `"2"`, `"auto"`), `mouse` |
 | `naming` | generated names: `enabled`, `model` (default `haiku`), `syncTmux` (tmux name follows the title, default on), `autoTitle` |
 | `stacks` | [session stacks](#session-stacks): `enabled` (default `true` — `false` = never call the model; a new stack gets the skeleton StackBrief), `model` (default `sonnet`) |
-| `restore` | [session recovery](#session-recovery): `onBoot` (default `false`) — when `true`, this host's web server runs `fleet --local restore --all` once at start if there are dormant sessions, at most once per boot (it remembers the boot id in `${XDG_STATE_HOME:-~/.local/state}/fleet/web-restored-boot`); the result is logged. For an always-on machine |
+| `restore` | [session recovery](#session-recovery): `onBoot` (default `false`) — when `true`, this host's web server runs `fleet --local restore --all` once at start if there are dormant sessions, at most once per boot (it remembers the boot id in `${XDG_STATE_HOME:-~/.local/state}/fleet/web-restored-boot`); the result is logged. For an always-on machine. Recently closed sessions are never part of it. `keepClosedDays` (default `7`, a number ≥ 0; `0` turns the [recently closed](#recently-closed) list off) — how long a session closed within a boot stays restorable; at most the newest 50 are kept |
 | `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
@@ -354,9 +354,10 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/stacks/:id/spawn` | `{ prompt?, name?, model?, dir? }` → a sibling in that stack: `dir` defaults to the stack's `absCwd`; otherwise as the session route below, without `ensure` |
 | POST | `/api/hosts/:host/sessions/:id/stack/spawn` | `{ prompt?, name?, model?, dir? }` → (1) `fleet --local stack ensure <session_id> --json` (timeout 150 s: it may call the model); (2) the server's own spawner (tmux, trust prompt handled) in the session's cwd (or `dir`, inside the session's cwd or a spawn dir) with `prompt` = `contextLine + ' ' + prompt`; (3) in the background, find the new session (by tmux session name, ≤ ~75 s) and `fleet --local stack add <stack id> <session_id> --json` → 200 `{ host, stack: StackView, created, generated, spawn: { name, dir, tmuxSession, command, trusted, model } }` |
 | POST | `/api/hosts/:host/stacks/sync` | `fleet --local stack sync --json` → `{ host, changed, stacks }` |
-| GET | `/api/hosts/:host/dormant` | [session recovery](#session-recovery): `fleet --local restore --json` → `{ host, bootId, dormant: [DormantView] }`; 501 when this host's CLI has no `restore` |
+| GET | `/api/hosts/:host/dormant` | [session recovery](#session-recovery): `fleet --local restore --json` → `{ host, bootId, dormant: [DormantView], closed: [ClosedView] }` (`closed`: [recently closed](#recently-closed), from CLIs that know it); 501 when this host's CLI has no `restore` |
 | POST | `/api/hosts/:host/dormant/restore` | `{ target, dryRun? }` (a dormant tmux name or session id, one line ≤ 200 chars) or `{ all: true, dryRun? }` → `fleet --local restore [--dry-run] (-- <target> \| --all) --json` → `{ host, restored, failed }`. Starts agents, like spawn: **409** `{ error, candidates }` when the target is ambiguous (exit 2), 404 no match (exit 3), 502 `{ error, restored: [], failed }` when nothing came back; a partial `--all` is 200 with `failed` filled. The fleet list (and a stack sync) refresh as the sessions register. Proxy timeout 6 min |
 | POST | `/api/hosts/:host/dormant/forget` | `{ target }` or `{ all: true }` → `fleet --local restore (--forget=<target> \| --forget-all) --json` → `{ host, forgotten }`; 409 / 404 as restore |
+| | | Both POSTs take `closed: true` for a [recently closed](#recently-closed) entry (→ `--closed`); `{ all: true, closed: true }` is a 400 on restore (closed ones are resumed one at a time), allowed on forget. A CLI without `--closed` → 501 |
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` → **202** `{ host, id, started, queued, generating: true }`, the model call runs in the background (poll GET); **429** `{ error, retryAfterMs }` at the hourly cap |
 
 `:host` is `self` or a configured peer; `:id` is a session id or a unique prefix (≥ 8 chars) — on
@@ -674,16 +675,19 @@ are preserved at every level on rewrite — it is a contract like `groups.json`.
   "version": 1, "host": "laptop", "bootId": "1727000000", "updatedAt": "2026-10-04T12:00:00Z",
   "tmux":  [ TmuxSnap… ],
   "iterm": [ ClaudeSnap… ],
-  "dormant": { "tmux": [ TmuxSnap… ], "iterm": [ ClaudeSnap… ] }
+  "dormant": { "tmux": [ TmuxSnap… ], "iterm": [ ClaudeSnap… ] },
+  "closed":  { "tmux": [ TmuxSnap… ], "claude": [ ClaudeSnap… ] }
 }
 TmuxSnap   = { name, windows: [ { index, name, layout, active, autoName,
                                   panes: [ { index, cwd, active, claude: ClaudeSnap|null } ] } ],
-               since?, goneAt? }
-ClaudeSnap = { sessionId, name, cwd, title, flags: [argv…], since?, goneAt? }
+               since?, goneAt?, closedAt? }
+ClaudeSnap = { sessionId, name, cwd, title, flags: [argv…], since?, goneAt?, closedAt?, tmuxSession? }
 ```
 
 - `tmux` — the live tmux sessions of the current boot; `iterm` — live Claude sessions that are
   not in a tmux pane fleet can see (iTerm, unknown). `dormant` — what earlier boots ran.
+  `closed` — what ended within a boot ([Recently closed](#recently-closed)); added later, so a
+  file without it is an empty list. A session id is never both dormant and closed.
 - `layout` is `#{window_layout}`; `autoName` = tmux named the window itself (a restore then
   leaves the name to tmux). `title` is the display title when recorded. `flags` is the
   replay-safe part of the Claude command line (`--dangerously-skip-permissions`, `--chrome`,
@@ -691,10 +695,12 @@ ClaudeSnap = { sessionId, name, cwd, title, flags: [argv…], since?, goneAt? }
   normalised to `--k v`).
 - `since` (dormant entries) — when it went down: the old boot's last `updatedAt`. An unchanged
   snapshot is still rewritten every 10 minutes so this stays accurate.
-- `goneAt` (live entries) — it vanished this long ago; dropped after 5 minutes. A restart quits
-  the terminal apps (and the Claude sessions in them) before it kills the daemons, and a poll in
-  between must not erase them; a Claude session gone from a pane that is still there lingers in
-  that pane, one whose pane is gone lingers in `iterm`.
+- `goneAt` (live entries) — it vanished this long ago; after 5 minutes it moves into `closed`. A
+  restart quits the terminal apps (and the Claude sessions in them) before it kills the daemons,
+  and a poll in between must not erase them; a Claude session gone from a pane that is still there
+  lingers in that pane, one whose pane is gone lingers in `iterm` (with `tmuxSession`).
+- `closedAt` (closed entries) — when it ended (its `goneAt`). `tmuxSession` — the tmux session a
+  Claude session ran in, kept when it left its pane (`/exit`, the shell stayed).
 - `bootId` — `$FLEET_BOOT_ID` (tests), else Linux `/proc/sys/kernel/random/boot_id`, else macOS
   `kern.boottime` seconds. Unknown → nothing is ever marked dormant.
 
@@ -714,6 +720,30 @@ set of this machine's dormant session ids; for another host, `fleet -H <host> re
 the `sessionId`s under `dormant[].sessions`. A dormant session counts as *present*, not gone:
 grouping keeps its assignment and flags the member `dormant: true` ([Smart
 grouping](#smart-grouping)); stack sync doesn't close it and StackView members carry `dormant`.
+
+### Recently closed
+
+A session that ends *within* a boot — Close in the app, `fleet kill`, `/exit`, a killed tmux
+session — is **closed**, deliberately separate from dormant: it is never part of `restore --all`,
+`restore.onBoot`, `fleet enter`'s auto-restore, `dormant_session_ids()` or the groups'/stacks'
+dormant sets, so a closed session's group and stack membership lapses as before. It can still be
+brought back by hand for `restore.keepClosedDays` (default 7; `0` = off), the newest 50 at most.
+
+- It shows as closed at once: `core::snapshot::closed_entries` is the stored `closed` lists plus
+  whatever still lingers with `goneAt`. When the grace period ends it moves into `closed`
+  (`closedAt` = its `goneAt`); a reboot within the grace period makes it dormant instead (and it
+  leaves the closed list). Older closed entries stay closed across a reboot (expiry still applies).
+- Whole tmux sessions are kept only when they had a Claude pane; plain shell sessions are not. A
+  Claude session that exits while its tmux pane lives on is a lone closed entry with
+  `tmuxSession`.
+- A closed (or dormant) Claude session whose id is live again leaves the list; a closed tmux
+  session left with no Claude pane goes. A newer closed tmux session of the same name replaces
+  the older one, whose Claude sessions stay as lone entries.
+- Restore (`fleet restore --closed <target>`) is the dormant restore: a tmux session with its
+  layout (non-Claude panes a plain shell), a lone Claude session in a new tmux session named
+  after its title — except one with a `tmuxSession` that still exists, which gets a new window
+  (`new-window -d`) there running the resume line. Same launcher, flags, name-clash handling,
+  dry run, file lock and exit codes (2 ambiguous, 3 no match).
 
 ## Extension points
 

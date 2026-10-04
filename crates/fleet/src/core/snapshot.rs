@@ -17,7 +17,10 @@
 //! except in the last [`GRACE_SECS`] before a reboot: a restart quits the terminal apps (and
 //! the Claude sessions in them) before it kills the daemons, and a `fleet list` polled in
 //! between must not erase them. So a vanished entry lingers with `goneAt` for the grace
-//! period, and only then is dropped.
+//! period, and only then moves into the **closed** list (`closed`, kept for
+//! `restore.keepClosedDays`, newest [`MAX_CLOSED`]). Closed entries — lingering ones
+//! included, see [`closed_entries`] — can be brought back with [`restore_closed`], but never
+//! count as dormant: no "restore all", no restore on boot, no group/stack membership.
 //!
 //! Nothing in here prints. The file is a contract like `groups.json`: unknown keys survive a
 //! rewrite, at every level.
@@ -43,6 +46,10 @@ pub const GRACE_SECS: i64 = 300;
 /// An unchanged snapshot is still rewritten this often, so `updatedAt` — which becomes the
 /// dormant entries' `since` — stays close to the moment the machine went down.
 pub const REFRESH_SECS: i64 = 600;
+/// `restore.keepClosedDays` when the config doesn't say.
+pub const DEFAULT_KEEP_CLOSED_DAYS: f64 = 7.0;
+/// At most this many closed entries are kept (the newest).
+pub const MAX_CLOSED: usize = 50;
 /// Shortest session-id prefix a restore target may be.
 const MIN_ID_PREFIX: usize = 4;
 /// Flags replayed on resume without a value.
@@ -75,6 +82,13 @@ pub struct ClaudeSnap {
     /// Live entries only: when it vanished, within [`GRACE_SECS`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gone_at: Option<String>,
+    /// Closed entries only: when it ended (within a boot — closed on purpose).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<String>,
+    /// The tmux session it ran in, kept when it leaves its pane (claude exited, the pane
+    /// lived on): a closed one is resumed in a new window there while that session exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -126,6 +140,9 @@ pub struct TmuxSnap {
     pub since: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gone_at: Option<String>,
+    /// Closed entries only: when it ended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -163,6 +180,136 @@ impl Dormant {
     }
 }
 
+/// Sessions that ended within a boot — closed on purpose (Close in the app, `fleet kill`,
+/// `/exit`, a killed tmux session). Never dormant: nothing restores them unasked.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Closed {
+    /// Whole tmux sessions (that had a Claude pane), with their layout.
+    pub tmux: Vec<TmuxSnap>,
+    /// Lone Claude sessions: not in tmux, or gone from a tmux pane that lived on.
+    pub claude: Vec<ClaudeSnap>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl Closed {
+    pub fn is_empty(&self) -> bool {
+        self.tmux.is_empty() && self.claude.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tmux.len() + self.claude.len()
+    }
+
+    /// Every session id in it.
+    fn ids(&self) -> HashSet<String> {
+        self.tmux
+            .iter()
+            .flat_map(TmuxSnap::claudes)
+            .chain(self.claude.iter())
+            .map(|c| c.session_id.clone())
+            .collect()
+    }
+
+    /// Take `ids` out: lone entries go, tmux panes become plain shells, and a tmux entry
+    /// left without a Claude pane goes.
+    fn drop_ids(&mut self, ids: &HashSet<String>) {
+        self.claude.retain(|c| !ids.contains(&c.session_id));
+        for t in &mut self.tmux {
+            for p in t.windows.iter_mut().flat_map(|w| w.panes.iter_mut()) {
+                if p.claude
+                    .as_ref()
+                    .is_some_and(|c| ids.contains(&c.session_id))
+                {
+                    p.claude = None;
+                }
+            }
+        }
+        self.tmux.retain(|t| t.claudes().next().is_some());
+    }
+
+    /// Add a whole tmux session that just closed (newer than everything here): its ids leave
+    /// older entries, and an older closed session of the same name hands what Claude panes
+    /// it has left over as lone sessions (hinted with the name).
+    fn add_tmux(&mut self, mut t: TmuxSnap) {
+        for p in t.windows.iter_mut().flat_map(|w| w.panes.iter_mut()) {
+            if let Some(c) = p.claude.as_mut() {
+                c.gone_at = None;
+                c.since = None;
+            }
+        }
+        if t.claudes().next().is_none() {
+            return;
+        }
+        let ids: HashSet<String> = t.claudes().map(|c| c.session_id.clone()).collect();
+        self.drop_ids(&ids);
+        if let Some(i) = self.tmux.iter().position(|o| o.name == t.name) {
+            let old = self.tmux.remove(i);
+            for c in old.claudes() {
+                self.claude.push(ClaudeSnap {
+                    closed_at: old.closed_at.clone(),
+                    tmux_session: Some(old.name.clone()),
+                    ..c.clone()
+                });
+            }
+        }
+        self.tmux.push(t);
+    }
+
+    /// Add a lone Claude session that just closed (newer than everything here).
+    fn add_claude(&mut self, c: ClaudeSnap) {
+        self.drop_ids(&HashSet::from([c.session_id.clone()]));
+        self.claude.push(ClaudeSnap {
+            gone_at: None,
+            since: None,
+            ..c
+        });
+    }
+
+    /// Drop what is older than `keep` seconds (or has no readable `closedAt`), then keep the
+    /// newest [`MAX_CLOSED`].
+    fn expire(&mut self, keep: i64, now: DateTime<Utc>) {
+        let fresh = |at: &Option<String>| {
+            at.as_deref()
+                .and_then(|a| age(a, now))
+                .is_some_and(|a| a <= keep)
+        };
+        self.tmux.retain(|t| fresh(&t.closed_at));
+        self.claude.retain(|c| fresh(&c.closed_at));
+        if self.len() <= MAX_CLOSED {
+            return;
+        }
+        let mut stamps: Vec<String> = self
+            .tmux
+            .iter()
+            .map(|t| t.closed_at.clone().unwrap_or_default())
+            .chain(
+                self.claude
+                    .iter()
+                    .map(|c| c.closed_at.clone().unwrap_or_default()),
+            )
+            .collect();
+        stamps.sort_unstable_by(|a, b| b.cmp(a));
+        let cut = stamps[MAX_CLOSED - 1].clone();
+        // Ties at the cut: the earliest-listed survive, up to the cap.
+        let mut room = MAX_CLOSED - stamps.iter().filter(|s| **s > cut).count();
+        let mut keep_one = |at: &Option<String>| {
+            let at = at.clone().unwrap_or_default();
+            if at > cut {
+                return true;
+            }
+            if at == cut && room > 0 {
+                room -= 1;
+                return true;
+            }
+            false
+        };
+        self.tmux.retain(|t| keep_one(&t.closed_at));
+        self.claude.retain(|c| keep_one(&c.closed_at));
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Snapshot {
@@ -176,6 +323,8 @@ pub struct Snapshot {
     /// Live Claude sessions of the current boot that are not in a tmux pane.
     pub iterm: Vec<ClaudeSnap>,
     pub dormant: Dormant,
+    /// What ended within a boot, for [`keep_closed_secs`] (see [`Closed`]).
+    pub closed: Closed,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -635,20 +784,48 @@ pub fn gather(rows: &[Session]) -> std::result::Result<Live, String> {
 
 // ------------------------------------------------------------------ record
 
-/// The pure heart of [`record`]: `stored` moved forward to `live` at `now` on boot `boot`.
+/// `restore.keepClosedDays` in seconds; 0 = the recently-closed list is off.
+pub fn keep_closed_secs() -> i64 {
+    (crate::core::config::get().keep_closed_days() * 86_400.0).round() as i64
+}
+
+/// [`step`] with the default `restore.keepClosedDays`.
+pub fn transition(
+    stored: Snapshot,
+    live: Live,
+    boot: Option<&str>,
+    host: &str,
+    now: DateTime<Utc>,
+) -> Snapshot {
+    step(
+        stored,
+        live,
+        boot,
+        host,
+        now,
+        (DEFAULT_KEEP_CLOSED_DAYS * 86_400.0) as i64,
+    )
+}
+
+/// The pure heart of [`record`]: `stored` moved forward to `live` at `now` on boot `boot`,
+/// keeping closed entries for `keep` seconds (0 = none).
 ///
 /// - A different boot id: everything the old boot was running moves into `dormant` (merged
-///   by tmux name / session id, `since` = the old snapshot's `updatedAt`).
+///   by tmux name / session id, `since` = the old snapshot's `updatedAt`) — including what
+///   was still lingering (`goneAt`). Older closed entries stay closed.
 /// - Then `tmux` / `iterm` become the live state. What vanished since the last record
-///   lingers with `goneAt` until [`GRACE_SECS`] have passed (see the module docs).
-/// - A dormant Claude session that is live again (resumed by hand) leaves `dormant`; a
-///   dormant tmux session left with no dormant Claude pane, whose name is live again, too.
-pub fn transition(
+///   lingers with `goneAt` until [`GRACE_SECS`] have passed (see the module docs) — shown
+///   as closed meanwhile ([`closed_entries`]) — and then moves into `closed`.
+/// - A dormant or closed Claude session that is live again (resumed by hand) leaves
+///   `dormant` / `closed`; a dormant tmux session left with no dormant Claude pane, whose
+///   name is live again, too. A session id is never both dormant and closed.
+pub fn step(
     mut stored: Snapshot,
     live: Live,
     boot: Option<&str>,
     host: &str,
     now: DateTime<Utc>,
+    keep: i64,
 ) -> Snapshot {
     let rebooted = matches!((stored.boot_id.as_deref(), boot), (Some(a), Some(b)) if a != b);
     if rebooted {
@@ -692,7 +869,7 @@ pub fn transition(
 
     let live_ids = live.ids();
     let live_names: HashSet<String> = live.tmux.iter().map(|t| t.name.clone()).collect();
-    let (tmux, iterm) = linger(
+    let (tmux, iterm, closed) = linger(
         std::mem::take(&mut stored.tmux),
         std::mem::take(&mut stored.iterm),
         live,
@@ -722,28 +899,47 @@ pub fn transition(
         .tmux
         .retain(|t| !(live_names.contains(&t.name) && t.claudes().next().is_none()));
 
+    if keep > 0 {
+        for c in closed {
+            match c {
+                Taken::Tmux(t) => stored.closed.add_tmux(t),
+                Taken::Claude(c) => stored.closed.add_claude(c),
+            }
+        }
+        let mut not_closed = live_ids;
+        not_closed.extend(dormant_ids(&stored));
+        stored.closed.drop_ids(&not_closed);
+        stored.closed.expire(keep, now);
+    } else {
+        stored.closed.tmux.clear();
+        stored.closed.claude.clear();
+    }
+
     stored.version = VERSION;
     stored.host = host.to_string();
     stored
 }
 
 /// The live lists, plus what vanished from the stored ones less than [`GRACE_SECS`] ago
-/// (stamped `goneAt` the first time it is missed). A vanished tmux session lingers whole; a
+/// (stamped `goneAt` the first time it is missed), plus — third — what has been gone longer
+/// and is now closed (`closedAt` = its `goneAt`). A vanished tmux session lingers whole; a
 /// Claude session gone from a pane that is still there goes back into that pane, else into
-/// the non-tmux list.
+/// the non-tmux list (remembering its tmux session).
 fn linger(
     stored_tmux: Vec<TmuxSnap>,
     stored_iterm: Vec<ClaudeSnap>,
     live: Live,
     live_ids: &HashSet<String>,
     now: DateTime<Utc>,
-) -> (Vec<TmuxSnap>, Vec<ClaudeSnap>) {
-    let fresh = |gone: &Option<String>| -> Option<String> {
+) -> (Vec<TmuxSnap>, Vec<ClaudeSnap>, Vec<Taken>) {
+    // Ok(goneAt) while it lingers, Err(closedAt) once the grace period is over.
+    let fresh = |gone: &Option<String>| -> std::result::Result<String, String> {
         match gone {
-            None => Some(iso(now)),
+            None => Ok(iso(now)),
             Some(g) => match age(g, now) {
-                Some(a) if a <= GRACE_SECS => Some(g.clone()),
-                _ => None,
+                Some(a) if a <= GRACE_SECS => Ok(g.clone()),
+                Some(_) => Err(g.clone()),
+                None => Err(iso(now)),
             },
         }
     };
@@ -751,6 +947,7 @@ fn linger(
         mut tmux,
         mut iterm,
     } = live;
+    let mut closed: Vec<Taken> = Vec::new();
     let mut orphans: Vec<ClaudeSnap> = Vec::new();
     for mut st in stored_tmux {
         if let Some(lt) = tmux.iter_mut().find(|t| t.name == st.name) {
@@ -760,12 +957,23 @@ fn linger(
                     if live_ids.contains(&c.session_id) {
                         continue;
                     }
-                    let Some(gone) = fresh(&c.gone_at) else {
-                        continue;
+                    let c = ClaudeSnap {
+                        tmux_session: Some(st.name.clone()),
+                        ..c.clone()
+                    };
+                    let gone = match fresh(&c.gone_at) {
+                        Ok(g) => g,
+                        Err(at) => {
+                            closed.push(Taken::Claude(ClaudeSnap {
+                                closed_at: Some(at),
+                                ..c
+                            }));
+                            continue;
+                        }
                     };
                     let c = ClaudeSnap {
                         gone_at: Some(gone),
-                        ..c.clone()
+                        ..c
                     };
                     let slot = lt
                         .windows
@@ -781,10 +989,6 @@ fn linger(
             }
             continue;
         }
-        let Some(gone) = fresh(&st.gone_at) else {
-            continue;
-        };
-        st.gone_at = Some(gone);
         // Its Claude sessions alive elsewhere are not part of it any more.
         for p in st.windows.iter_mut().flat_map(|w| w.panes.iter_mut()) {
             if p.claude
@@ -794,20 +998,34 @@ fn linger(
                 p.claude = None;
             }
         }
-        tmux.push(st);
+        match fresh(&st.gone_at) {
+            Ok(gone) => {
+                st.gone_at = Some(gone);
+                tmux.push(st);
+            }
+            Err(at) => {
+                st.gone_at = None;
+                st.closed_at = Some(at);
+                closed.push(Taken::Tmux(st));
+            }
+        }
     }
     for c in stored_iterm.into_iter().chain(orphans) {
         if live_ids.contains(&c.session_id) || iterm.iter().any(|i| i.session_id == c.session_id) {
             continue;
         }
-        if let Some(gone) = fresh(&c.gone_at) {
-            iterm.push(ClaudeSnap {
+        match fresh(&c.gone_at) {
+            Ok(gone) => iterm.push(ClaudeSnap {
                 gone_at: Some(gone),
                 ..c
-            });
+            }),
+            Err(at) => closed.push(Taken::Claude(ClaudeSnap {
+                closed_at: Some(at),
+                ..c
+            })),
         }
     }
-    (tmux, iterm)
+    (tmux, iterm, closed)
 }
 
 /// Record the live state on top of the stored snapshot. Writes only when something changed
@@ -835,7 +1053,14 @@ pub fn record(rows: &[Session]) -> Result<bool> {
         }
     };
     let now = Utc::now();
-    let next = transition(stored.clone(), live, boot.as_deref(), &host, now);
+    let next = step(
+        stored.clone(),
+        live,
+        boot.as_deref(),
+        &host,
+        now,
+        keep_closed_secs(),
+    );
     let stale = stored
         .updated_at
         .as_deref()
@@ -881,12 +1106,13 @@ pub fn current() -> Result<Snapshot> {
         return Ok(s);
     }
     let host = s.host.clone();
-    Ok(transition(
+    Ok(step(
         s,
         Live::default(),
         boot.as_deref(),
         &host,
         Utc::now(),
+        keep_closed_secs(),
     ))
 }
 
@@ -998,7 +1224,155 @@ pub fn dormant_views(s: &Snapshot) -> Vec<DormantView> {
     tmux
 }
 
+/// One recently closed entry (`fleet restore --closed --json`, and `closed` in the list):
+/// a [`DormantView`] (`since` = `closedAt`) plus when it closed and, for a Claude session
+/// whose tmux pane outlived it, that tmux session.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedView {
+    #[serde(flatten)]
+    pub view: DormantView,
+    pub closed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
+}
+
+/// Everything recently closed: the stored `closed` lists, plus what is still lingering
+/// (`goneAt`) — it shows as closed at once, while a reboot within [`GRACE_SECS`] would still
+/// make it dormant instead. Lone Claude sessions in `iterm`; a session id appears once.
+pub fn closed_entries(s: &Snapshot) -> Closed {
+    let mut out = s.closed.clone();
+    let mut lingering: Vec<(String, Taken)> = Vec::new();
+    for t in &s.tmux {
+        if let Some(g) = &t.gone_at {
+            lingering.push((
+                g.clone(),
+                Taken::Tmux(TmuxSnap {
+                    gone_at: None,
+                    closed_at: Some(g.clone()),
+                    ..t.clone()
+                }),
+            ));
+            continue;
+        }
+        for c in t.claudes() {
+            if let Some(g) = &c.gone_at {
+                lingering.push((
+                    g.clone(),
+                    Taken::Claude(ClaudeSnap {
+                        closed_at: Some(g.clone()),
+                        tmux_session: Some(t.name.clone()),
+                        ..c.clone()
+                    }),
+                ));
+            }
+        }
+    }
+    for c in &s.iterm {
+        if let Some(g) = &c.gone_at {
+            lingering.push((
+                g.clone(),
+                Taken::Claude(ClaudeSnap {
+                    closed_at: Some(g.clone()),
+                    ..c.clone()
+                }),
+            ));
+        }
+    }
+    // Oldest first: each add counts as newer than what is there.
+    lingering.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, x) in lingering {
+        match x {
+            Taken::Tmux(t) => out.add_tmux(t),
+            Taken::Claude(c) => out.add_claude(c),
+        }
+    }
+    out
+}
+
+/// [`closed_entries`] as a [`Dormant`] (lone sessions in `iterm`) — what targets resolve in.
+fn closed_pool(s: &Snapshot) -> Dormant {
+    let c = closed_entries(s);
+    Dormant {
+        tmux: c.tmux,
+        iterm: c.claude,
+        extra: Map::new(),
+    }
+}
+
+/// Every recently closed entry, most recent first.
+pub fn closed_views(s: &Snapshot) -> Vec<ClosedView> {
+    let c = closed_entries(s);
+    let mut out: Vec<ClosedView> = c
+        .tmux
+        .iter()
+        .map(|t| ClosedView {
+            view: DormantView {
+                kind: "tmux",
+                target: t.name.clone(),
+                name: t.name.clone(),
+                since: t.closed_at.clone(),
+                windows: t.windows.len(),
+                panes: t.pane_count(),
+                sessions: t.claudes().map(session_view).collect(),
+            },
+            closed_at: t.closed_at.clone(),
+            tmux_session: None,
+        })
+        .chain(c.claude.iter().map(|c| ClosedView {
+            view: DormantView {
+                kind: "claude",
+                target: c.session_id.clone(),
+                name: c.label(),
+                since: c.closed_at.clone(),
+                windows: 1,
+                panes: 1,
+                sessions: vec![session_view(c)],
+            },
+            closed_at: c.closed_at.clone(),
+            tmux_session: c.tmux_session.clone(),
+        }))
+        .collect();
+    out.sort_by(|a, b| b.closed_at.cmp(&a.closed_at));
+    out
+}
+
+/// [`closed_views`] of this machine's [`current`] snapshot, empty when the list is off
+/// (`restore.keepClosedDays: 0`).
+pub fn closed_now(s: &Snapshot) -> Vec<ClosedView> {
+    if keep_closed_secs() <= 0 {
+        return Vec::new();
+    }
+    closed_views(s)
+}
+
 // ------------------------------------------------------------------ targets
+
+/// Which list a target lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pool {
+    /// Left by a reboot (`dormant`).
+    Dormant,
+    /// Ended within a boot (`closed` and what lingers).
+    Closed,
+}
+
+impl Pool {
+    fn noun(self) -> &'static str {
+        match self {
+            Pool::Dormant => "dormant",
+            Pool::Closed => "recently closed",
+        }
+    }
+
+    /// The entries of this pool in `s`.
+    pub fn entries(self, s: &Snapshot) -> Dormant {
+        match self {
+            Pool::Dormant => s.dormant.clone(),
+            Pool::Closed => closed_pool(s),
+        }
+    }
+}
 
 /// One dormant entry, by identity.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1011,10 +1385,14 @@ pub enum Target {
 
 impl Target {
     pub fn label(&self, s: &Snapshot) -> String {
+        self.label_in(&s.dormant)
+    }
+
+    /// Its name among `d`'s entries.
+    pub fn label_in(&self, d: &Dormant) -> String {
         match self {
             Target::Tmux(n) => n.clone(),
-            Target::Claude(id) => s
-                .dormant
+            Target::Claude(id) => d
                 .iterm
                 .iter()
                 .find(|c| &c.session_id == id)
@@ -1031,12 +1409,20 @@ impl Target {
 ///    tmux pane resolves to that tmux session;
 /// 3. a recorded title or name — exact, then prefix, then substring (case-insensitive).
 pub fn resolve(s: &Snapshot, q: &str) -> Result<Target> {
+    resolve_in(&s.dormant, q, Pool::Dormant)
+}
+
+/// [`resolve`] among the recently closed entries ([`closed_entries`]).
+pub fn resolve_closed(s: &Snapshot, q: &str) -> Result<Target> {
+    resolve_in(&closed_pool(s), q, Pool::Closed)
+}
+
+fn resolve_in(d: &Dormant, q: &str, pool: Pool) -> Result<Target> {
     let q = q.trim();
     if q.is_empty() {
         return Err(Error::exit(1, "no target given"));
     }
-    let names: Vec<crate::core::tmux::TmuxSession> = s
-        .dormant
+    let names: Vec<crate::core::tmux::TmuxSession> = d
         .tmux
         .iter()
         .map(|t| crate::core::tmux::TmuxSession {
@@ -1045,16 +1431,16 @@ pub fn resolve(s: &Snapshot, q: &str) -> Result<Target> {
         })
         .collect();
     if let Some((_, hits)) = crate::core::tmux::match_tier(&names, q) {
-        return one(s, hits.into_iter().map(Target::Tmux).collect(), q);
+        return one(d, hits.into_iter().map(Target::Tmux).collect(), q, pool);
     }
     // Every dormant Claude session with the entry it restores through.
     let mut all: Vec<(&ClaudeSnap, Target)> = Vec::new();
-    for t in &s.dormant.tmux {
+    for t in &d.tmux {
         for c in t.claudes() {
             all.push((c, Target::Tmux(t.name.clone())));
         }
     }
-    for c in &s.dormant.iterm {
+    for c in &d.iterm {
         all.push((c, Target::Claude(c.session_id.clone())));
     }
     let ql = q.to_lowercase();
@@ -1065,7 +1451,7 @@ pub fn resolve(s: &Snapshot, q: &str) -> Result<Target> {
             .map(|(_, t)| t.clone())
             .collect();
         if !hits.is_empty() {
-            return one(s, hits, q);
+            return one(d, hits, q, pool);
         }
     }
     let texts = |c: &ClaudeSnap| {
@@ -1087,28 +1473,29 @@ pub fn resolve(s: &Snapshot, q: &str) -> Result<Target> {
             .map(|(_, t)| t.clone())
             .collect();
         if !hits.is_empty() {
-            return one(s, hits, q);
+            return one(d, hits, q, pool);
         }
     }
     Err(Error::exit(
         EXIT_NOTHING,
-        format!("no dormant session matches \"{q}\""),
+        format!("no {} session matches \"{q}\"", pool.noun()),
     ))
 }
 
 /// One target from a tier's hits (several hits naming the same entry are one), else exit 2.
-fn one(s: &Snapshot, mut hits: Vec<Target>, q: &str) -> Result<Target> {
+fn one(d: &Dormant, mut hits: Vec<Target>, q: &str, pool: Pool) -> Result<Target> {
     let mut seen = HashSet::new();
     hits.retain(|t| seen.insert(t.clone()));
     if hits.len() == 1 {
         return Ok(hits.remove(0));
     }
-    let names: Vec<String> = hits.iter().map(|t| t.label(s)).collect();
+    let names: Vec<String> = hits.iter().map(|t| t.label_in(d)).collect();
     Err(Error::exit(
         EXIT_AMBIGUOUS,
         format!(
-            "\"{q}\" matches {} dormant sessions: {} — be more specific",
+            "\"{q}\" matches {} {} sessions: {} — be more specific",
             names.len(),
+            pool.noun(),
             names.join(", ")
         ),
     ))
@@ -1387,17 +1774,32 @@ fn as_tmux(c: &ClaudeSnap, live: &[String]) -> TmuxSnap {
     }
 }
 
-/// Take `target` out of the dormant list (under the lock) and hand it back.
-fn take(target: &Target) -> Result<Result<Taken>> {
+/// Take `target` out of `pool` (under the lock) and hand it back.
+fn take(pool: Pool, target: &Target) -> Result<Result<Taken>> {
     update(|snap| {
-        let found = match target {
-            Target::Tmux(n) => snap
+        let found = match (pool, target) {
+            (Pool::Closed, t) => {
+                let entry = match t {
+                    Target::Tmux(n) => closed_entries(snap)
+                        .tmux
+                        .into_iter()
+                        .find(|x| &x.name == n)
+                        .map(Taken::Tmux),
+                    Target::Claude(id) => closed_entries(snap)
+                        .claude
+                        .into_iter()
+                        .find(|x| &x.session_id == id)
+                        .map(Taken::Claude),
+                };
+                entry.filter(|_| remove_closed(snap, t))
+            }
+            (Pool::Dormant, Target::Tmux(n)) => snap
                 .dormant
                 .tmux
                 .iter()
                 .position(|t| &t.name == n)
                 .map(|i| Taken::Tmux(snap.dormant.tmux.remove(i))),
-            Target::Claude(id) => snap
+            (Pool::Dormant, Target::Claude(id)) => snap
                 .dormant
                 .iterm
                 .iter()
@@ -1410,11 +1812,65 @@ fn take(target: &Target) -> Result<Result<Taken>> {
                 false,
                 Err(Error::exit(
                     EXIT_NOTHING,
-                    "that session is no longer dormant (restored or forgotten meanwhile)",
+                    format!(
+                        "that session is no longer {} (restored or forgotten meanwhile)",
+                        pool.noun()
+                    ),
                 )),
             ),
         })
     })
+}
+
+/// Take one closed entry out of the snapshot, wherever it is kept: the `closed` lists, or
+/// still lingering (`goneAt`) in `tmux` / `iterm` / a live pane. → whether it was there.
+fn remove_closed(snap: &mut Snapshot, target: &Target) -> bool {
+    match target {
+        Target::Tmux(n) => {
+            if let Some(i) = snap
+                .tmux
+                .iter()
+                .position(|t| &t.name == n && t.gone_at.is_some())
+            {
+                snap.tmux.remove(i);
+                // An older closed session of that name showed as lone sessions: keep them so.
+                if let Some(j) = snap.closed.tmux.iter().position(|t| &t.name == n) {
+                    let old = snap.closed.tmux.remove(j);
+                    for c in old.claudes() {
+                        snap.closed.claude.push(ClaudeSnap {
+                            closed_at: old.closed_at.clone(),
+                            tmux_session: Some(old.name.clone()),
+                            ..c.clone()
+                        });
+                    }
+                }
+                return true;
+            }
+            let before = snap.closed.tmux.len();
+            snap.closed.tmux.retain(|t| &t.name != n);
+            snap.closed.tmux.len() != before
+        }
+        Target::Claude(id) => {
+            let mut hit = snap.closed.ids().contains(id);
+            snap.closed.drop_ids(&HashSet::from([id.clone()]));
+            let before = snap.iterm.len();
+            snap.iterm
+                .retain(|c| !(&c.session_id == id && c.gone_at.is_some()));
+            hit |= snap.iterm.len() != before;
+            for t in snap.tmux.iter_mut().filter(|t| t.gone_at.is_none()) {
+                for p in t.windows.iter_mut().flat_map(|w| w.panes.iter_mut()) {
+                    if p.claude
+                        .as_ref()
+                        .is_some_and(|c| &c.session_id == id && c.gone_at.is_some())
+                    {
+                        p.claude = None;
+                        hit = true;
+                    }
+                }
+            }
+            hit
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1423,17 +1879,18 @@ enum Taken {
     Claude(ClaudeSnap),
 }
 
-/// Put a taken entry back after a failed restore (unless something re-added it).
-fn put_back(taken: Taken) {
+/// Put a taken entry back after a failed restore (unless something re-added it). A closed
+/// one goes into the `closed` lists, keeping its `closedAt`.
+fn put_back(pool: Pool, taken: Taken) {
     let _ = update(|snap| {
-        match taken {
-            Taken::Tmux(t) => {
+        match (pool, taken) {
+            (Pool::Dormant, Taken::Tmux(t)) => {
                 if snap.dormant.tmux.iter().any(|d| d.name == t.name) {
                     return Ok((false, ()));
                 }
                 snap.dormant.tmux.push(t);
             }
-            Taken::Claude(c) => {
+            (Pool::Dormant, Taken::Claude(c)) => {
                 if snap
                     .dormant
                     .iterm
@@ -1443,6 +1900,23 @@ fn put_back(taken: Taken) {
                     return Ok((false, ()));
                 }
                 snap.dormant.iterm.push(c);
+            }
+            (Pool::Closed, Taken::Tmux(t)) => {
+                let all = closed_entries(snap);
+                if all.tmux.iter().any(|d| d.name == t.name) {
+                    return Ok((false, ()));
+                }
+                let ids = all.ids();
+                if t.claudes().any(|c| ids.contains(&c.session_id)) {
+                    return Ok((false, ()));
+                }
+                snap.closed.tmux.push(t);
+            }
+            (Pool::Closed, Taken::Claude(c)) => {
+                if closed_entries(snap).ids().contains(&c.session_id) {
+                    return Ok((false, ()));
+                }
+                snap.closed.claude.push(c);
             }
         }
         Ok((true, ()))
@@ -1455,29 +1929,39 @@ fn put_back(taken: Taken) {
 /// named after its title — tmux is the backend a restore can drive reliably. On success the
 /// entry leaves the dormant list; a dry run (`-n`) changes nothing and only renders.
 pub fn restore(snap: &Snapshot, target: &Target, launcher: &str) -> Result<Restored> {
+    restore_from(snap, Pool::Dormant, target, launcher)
+}
+
+/// [`restore`] for a recently closed entry. The same, except that a Claude session whose
+/// tmux session outlived it (`/exit`, the shell stayed) comes back in a new window of that
+/// session while it exists.
+pub fn restore_closed(snap: &Snapshot, target: &Target, launcher: &str) -> Result<Restored> {
+    restore_from(snap, Pool::Closed, target, launcher)
+}
+
+fn restore_from(snap: &Snapshot, pool: Pool, target: &Target, launcher: &str) -> Result<Restored> {
     let dry = crate::core::hosts::dry_run();
     if discovery::is_fixture() && !dry {
         return Err(Error::Other(
             "fixture mode: restore is inert (unset FLEET_FIXTURE)".into(),
         ));
     }
+    let entries = pool.entries(snap);
     let entry = match target {
-        Target::Tmux(n) => snap
-            .dormant
+        Target::Tmux(n) => entries
             .tmux
             .iter()
             .find(|t| &t.name == n)
             .cloned()
             .map(Taken::Tmux),
-        Target::Claude(id) => snap
-            .dormant
+        Target::Claude(id) => entries
             .iterm
             .iter()
             .find(|c| &c.session_id == id)
             .cloned()
             .map(Taken::Claude),
     }
-    .ok_or_else(|| Error::exit(EXIT_NOTHING, "no such dormant session"))?;
+    .ok_or_else(|| Error::exit(EXIT_NOTHING, format!("no such {} session", pool.noun())))?;
     let live: Vec<String> = crate::core::tmux::list_sessions()
         .map_err(|e| Error::exit(127, e.to_string()))?
         .into_iter()
@@ -1487,28 +1971,54 @@ pub fn restore(snap: &Snapshot, target: &Target, launcher: &str) -> Result<Resto
         .into_iter()
         .filter_map(|r| r.session_id)
         .collect();
+    // A closed Claude session whose tmux session is still there: a new window in it.
+    let host_session = match (&entry, pool) {
+        (Taken::Claude(c), Pool::Closed) => c
+            .tmux_session
+            .clone()
+            .filter(|h| live.iter().any(|l| l == h)),
+        _ => None,
+    };
     let (kind, from, layout) = match &entry {
         Taken::Tmux(t) => ("tmux", t.name.clone(), t.clone()),
         Taken::Claude(c) => ("claude", c.label(), as_tmux(c, &live)),
     };
-    let name = match &entry {
-        Taken::Tmux(t) => restore_name(&t.name, &live),
-        Taken::Claude(_) => layout.name.clone(),
+    let name = match (&entry, &host_session) {
+        (_, Some(h)) => h.clone(),
+        (Taken::Tmux(t), None) => restore_name(&t.name, &live),
+        (Taken::Claude(_), None) => layout.name.clone(),
     };
-    let taken = if dry { None } else { Some(take(target)??) };
+    let taken = if dry {
+        None
+    } else {
+        Some(take(pool, target)??)
+    };
     let mut ex = Exec {
         dry,
         log: Vec::new(),
     };
     let mut warnings = Vec::new();
-    match rebuild(&mut ex, &layout, &name, launcher, &skip, &mut warnings) {
-        Ok(launched) => Ok(Restored {
+    let built = match (&entry, &host_session) {
+        (Taken::Claude(c), Some(h)) => {
+            reopen_in(&mut ex, c, h, launcher, &skip, &mut warnings).map(|l| (l, 1, 1, false))
+        }
+        _ => rebuild(&mut ex, &layout, &name, launcher, &skip, &mut warnings).map(|l| {
+            (
+                l,
+                layout.windows.len(),
+                layout.pane_count(),
+                name != from || kind == "claude",
+            )
+        }),
+    };
+    match built {
+        Ok((launched, windows, panes, renamed)) => Ok(Restored {
             kind,
             from: from.clone(),
-            renamed: name != from || kind == "claude",
+            renamed,
             session: name,
-            windows: layout.windows.len(),
-            panes: layout.pane_count(),
+            windows,
+            panes,
             launched,
             warnings,
             commands: ex.log,
@@ -1516,11 +2026,69 @@ pub fn restore(snap: &Snapshot, target: &Target, launcher: &str) -> Result<Resto
         }),
         Err(e) => {
             if let Some(t) = taken {
-                put_back(t);
+                put_back(pool, t);
             }
             Err(e)
         }
     }
+}
+
+/// A Claude session resumed in a new window of the live tmux session `session`.
+fn reopen_in(
+    ex: &mut Exec,
+    c: &ClaudeSnap,
+    session: &str,
+    launcher: &str,
+    skip: &HashSet<String>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Launched>> {
+    if skip.contains(&c.session_id) {
+        warnings.push(format!(
+            "{} is already running elsewhere — not started again",
+            c.label()
+        ));
+        return Ok(Vec::new());
+    }
+    let dir = usable_dir(c.cwd.as_deref().unwrap_or("~"), warnings);
+    let pane = ex.run(
+        vec![
+            s("new-window"),
+            s("-d"),
+            s("-t"),
+            format!("={session}:"),
+            s("-c"),
+            dir.clone(),
+            s("-P"),
+            s("-F"),
+            s("#{pane_id}"),
+        ],
+        "%new",
+    )?;
+    let line = resume_line(launcher, &dir, c);
+    ex.type_line(&pane, &line)?;
+    Ok(vec![Launched {
+        session_id: c.session_id.clone(),
+        title: c.title.clone(),
+        line,
+    }])
+}
+
+/// Settle a pending reboot in `snap` (so "forget all" also covers what the old boot ran).
+/// → whether it did.
+fn settle(snap: &mut Snapshot, boot: Option<&str>) -> bool {
+    let rebooted = matches!((snap.boot_id.as_deref(), boot), (Some(a), Some(b)) if a != b);
+    if rebooted {
+        let host = snap.host.clone();
+        *snap = step(
+            std::mem::take(snap),
+            Live::default(),
+            boot,
+            &host,
+            Utc::now(),
+            keep_closed_secs(),
+        );
+    }
+    rebooted
 }
 
 /// Drop dormant entries without restoring them: one `target`, or all with `None`.
@@ -1535,19 +2103,7 @@ pub fn forget(target: Option<&Target>) -> Result<Vec<String>> {
     }
     let boot = boot_id();
     update(|snap| {
-        // Settle a pending reboot first, so "forget all" also covers what the old boot ran.
-        let rebooted =
-            matches!((snap.boot_id.as_deref(), boot.as_deref()), (Some(a), Some(b)) if a != b);
-        if rebooted {
-            let host = snap.host.clone();
-            *snap = transition(
-                std::mem::take(snap),
-                Live::default(),
-                boot.as_deref(),
-                &host,
-                Utc::now(),
-            );
-        }
+        let rebooted = settle(snap, boot.as_deref());
         let mut gone = Vec::new();
         match target {
             None => {
@@ -1565,6 +2121,55 @@ pub fn forget(target: Option<&Target>) -> Result<Vec<String>> {
         }
         Ok((rebooted || !gone.is_empty(), gone))
     })
+}
+
+/// Drop recently closed entries: one `target`, or all with `None` (what still lingers too —
+/// a reboot within the grace period will not make it dormant any more).
+/// → the names of what was forgotten.
+pub fn forget_closed(target: Option<&Target>) -> Result<Vec<String>> {
+    if crate::core::hosts::dry_run() {
+        let s = current()?;
+        return Ok(match target {
+            Some(t) => vec![t.label_in(&closed_pool(&s))],
+            None => closed_views(&s).into_iter().map(|v| v.view.name).collect(),
+        });
+    }
+    let boot = boot_id();
+    update(|snap| {
+        let rebooted = settle(snap, boot.as_deref());
+        let mut gone = Vec::new();
+        match target {
+            None => {
+                gone.extend(closed_views(snap).into_iter().map(|v| v.view.name));
+                forget_all_closed(snap);
+            }
+            Some(t) => {
+                let label = t.label_in(&closed_pool(snap));
+                if remove_closed(snap, t) {
+                    gone.push(label);
+                }
+            }
+        }
+        Ok((rebooted || !gone.is_empty(), gone))
+    })
+}
+
+/// Empty the recently closed list, lingering entries included.
+fn forget_all_closed(snap: &mut Snapshot) {
+    snap.closed.tmux.clear();
+    snap.closed.claude.clear();
+    snap.tmux.retain(|t| t.gone_at.is_none());
+    snap.iterm.retain(|c| c.gone_at.is_none());
+    for p in snap
+        .tmux
+        .iter_mut()
+        .flat_map(|t| t.windows.iter_mut())
+        .flat_map(|w| w.panes.iter_mut())
+    {
+        if p.claude.as_ref().is_some_and(|c| c.gone_at.is_some()) {
+            p.claude = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2104,5 +2709,343 @@ garbage";
         c.title = Some("čćž".into());
         c.name = None;
         assert_eq!(as_tmux(&c, &[]).name, "claude");
+    }
+
+    const WEEK: i64 = 7 * 86_400;
+
+    fn ids_of(v: &[ClosedView]) -> Vec<String> {
+        v.iter().map(|c| c.view.target.clone()).collect()
+    }
+
+    #[test]
+    fn a_session_closed_within_a_boot_is_closed_at_once_and_after_the_grace_period() {
+        let s = step(
+            Snapshot::default(),
+            live(
+                vec![tmux("api", &["a1"]), tmux("shell", &[])],
+                vec![claude("i1")],
+            ),
+            Some("b1"),
+            "h",
+            at(0),
+            WEEK,
+        );
+        assert!(closed_views(&s).is_empty());
+        // Closed: shown at once, while it still lingers for a reboot.
+        let s = step(s, Live::default(), Some("b1"), "h", at(10), WEEK);
+        let v = closed_views(&s);
+        assert_eq!(ids_of(&v), ["api", "i1"], "{v:?}");
+        assert_eq!(v[0].closed_at.as_deref(), Some(iso(at(10)).as_str()));
+        assert_eq!(v[0].view.since, v[0].closed_at);
+        assert!(s.closed.is_empty(), "still lingering, not yet moved");
+        // After the grace period it moves into `closed`, same closedAt; a plain shell
+        // session (no Claude pane) is not kept.
+        let s = step(
+            s,
+            Live::default(),
+            Some("b1"),
+            "h",
+            at(10 + GRACE_SECS + 1),
+            WEEK,
+        );
+        assert!(s.tmux.is_empty() && s.iterm.is_empty());
+        assert_eq!(s.closed.tmux.len(), 1);
+        assert_eq!(s.closed.tmux[0].name, "api");
+        assert_eq!(s.closed.claude[0].session_id, "i1");
+        assert_eq!(s.closed.claude[0].gone_at, None);
+        let v = closed_views(&s);
+        assert_eq!(ids_of(&v), ["api", "i1"]);
+        assert_eq!(v[1].closed_at.as_deref(), Some(iso(at(10)).as_str()));
+        // Never dormant, never a dormant id, never a dormant target.
+        assert!(s.dormant.is_empty());
+        assert!(dormant_ids(&s).is_empty());
+        assert!(dormant_views(&s).is_empty());
+        assert_eq!(resolve(&s, "api").unwrap_err().code(), EXIT_NOTHING);
+        assert_eq!(
+            resolve_closed(&s, "api").unwrap(),
+            Target::Tmux("api".into())
+        );
+        assert_eq!(
+            resolve_closed(&s, "work i1").unwrap(),
+            Target::Claude("i1".into())
+        );
+        // A reboot later leaves it closed (expiry still applies), and nothing dormant.
+        let s = step(s, Live::default(), Some("b2"), "h", at(1000), WEEK);
+        assert!(s.dormant.is_empty());
+        assert_eq!(closed_views(&s).len(), 2);
+    }
+
+    #[test]
+    fn a_reboot_within_the_grace_period_makes_it_dormant_not_closed() {
+        let s = step(
+            Snapshot::default(),
+            live(vec![tmux("api", &["a1"])], vec![claude("i1")]),
+            Some("b1"),
+            "h",
+            at(0),
+            WEEK,
+        );
+        let s = step(s, Live::default(), Some("b1"), "h", at(30), WEEK);
+        assert_eq!(closed_views(&s).len(), 2);
+        let s = step(s, Live::default(), Some("b2"), "h", at(90), WEEK);
+        assert!(closed_views(&s).is_empty(), "{:?}", closed_views(&s));
+        assert_eq!(dormant_views(&s).len(), 2);
+        assert_eq!(
+            dormant_ids(&s),
+            HashSet::from(["a1".to_string(), "i1".into()])
+        );
+    }
+
+    #[test]
+    fn closed_entries_expire_and_are_capped() {
+        let mut s = Snapshot {
+            boot_id: Some("b".into()),
+            ..Default::default()
+        };
+        for i in 0..60 {
+            s.closed.claude.push(ClaudeSnap {
+                closed_at: Some(iso(at(i))),
+                ..claude(&format!("c{i:02}"))
+            });
+        }
+        s.closed.claude.push(ClaudeSnap {
+            closed_at: Some("not a time".into()),
+            ..claude("bad")
+        });
+        let t = step(s.clone(), Live::default(), Some("b"), "h", at(100), WEEK);
+        assert_eq!(t.closed.len(), MAX_CLOSED);
+        assert!(
+            t.closed
+                .claude
+                .iter()
+                .all(|c| c.session_id.as_str() >= "c10")
+        );
+        // Older than keep: gone.
+        let t = step(
+            s.clone(),
+            Live::default(),
+            Some("b"),
+            "h",
+            at(50 + WEEK),
+            WEEK,
+        );
+        let left: Vec<&str> = t
+            .closed
+            .claude
+            .iter()
+            .map(|c| c.session_id.as_str())
+            .collect();
+        assert_eq!(
+            left,
+            [
+                "c50", "c51", "c52", "c53", "c54", "c55", "c56", "c57", "c58", "c59"
+            ]
+        );
+        // keepClosedDays 0: the feature is off, nothing is kept.
+        let t = step(s, Live::default(), Some("b"), "h", at(100), 0);
+        assert!(t.closed.is_empty());
+    }
+
+    #[test]
+    fn a_closed_session_live_again_leaves_the_list() {
+        let mut s = Snapshot {
+            boot_id: Some("b".into()),
+            ..Default::default()
+        };
+        s.closed.claude.push(ClaudeSnap {
+            closed_at: Some(iso(at(0))),
+            ..claude("c1")
+        });
+        let mut t = tmux("api", &["a1", "a2"]);
+        t.closed_at = Some(iso(at(0)));
+        s.closed.tmux.push(t);
+        // c1 and a1 resumed by hand somewhere.
+        let s = step(
+            s,
+            live(vec![], vec![claude("c1"), claude("a1")]),
+            Some("b"),
+            "h",
+            at(10),
+            WEEK,
+        );
+        assert!(s.closed.claude.is_empty());
+        let ids: Vec<&str> = s.closed.tmux[0]
+            .claudes()
+            .map(|c| c.session_id.as_str())
+            .collect();
+        assert_eq!(ids, ["a2"]);
+        let s = step(
+            s,
+            live(vec![], vec![claude("a2")]),
+            Some("b"),
+            "h",
+            at(20),
+            WEEK,
+        );
+        assert!(s.closed.is_empty(), "no Claude pane left: gone");
+        // And an id that is dormant is never closed too.
+        let mut s2 = Snapshot {
+            boot_id: Some("b".into()),
+            ..Default::default()
+        };
+        s2.closed.claude.push(ClaudeSnap {
+            closed_at: Some(iso(at(0))),
+            ..claude("x")
+        });
+        s2.dormant.iterm.push(claude("x"));
+        let s2 = step(s2, Live::default(), Some("b"), "h", at(10), WEEK);
+        assert!(s2.closed.is_empty());
+        assert_eq!(s2.dormant.len(), 1);
+    }
+
+    #[test]
+    fn a_claude_that_exits_in_a_live_pane_is_closed_with_its_tmux_session() {
+        let s = step(
+            Snapshot::default(),
+            live(vec![tmux("api", &["a1"])], vec![]),
+            Some("b"),
+            "h",
+            at(0),
+            WEEK,
+        );
+        // /exit: the shell stays.
+        let s = step(
+            s,
+            live(vec![tmux("api", &[])], vec![]),
+            Some("b"),
+            "h",
+            at(10),
+            WEEK,
+        );
+        let v = closed_views(&s);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].view.kind, "claude");
+        assert_eq!(v[0].view.target, "a1");
+        assert_eq!(v[0].tmux_session.as_deref(), Some("api"));
+        let j = serde_json::to_value(&v[0]).unwrap();
+        assert_eq!(j["tmuxSession"], "api");
+        assert_eq!(j["closedAt"], iso(at(10)));
+        assert_eq!(j["kind"], "claude");
+        let s = step(
+            s,
+            live(vec![tmux("api", &[])], vec![]),
+            Some("b"),
+            "h",
+            at(10 + GRACE_SECS + 1),
+            WEEK,
+        );
+        assert!(s.tmux[0].windows[0].panes[0].claude.is_none());
+        assert_eq!(s.closed.claude[0].tmux_session.as_deref(), Some("api"));
+        assert_eq!(closed_views(&s)[0].tmux_session.as_deref(), Some("api"));
+        // Its closing tmux session later: a newer entry; the id stays in one place.
+        let mut s = s;
+        let t = TmuxSnap {
+            closed_at: Some(iso(at(2000))),
+            ..tmux("api", &["a1"])
+        };
+        s.closed.add_tmux(t);
+        assert!(s.closed.claude.is_empty());
+        assert_eq!(s.closed.tmux.len(), 1);
+    }
+
+    #[test]
+    fn closed_entries_are_taken_and_forgotten_wherever_they_are_kept() {
+        let s = step(
+            Snapshot::default(),
+            live(
+                vec![tmux("api", &["a1"]), tmux("web", &["w1"])],
+                vec![claude("i1"), claude("i2")],
+            ),
+            Some("b"),
+            "h",
+            at(0),
+            WEEK,
+        );
+        // web closed, a1 exited in its pane, i1 closed — all still lingering — and i2 long closed.
+        let mut s = step(
+            s,
+            live(vec![tmux("api", &[])], vec![claude("i2")]),
+            Some("b"),
+            "h",
+            at(10),
+            WEEK,
+        );
+        s.iterm.retain(|c| c.session_id != "i2");
+        s.closed.claude.push(ClaudeSnap {
+            closed_at: Some(iso(at(5))),
+            ..claude("i2")
+        });
+        assert_eq!(closed_views(&s).len(), 4);
+        let mut t = s.clone();
+        assert!(remove_closed(&mut t, &Target::Tmux("web".into())));
+        assert!(remove_closed(&mut t, &Target::Claude("a1".into())));
+        assert!(remove_closed(&mut t, &Target::Claude("i1".into())));
+        assert!(remove_closed(&mut t, &Target::Claude("i2".into())));
+        assert!(!remove_closed(&mut t, &Target::Claude("i2".into())));
+        assert!(closed_views(&t).is_empty());
+        assert_eq!(t.tmux.len(), 1, "the live api session stays");
+        // Forget all: lingering ones too, so a reboot now leaves nothing dormant.
+        forget_all_closed(&mut s);
+        assert!(closed_views(&s).is_empty());
+        let s = step(s, Live::default(), Some("b2"), "h", at(20), WEEK);
+        assert_eq!(dormant_views(&s).len(), 1, "only the live api session");
+    }
+
+    #[test]
+    fn a_closed_claude_reopens_in_a_window_of_its_tmux_session() {
+        let mut ex = Exec {
+            dry: true,
+            log: Vec::new(),
+        };
+        let mut warn = Vec::new();
+        let c = ClaudeSnap {
+            flags: argv("--chrome"),
+            tmux_session: Some("api".into()),
+            ..claude("s-1")
+        };
+        let launched = reopen_in(&mut ex, &c, "api", "claude", &HashSet::new(), &mut warn).unwrap();
+        let log: Vec<String> = ex
+            .log
+            .iter()
+            .map(|l| l.split_once(' ').unwrap().1.to_string())
+            .collect();
+        assert_eq!(
+            log[0],
+            "new-window -d -t '=api:' -c /tmp -P -F '#{pane_id}'"
+        );
+        assert_eq!(
+            log[1],
+            "send-keys -t %new -l 'cd '\\''/tmp'\\'' && claude --chrome --resume s-1'"
+        );
+        assert_eq!(launched.len(), 1);
+        // Running elsewhere: nothing opened.
+        let mut ex = Exec {
+            dry: true,
+            log: Vec::new(),
+        };
+        let skip = HashSet::from(["s-1".to_string()]);
+        assert!(
+            reopen_in(&mut ex, &c, "api", "claude", &skip, &mut warn)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(ex.log.is_empty());
+    }
+
+    #[test]
+    fn an_old_file_without_closed_loads_and_keeps_unknown_closed_keys() {
+        let s: Snapshot = serde_json::from_str(
+            r#"{"version":1,"host":"h","bootId":"1","tmux":[],"iterm":[],"dormant":{"tmux":[],"iterm":[]}}"#,
+        )
+        .unwrap();
+        assert!(s.closed.is_empty());
+        let s: Snapshot = serde_json::from_str(
+            r#"{"closed":{"tmux":[],"claude":[{"sessionId":"x","closedAt":"2026-01-01T00:00:00Z","tmuxSession":"api","k":1}],"later":true}}"#,
+        )
+        .unwrap();
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["closed"]["later"], true);
+        assert_eq!(back["closed"]["claude"][0]["k"], 1);
+        assert_eq!(back["closed"]["claude"][0]["tmuxSession"], "api");
     }
 }
