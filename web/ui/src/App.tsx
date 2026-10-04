@@ -4,6 +4,7 @@ import { useHashLocation } from 'wouter/use-hash-location'
 import { StackUi } from '@/components/stack/StackUi'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { DormantProvider } from '@/providers/DormantProvider'
 import { FleetProvider } from '@/providers/FleetProvider'
 import { PrefsProvider } from '@/providers/PrefsProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
@@ -34,6 +35,7 @@ export default function App() {
       <PrefsProvider>
       <SettingsProvider>
         <FleetProvider>
+        <DormantProvider>
           <TooltipProvider>
             <Router hook={useHashLocation}>
               {desktop ? (
@@ -65,6 +67,7 @@ export default function App() {
             </Router>
             <Toaster position={desktop ? 'bottom-right' : 'top-center'} offset={desktop ? { bottom: 112, right: 16 } : undefined} />
           </TooltipProvider>
+        </DormantProvider>
         </FleetProvider>
       </SettingsProvider>
       </PrefsProvider>

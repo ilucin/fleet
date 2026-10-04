@@ -4,6 +4,7 @@ import { useLocation } from 'wouter'
 
 import { GroupedList } from '@/components/board/GroupedList'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
+import { DormantSection } from '@/components/DormantSection'
 import { HostDot } from '@/components/HostBadge'
 import { NewSessionDrawer } from '@/components/NewSessionDrawer'
 import { ScreenHeader } from '@/components/ScreenHeader'
@@ -38,7 +39,7 @@ export function ListScreen() {
   const notesHosts = useNotesHosts()
   const board = mode === 'board'
   const groups = useGroups(board)
-  const { columns } = useBoardColumns(board, view.sessions, groups.groups, fleet)
+  const { columns } = useBoardColumns(board, view.sessions, groups.groups, fleet, host)
   // The filter rows live in a drawer under the search field, closed by default: swipe down on
   // the header (or tap the handle) opens it, swipe up closes it. Active filters show on the handle.
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -275,6 +276,8 @@ export function ListScreen() {
           ) : unreachable.length === 0 ? (
             <EmptyState anySessions={allSessions(fleet).length > 0} />
           ) : null}
+
+          {fleet ? <DormantSection now={now} host={host} className="mt-6" /> : null}
         </div>
       </main>
 

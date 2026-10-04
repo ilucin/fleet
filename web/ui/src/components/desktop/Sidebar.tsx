@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref } from 'react'
 import { CommandIcon, GaugeIcon, KeyboardIcon, NotebookTextIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 
+import { DormantSection } from '@/components/DormantSection'
 import { HostDot } from '@/components/HostBadge'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
 import { SessionRow } from '@/components/SessionRow'
@@ -208,6 +209,7 @@ export function Sidebar({ list, now, cursorKey, selectedKey, searchRef, onSearch
             {allSessions(fleet).length > 0 ? 'Nothing matches.' : 'No Claude sessions running.'}
           </div>
         ) : null}
+        {fleet ? <DormantSection now={now} host={host} desktop className="mt-4" /> : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1 border-t px-2 py-1.5 text-xs text-dimmer">

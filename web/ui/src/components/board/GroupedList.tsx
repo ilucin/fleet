@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronRightIcon, LayersIcon } from 'lucide-react'
 
+import { DormantCard } from '@/components/board/DormantCard'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { SessionRow } from '@/components/SessionRow'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
@@ -58,6 +59,7 @@ export function GroupedList({ columns, now }: { columns: BoardColumn[]; now: num
                 {c.sessions.map((s) => (
                   <SessionRow key={sessionKey(s)} session={s} now={now} />
                 ))}
+                {c.dormant?.map((m) => <DormantCard key={`${m.host}/${m.id}`} member={m} now={now} />)}
               </div>
             ) : null}
           </section>

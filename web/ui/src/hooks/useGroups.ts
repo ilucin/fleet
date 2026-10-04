@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ApiError, api, isAbortError } from '@/api/client'
-import type { FleetResponse, GroupsResponse, Session } from '@/api/types'
+import type { FleetResponse, GroupMember, GroupsResponse, Session } from '@/api/types'
+import { useDormant } from '@/hooks/useDormant'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePoller } from '@/hooks/usePoller'
 import {
@@ -19,6 +20,7 @@ import {
   type GroupEdit,
   type ViewMode,
 } from '@/lib/groups'
+import { dormantMember } from '@/lib/dormant'
 import { allSessions } from '@/lib/sessions'
 import { storage } from '@/lib/storage'
 
@@ -129,15 +131,16 @@ export function useBoardColumns(
   sessions: Session[],
   groups: GroupsResponse | null,
   fleet: FleetResponse | null,
+  /** The host filter: dormant cards of other hosts are left out. */
+  host: string | null = null,
 ): { columns: BoardColumn[]; moveColumn: (id: string, before: string | null) => void } {
   const [order, setOrder] = useState<string[]>(() => parseIdList(storage.getJSON(ORDER_KEY)))
-  const sticky = useMemo(
-    () =>
-      enabled
-        ? stickyColumns(withStackColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups), sessions), order)
-        : null,
-    [enabled, sessions, groups, fleet, order],
-  )
+  const { index } = useDormant()
+  const sticky = useMemo(() => {
+    if (!enabled) return null
+    const dormantOf = (m: GroupMember) => (host && m.host !== host ? null : dormantMember(m, index))
+    return stickyColumns(withStackColumns(boardColumns(sessions, effectiveGroups(groups, allSessions(fleet)).groups, dormantOf), sessions), order)
+  }, [enabled, sessions, groups, fleet, order, index, host])
   if (sticky && (sticky.order.length !== order.length || sticky.order.some((id, i) => id !== order[i]))) setOrder(sticky.order)
   useEffect(() => {
     storage.set(ORDER_KEY, JSON.stringify(order))

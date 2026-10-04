@@ -4,7 +4,9 @@ import type {
   AutoNameRun,
   Brief,
   BriefRegenerateResponse,
+  DormantResponse,
   FileOpenResponse,
+  ForgetResponse,
   FileStatResponse,
   FleetResponse,
   GroupsResponse,
@@ -17,6 +19,7 @@ import type {
   OkResponse,
   PeekResponse,
   RenameResponse,
+  RestoreResponse,
   SessionKey,
   Settings,
   SpawnDirEntry,
@@ -190,6 +193,14 @@ export const api = {
   /** The Claude subscription limits of the account logged in on that host (`refresh` skips its 60s cache). */
   usage: (host: string, { refresh = false, ...o }: Opts & { refresh?: boolean } = {}) =>
     request<UsageResponse>(`${hostPath(host)}/usage${refresh ? '?refresh=1' : ''}`, o),
+
+  /** Sessions a reboot left dormant on `host` (404 / 501 on servers or CLIs that predate session recovery). */
+  dormant: (host: string, o: Opts = {}) => request<DormantResponse>(`${hostPath(host)}/dormant`, o),
+  /** Bring one back (`target`: tmux name or session id) or every one (`all`). Starts agents. */
+  restoreDormant: (host: string, body: { target: string } | { all: true }, o: Opts = {}) =>
+    request<RestoreResponse>(`${hostPath(host)}/dormant/restore`, { ...o, method: 'POST', body }),
+  forgetDormant: (host: string, body: { target: string } | { all: true }, o: Opts = {}) =>
+    request<ForgetResponse>(`${hostPath(host)}/dormant/forget`, { ...o, method: 'POST', body }),
 
   groups: (o: Opts = {}) => request<GroupsResponse>('/api/groups', o),
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),

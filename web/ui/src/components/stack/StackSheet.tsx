@@ -391,7 +391,7 @@ function Members({ stack, onOpen, now }: { stack: StackView; onOpen: (m: StackMe
                   {live ? <StatusDot status={status} className="size-2" /> : <span aria-label="closed" className="inline-block size-2 shrink-0 rounded-full border border-dimmer" />}
                   <span className={cn('min-w-0 flex-1 truncate text-sm', !live && 'text-muted-foreground')}>{title}</span>
                   <span className={cn('shrink-0 text-xs', live ? STATUS_TEXT[statusMeta(status).key] : 'text-dimmer')}>
-                    {live ? (session ? statusLabel(session) : statusMeta(status).label) : closed ? `closed ${relTime(closed, now)} ago` : 'closed'}
+                    {live ? (session ? statusLabel(session) : statusMeta(status).label) : m.dormant ? 'dormant' : closed ? `closed ${relTime(closed, now)} ago` : 'closed'}
                   </span>
                 </button>
               </li>

@@ -26,7 +26,7 @@ phone ──http──▶ workstation:7777 (self=workstation) ──http──�
 ```
 server.mjs            wiring: config → deps → API → HTTP server → listen
 lib/config.mjs        shared fleet config loader + binary resolution
-lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `usage --json`, `config set`, `--local stack … --json`, …)
+lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `usage --json`, `config set`, `--local stack … --json`, `--local restore … --json`, …)
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
@@ -42,6 +42,7 @@ lib/touched.mjs       absolute paths a session's tool calls touched, parsed incr
 lib/brief-format.mjs  session brief file format: parse/serialise, resource + Git-line merge, model-output check, continue prompt (pure)
 lib/brief-extract.mjs brief resources + todos from a transcript (incremental, no model); the conversation delta for the model
 lib/briefs.mjs        brief store (atomic files), budgeted `claude -p` generation, background pass (see Session briefs)
+lib/dormant.mjs       dormant sessions (session recovery): `fleet --local restore … --json` errors → HTTP, restore.onBoot
 lib/stacks.mjs        session stacks: `fleet stack` errors → HTTP, sibling spawn dir rule, post-spawn `stack add`, background `stack sync`
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
@@ -81,6 +82,7 @@ The server reads the **shared fleet config** written by `fleet init`:
 | `web.notes` | `{ root, name?, searchCmd?, exclude? }`, default none (off): the notes explorer over the markdown notes under `root` (`~` expanded, absolute). `name` defaults to the root's basename; `searchCmd` is an argv array (or a space-separated string) run with cwd = root — `{query}` is the query as one argument, `{args}` one argument per word, neither → the query is appended; `exclude` = extra names / root-relative paths to hide (see Notes) |
 | `web.files.roots` | array of dirs (`~` expanded, default `[]`): extra places a relative path in chat may live, tried after the session's touched files (see files). They add candidates only; the sandbox stays `$HOME` + cwd |
 | `grouping.host` | the host whose server runs grouping; set, it is the only one (a `web.grouping.enabled` elsewhere is ignored) and every other server proxies `/api/groups` to it |
+| `restore.onBoot` | `true`: at start, `fleet --local restore --all` once when this host has dormant sessions — once per boot (marker `${XDG_STATE_HOME:-~/.local/state}/fleet/web-restored-boot`), logged. Default `false`; a non-boolean is a config error |
 | `tmux` | tmux binary; `null` → PATH, `/opt/homebrew/bin`, `/usr/local/bin` |
 | `fleetBin` | `fleet` binary; `null` → PATH, fallbacks, `~/.local/bin`, `~/.cargo/bin` |
 | `claude` | launcher typed by spawn (default `claude`) |
@@ -170,7 +172,7 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | GET | `/api/hosts/:host/usage` | `?refresh=1` skips the CLI's 60s cache | `{ host, account, limits: [{ kind, group, label, model, percent, severity, resets_at, active }], extra_usage, fetched_at, stale, error }` — `fleet usage --json` (docs/architecture.md → Subscription usage); 502 with the CLI's reason, 504 on timeout. Proxied once to a peer |
 | GET | `/api/hosts/:host/spawn-dirs` | | `{ host, hosts: [names], spawnDirs: [{ label, paths: { host: dir } }], checks: [{ path, resolved, exists, isDir } \| null], offered: [{ label, path }], limits: { maxEntries, maxLabel, maxPath } }` — see **spawn-dirs** |
 | PUT | `/api/hosts/:host/spawn-dirs` | `{ spawnDirs: [{ label, paths }], dryRun? }` | the GET shape for the new list + `saved` (`false` on a dry run). 400 `{ error, errors: [{ index, field, host?, error }], checks }`; 502 when `fleet config set` failed |
-| GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id }] }], error? }` — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
+| GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id, dormant? }] }], error? }` (`dormant: true` only when that member is dormant on its host) — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
 | POST | `/api/groups/edit` | `{ op: "rename", id, label }` \| `{ op: "move", host, session, to }` \| `{ op: "move", host, session, label }` \| `{ op: "create", label }` \| `{ op: "delete", id }` | the same shape after `fleet group --rename/--move/--create/--delete` (400 bad body, 409 refused by the CLI, 501 when grouping is off). Waits for a running pass; edits run one at a time |
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
 | POST | `/api/hosts/:host/uploads` | `?name=<file name>`, the raw file as the body (any `content-type`) | `{ host, path, name, size }` — `path` is absolute on `:host`. 413 over `web.uploads.maxMB` (no partial file is left) |
@@ -187,6 +189,9 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | POST | `/api/hosts/:host/sessions/:id/brief/regenerate` | `{}` | **202** `{ host, id, started, queued, generating: true }` — returns at once, poll GET until `generating` is false. `started: false, queued: false` = one for this session is already running; `queued: true` = waiting for another session's call. **429** `{ error, retryAfterMs }` at `maxCallsPerHour`; 404 no transcript / gone session |
 | GET | `/api/hosts/:host/stacks` | | `{ host, stacks: [StackView] }` (`fleet stack list --json`, which syncs membership first) |
 | POST | `/api/hosts/:host/stacks/sync` | `{}` | `{ host, changed: [ids], stacks: [StackView] }` (`fleet stack sync --json`) |
+| GET | `/api/hosts/:host/dormant` | | `{ host, bootId, dormant: [{ kind, target, name, since, windows, panes, sessions: [{ sessionId, name, title, cwd }] }] }` — `fleet --local restore --json` (docs/architecture.md → Session recovery). 501 when the CLI predates `restore` |
+| POST | `/api/hosts/:host/dormant/restore` | `{ target, dryRun? }` \| `{ all: true, dryRun? }` | `{ host, restored: [{ kind, from, session, renamed, windows, panes, launched, warnings, commands, dryRun }], failed: [{ target, error }] }`. Starts agents: **409** `{ error, candidates }` ambiguous target, 404 no match, 400 bad body, 502 when nothing was restored; a partial `all` is 200. Refreshes the fleet (now, ~3 s, ~10 s) and then runs a stack sync. Proxy timeout 6 min |
+| POST | `/api/hosts/:host/dormant/forget` | `{ target }` \| `{ all: true }` | `{ host, forgotten: [names] }`; 409 / 404 as restore |
 | GET | `/api/hosts/:host/stacks/:id` | `:id` = `st-` + 8 hex | `StackView`. 400 bad id, 404 unknown stack |
 | PUT | `/api/hosts/:host/stacks/:id` | `{ markdown, expectUpdated? }` — markdown a string ≤ 64 kB (UTF-8; the request body may be up to 256 kB), `expectUpdated` the `updated` you loaded | `StackView` after the human edit (`fleet stack set`). **409** `{ error, updated }` when the stored `updated` differs (nothing written — reload); 400 bad body / id; 404 unknown |
 | POST | `/api/hosts/:host/stacks/:id/rename` | `{ label }` — one line, 1–80 characters | `StackView` with the new label (`fleet stack rename`; `editedAt` stamped). 400 bad label / id; 404 unknown |

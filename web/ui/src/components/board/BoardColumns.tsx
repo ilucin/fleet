@@ -3,6 +3,7 @@ import { LayersIcon, PlusIcon } from 'lucide-react'
 
 import type { Session } from '@/api/types'
 import { BoardCard } from '@/components/board/BoardCard'
+import { DormantCard } from '@/components/board/DormantCard'
 import { InlineEdit, InlineField } from '@/components/InlineEdit'
 import { StatusSummaryDots } from '@/components/board/StatusSummaryDots'
 import { StackColumnMenu } from '@/components/stack/StackColumnMenu'
@@ -153,7 +154,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
               {c.description ? <p className="mt-0.5 line-clamp-2 text-[0.6875rem] text-dimmer">{c.description}</p> : null}
             </header>
             <div className="flex min-h-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-y-contain px-2 pb-2">
-              {c.sessions.length === 0 ? (
+              {c.sessions.length === 0 && !c.dormant?.length ? (
                 <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-3 text-xs text-dimmer">
                   <span>Drag sessions here</span>
                   {!c.id.startsWith(PENDING_PREFIX) ? (
@@ -185,6 +186,7 @@ export function BoardColumns({ columns, now, cursorKey, selectedKey, onOpen, edi
                   />
                 )
               })}
+              {c.dormant?.map((m) => <DormantCard key={`${m.host}/${m.id}`} member={m} now={now} desktop />)}
             </div>
           </section>
         )

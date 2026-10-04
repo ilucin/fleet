@@ -25,6 +25,7 @@ import {
   withStacksEditor,
 } from './stacks.mjs';
 import { DEFAULT_STACKS_MODEL } from './config.mjs';
+import { validateDormantRequest } from './dormant.mjs';
 
 export const API_VERSION = 1;
 
@@ -76,6 +77,11 @@ const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/st
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
+const DORMANT_ROUTE = /^\/api\/hosts\/([^/]+)\/dormant(?:\/(restore|forget))?$/;
+/** A restore types launch lines into new tmux panes; `--all` may bring back many sessions. */
+const DORMANT_PROXY_MS = 6 * 60 * 1000;
+/** Restored sessions register in `fleet list` within seconds: refresh the list and stacks then. */
+const DORMANT_SETTLE_MS = [3000, 10000];
 
 export const DEFAULT_QUICK_REPLIES = [
   { label: 'Continue', text: 'Continue.' },
@@ -103,6 +109,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
  *   stacks      lib/stacks.mjs#createStacks (…/stacks routes, sibling spawn, sync after kill; absent → 501)
+ *   dormant     lib/dormant.mjs#createDormant (…/dormant routes: list / restore / forget; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmFleet   keep the merged /api/fleet warm in the background (lib/snapshot.mjs)
@@ -127,6 +134,7 @@ export function createApi({
   notes = null,
   spawnDirs = null,
   stacks = null,
+  dormant = null,
   grouper = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
@@ -626,6 +634,14 @@ export function createApi({
       return r.status === 200 ? { ...r, body: { ...r.body, stack: withStackEditor(r.body?.stack, host, editorViewer(config, req)) } } : r;
     }
 
+    const dm = DORMANT_ROUTE.exec(url.pathname);
+    if (dm) {
+      const action = dm[2] ?? 'list';
+      if (req.method !== (action === 'list' ? 'GET' : 'POST')) throw new HttpError('method not allowed', 405);
+      const host = decodeURIComponent(dm[1]);
+      return forHost({ req, url, host, timeoutMs: action === 'restore' ? DORMANT_PROXY_MS : peerProxyTimeoutMs, local: () => localDormant(action, req) });
+    }
+
     const n = NOTES_ROUTE.exec(url.pathname);
     if (n) {
       const [, rawHost, action] = n;
@@ -652,6 +668,42 @@ export function createApi({
     }
     if (action === 'file') return { status: 200, body: { host: config.self, ...(await notes.file(url.searchParams.get('path'))) } };
     return notes.raw(url.searchParams.get('path'));
+  }
+
+  /**
+   * Dormant sessions (lib/dormant.mjs): the CLI's JSON passed through. A restore starts agents,
+   * like a spawn: an ambiguous target is a 409 with `candidates`, never a guess.
+   */
+  async function localDormant(action, req) {
+    if (!dormant) throw new HttpError('session recovery is not available on this server', 501);
+    try {
+      if (action === 'list') return { status: 200, body: await dormant.list() };
+      const check = validateDormantRequest(await readJsonBody(req), { allowDryRun: action === 'restore' });
+      if (action === 'forget') return { status: 200, body: await dormant.forget(check) };
+      const report = await dormant.restore(check);
+      const restored = Array.isArray(report?.restored) ? report.restored : [];
+      const failed = Array.isArray(report?.failed) ? report.failed : [];
+      if (!check.dryRun && restored.length) afterRestore();
+      if (!restored.length && failed.length) {
+        return { status: 502, body: { error: String(failed[0]?.error ?? 'restore failed'), ...report } };
+      }
+      return { status: 200, body: report };
+    } catch (err) {
+      if (err instanceof HttpError && err.body) return { status: err.status, body: err.body };
+      throw err;
+    }
+  }
+
+  /** After a restore: the list now (tmux sessions), again as the agents register, then a stack sync. */
+  function afterRestore() {
+    refreshFleet();
+    DORMANT_SETTLE_MS.forEach((ms, i) => {
+      const timer = setTimeout(() => {
+        refreshFleet();
+        if (i === DORMANT_SETTLE_MS.length - 1) stacks?.sync('restore').catch(() => {});
+      }, ms);
+      timer.unref?.();
+    });
   }
 
   /** GET usage: this host's Claude subscription limits (`fleet usage --json`). */

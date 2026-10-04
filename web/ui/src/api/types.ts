@@ -317,6 +317,8 @@ export interface OkResponse {
 export interface GroupMember {
   host: string
   id: string
+  /** Set by servers that know session recovery: the session is dormant (a reboot left it, not resumed yet). */
+  dormant?: boolean
 }
 
 /** A smart group of sessions (`fleet group`). Ids are stable across runs. */
@@ -389,6 +391,8 @@ export interface StackMember {
   closed: string | null
   /** Live right now (discovery at render time). */
   live?: boolean
+  /** Dormant on its host (a reboot left it; resume it from the Dormant section). */
+  dormant?: boolean
   status?: SessionStatus | string | null
   briefPath?: string | null
   briefExists?: boolean
@@ -642,4 +646,60 @@ export interface UsageResponse {
   /** A refresh failed; these are the last good numbers. */
   stale: boolean
   error: string | null
+}
+
+/** A Claude session inside a dormant entry (`fleet restore --json`). */
+export interface DormantSession {
+  sessionId: string
+  name: string | null
+  title: string | null
+  cwd: string | null
+}
+
+/** One dormant tmux session (`kind: tmux`) or lone Claude session (`kind: claude`) a reboot left. */
+export interface DormantView {
+  kind: 'tmux' | 'claude' | string
+  /** What `fleet restore <target>` takes: the tmux name, or the full session id. */
+  target: string
+  /** The tmux name, or the Claude title. */
+  name: string
+  /** When it went down (ISO). */
+  since: string | null
+  windows: number
+  panes: number
+  sessions: DormantSession[]
+}
+
+/** GET /api/hosts/:host/dormant. */
+export interface DormantResponse {
+  host: string
+  bootId: string | null
+  dormant: DormantView[]
+}
+
+export interface RestoredEntry {
+  kind: string
+  from: string
+  /** The tmux session it now lives in. */
+  session: string
+  renamed: boolean
+  windows: number
+  panes: number
+  launched: { sessionId: string; title: string | null; line: string }[]
+  warnings: string[]
+  commands: string[]
+  dryRun: boolean
+}
+
+/** POST /api/hosts/:host/dormant/restore. 409 `{ error, candidates }` when the target is ambiguous. */
+export interface RestoreResponse {
+  host: string
+  restored: RestoredEntry[]
+  failed: { target: string; error: string }[]
+}
+
+/** POST /api/hosts/:host/dormant/forget. */
+export interface ForgetResponse {
+  host: string
+  forgotten: string[]
 }

@@ -25,6 +25,7 @@ import { createTouchedIndex } from './lib/touched.mjs';
 import { createBriefExtractor } from './lib/brief-extract.mjs';
 import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
 import { createStacks } from './lib/stacks.mjs';
+import { createDormant } from './lib/dormant.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -118,6 +119,8 @@ const stacks = createStacks({
   syncIntervalMs: config.stacks.syncMinutes * 60 * 1000,
   log,
 });
+// Session recovery: dormant sessions after a reboot (`fleet --local restore … --json`).
+const dormant = createDormant({ cli, log });
 const handleApi = createApi({
   config,
   fleet,
@@ -135,6 +138,7 @@ const handleApi = createApi({
   spawnDirs: createSpawnDirsEditor({ config, configFile: config.configFile ?? configPath(process.env), cli }),
   briefs,
   stacks,
+  dormant,
   grouper,
   name: NAME,
   version: VERSION,
@@ -181,6 +185,12 @@ server.listen(config.port, config.bind, () => {
   log(config.stacks.sync
     ? `[fleet-web] stacks: sync every ${config.stacks.syncMinutes}m while a session is in a stack (fleet stack sync)`
     : '[fleet-web] stacks: background sync off (FLEET_WEB_STACKS=0)');
+  if (config.restore.onBoot) {
+    log('[fleet-web] restore.onBoot: bringing back dormant sessions (fleet restore --all)');
+    dormant.restoreOnBoot({ markerFile: config.restore.markerFile }).then((r) => {
+      if (r?.restored?.length) handleApi.refreshFleet();
+    });
+  }
 });
 
 let shuttingDown = false;

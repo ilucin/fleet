@@ -336,3 +336,11 @@ test('/api/groups/edit: applied on the grouping host, proxied from a peer, refus
   assert.equal((await post(`${urls.laptop}/api/groups/edit`, { op: 'rename', id: 'g-1' })).status, 400);
   assert.equal((await get(`${urls.laptop}/api/groups/edit`)).status, 405);
 });
+
+test('grouper: a member\'s `dormant: true` passes through to /api/groups (only when true)', async () => {
+  const members = [{ host: 'laptop', id: 'a1', dormant: true }, { host: 'laptop', id: 'a2', dormant: false }, { host: 'laptop', id: 'a3' }];
+  const cli = { ...fakeCli(), groupCached: async () => report([{ ...BOARD, members }]) };
+  const g = createGrouper({ cli, getFleet: async () => FLEET, self: 'laptop', intervalMs: 600000 });
+  await g.loadCached();
+  assert.deepEqual(g.response().groups[0].members, [{ host: 'laptop', id: 'a1', dormant: true }, { host: 'laptop', id: 'a2' }, { host: 'laptop', id: 'a3' }]);
+});

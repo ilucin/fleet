@@ -47,8 +47,13 @@ export const DEFAULT_BRIEFS = Object.freeze({
 /** Where brief files live: $FLEET_BRIEFS_DIR, else ${XDG_STATE_HOME:-~/.local/state}/fleet/briefs. */
 export function briefsDir(env = process.env, home = os.homedir()) {
   if (env.FLEET_BRIEFS_DIR) return path.resolve(expandHome(env.FLEET_BRIEFS_DIR, home));
+  return path.join(fleetStateDir(env, home), 'briefs');
+}
+
+/** fleet's per-machine state: `${XDG_STATE_HOME:-~/.local/state}/fleet`. */
+export function fleetStateDir(env = process.env, home = os.homedir()) {
   const base = env.XDG_STATE_HOME ? expandHome(env.XDG_STATE_HOME, home) : path.join(home, '.local', 'state');
-  return path.join(base, 'fleet', 'briefs');
+  return path.join(base, 'fleet');
 }
 
 /** A model id typed after `--model` in a shell: letters, digits and `._[]-` only. */
@@ -196,7 +201,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
- *     configFile, configFound }
+ *     restore: { onBoot, markerFile }, configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -433,6 +438,12 @@ export function normalizeConfig(
   const stacksModel = typeof st.model === 'string' && MODEL_ID_RE.test(st.model) ? st.model : DEFAULT_STACKS_MODEL;
   const stacks = { sync: stacksSync, syncMinutes, generate: st.enabled !== false, model: stacksModel };
 
+  // restore.onBoot: at start, bring back what the last boot left dormant (lib/dormant.mjs).
+  const rs = raw.restore == null ? {} : raw.restore;
+  if (!isObject(rs)) throw new Error('config.restore must be an object { onBoot }');
+  if (rs.onBoot != null && typeof rs.onBoot !== 'boolean') throw new Error('config.restore.onBoot must be true or false');
+  const restore = { onBoot: rs.onBoot === true, markerFile: path.join(fleetStateDir(env, home), 'web-restored-boot') };
+
   return {
     self: self.trim(),
     port,
@@ -457,6 +468,7 @@ export function normalizeConfig(
     notes,
     briefs,
     stacks,
+    restore,
   };
 }
 

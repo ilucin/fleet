@@ -3,6 +3,7 @@ import { GaugeIcon, PlusIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-re
 
 import type { Session } from '@/api/types'
 import { BoardColumns } from '@/components/board/BoardColumns'
+import { DormantSection } from '@/components/DormantSection'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
 import { NotesLink } from '@/components/desktop/Sidebar'
 import { HostDot } from '@/components/HostBadge'
@@ -243,6 +244,7 @@ export function Board({ list, groups, columns, onMoveColumn, now, cursorKey, sel
             onMoveColumn={onMoveColumn}
           />
         )}
+        {fleet ? <DormantSection now={now} host={host} desktop className="max-h-full w-72 shrink-0 overflow-y-auto rounded-xl border border-dashed p-2" /> : null}
         {fleet && columns.length && overlayInset ? <div aria-hidden className="shrink-0" style={{ width: overlayInset }} /> : null}
       </div>
     </div>

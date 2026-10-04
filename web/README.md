@@ -26,7 +26,7 @@ Open `http://<host>:<port>/` on your phone and "Add to Home Screen". Health: `/a
 
 Reads the shared fleet config (`$FLEET_CONFIG` or `~/.config/fleet/config.json`, written by
 `fleet init`). Relevant keys: `self`, `hosts.<name>.web` (peers), `web.port`, `web.bind`,
-`web.ui` (a path), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `web.stacks`, `grouping.host`, `stacks.model` (reported only), `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
+`web.ui` (a path), `web.editor`, `web.quickReplies`, `web.models`, `web.autoName`, `web.grouping`, `web.briefs`, `web.stacks`, `restore.onBoot`, `grouping.host`, `stacks.model` (reported only), `tmux`, `fleetBin`, `spawnDirs` (spawn only accepts dirs inside these; editable in Settings → Start directories, which writes it through `fleet config set`). Example:
 [`config.example.json`](./config.example.json). Without a config it runs as a single local host
 on 127.0.0.1.
 
@@ -52,6 +52,12 @@ Resources and todos come from the transcript for free; the summary costs one
 ≥ 15 min per session, one at a time, ≤ 12/hour — all tunable: `model`, `idleMs`, `minIntervalMs`,
 `maxDeltaChars`, `maxCallsPerHour`, `minNewTurns`, `minNewChars`, `maxBriefChars`). Reading and
 editing briefs (`GET`/`PUT …/brief`) and a manual regenerate work with it off.
+
+**Dormant sessions** (session recovery after a reboot, owned by `fleet restore`): the server
+serves `GET /api/hosts/:host/dormant` and `POST …/dormant/restore` / `…/dormant/forget`
+(`{ target }` or `{ all: true }`); the UI lists them per host under the session list (Resume,
+Forget, Resume all) and dims dormant group members on the Board. Config `restore.onBoot: true`
+resumes everything once per boot when the server starts. Details: ARCHITECTURE.md → HTTP API.
 
 **Session stacks** (sessions sharing one StackBrief file, owned by `fleet stack`): the server
 serves `/api/hosts/:host/stacks…` (list, show, edit with conflict check, rename, delete, sync) and spawns

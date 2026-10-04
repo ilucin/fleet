@@ -1,7 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
 // contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group` (+ `--rename` / `--move`),
-// `fleet usage --json`, `fleet config set`, `fleet --local stack … --json`) are documented in one
+// `fleet usage --json`, `fleet config set`, `fleet --local stack … --json`, `fleet --local restore … --json`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -246,6 +246,30 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, `fleet stack ${args[0] ?? ''}`.trim());
   }
 
+  /**
+   * `fleet --local restore <args…> --json` (session recovery, docs/cli.md → Session recovery):
+   * the dormant list (no args), a restore (`--` target / `--all`, `--dry-run`) or a forget
+   * (`--forget=<t>` / `--forget-all`). Resolves the parsed object. Throws FleetCliError carrying
+   * `exitCode` (2 ambiguous, 3 no match, 1 a restore with failures), `report` (the JSON the CLI
+   * printed before exiting non-zero), `missing` (the binary predates `restore`), `timedOut`.
+   */
+  async function restore(args = [], { timeoutMs: t = 60 * 1000 } = {}) {
+    const argv = ['--local', 'restore', '--json', ...args.map(String)];
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, argv, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, 'fleet restore', t);
+      const why = String(err?.stderr ?? '').replace(/^Error:\s*/, '').trim();
+      if (why && !e.timedOut) e.message = why.split('\n')[0];
+      e.exitCode = typeof err?.code === 'number' ? err.code : null;
+      e.report = tryObject(err?.stdout);
+      e.missing = !e.timedOut && /unrecognized subcommand|unexpected argument 'restore'|invalid subcommand/i.test(why);
+      throw e;
+    }
+    return parseObject(stdout, 'fleet restore');
+  }
+
   // `--flag=value` everywhere: a value starting with "-" must not read as a flag.
   const stackList = () => stack(['list']);
   const stackShow = (id) => stack(['show', id]);
@@ -280,5 +304,6 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     stackEnsure,
     stackAdd,
     stackSync,
+    restore,
   };
 }

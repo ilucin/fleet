@@ -1,7 +1,8 @@
 // Board view logic: join live sessions with the smart groups from /api/groups, the
 // client-side fallback (group by repo), per-column status summaries and ordering —
 // pure, unit-tested in groups.test.ts.
-import type { GroupRun, GroupsResponse, Session, SessionGroup } from '@/api/types'
+import type { GroupMember, GroupRun, GroupsResponse, Session, SessionGroup } from '@/api/types'
+import type { DormantMember } from '@/lib/dormant'
 import { relTime } from '@/lib/format'
 import { byLastActivity, statusMeta, type StatusKey } from '@/lib/sessions'
 
@@ -21,6 +22,8 @@ export interface BoardColumn {
   summary: StatusSummary
   /** `source: 'stack'` columns: the session stack they show (on `host`). */
   stack?: { id: string; host: string } | null
+  /** Members a reboot left dormant (not live): dimmed cards with Resume, after the live ones. */
+  dormant?: DormantMember[]
 }
 
 export const STACK_COLUMN_PREFIX = 'stack:'
@@ -99,7 +102,12 @@ export function compareColumns(a: BoardColumn, b: BoardColumn): number {
  * except a group of the user's with no members at all (`manual`, just made on the board):
  * an empty column to drop sessions into.
  */
-export function boardColumns(sessions: Session[], groups: SessionGroup[]): BoardColumn[] {
+export function boardColumns(
+  sessions: Session[],
+  groups: SessionGroup[],
+  /** A member that is not live → its dormant card (null: not dormant / filtered out). */
+  dormantOf: (m: GroupMember) => DormantMember | null = () => null,
+): BoardColumn[] {
   const owner = new Map<string, number>()
   groups.forEach((g, i) => {
     for (const m of g.members ?? []) {
@@ -116,9 +124,20 @@ export function boardColumns(sessions: Session[], groups: SessionGroup[]): Board
     if (idx === undefined) ungrouped.push(s)
     else buckets[idx].push(s)
   }
+  const live = new Set(sessions.flatMap(sessionKeys))
+  const placed = new Set<string>()
   const cols: BoardColumn[] = []
   groups.forEach((g, i) => {
-    if (!buckets[i].length && !isEmptyOwnGroup(g)) return
+    const dormant: DormantMember[] = []
+    for (const m of g.members ?? []) {
+      const k = memberKey(m.host, m.id)
+      if (live.has(k) || placed.has(k)) continue
+      const d = dormantOf(m)
+      if (!d) continue
+      placed.add(k)
+      dormant.push(d)
+    }
+    if (!buckets[i].length && !dormant.length && !isEmptyOwnGroup(g)) return
     const list = buckets[i].sort(byUrgency)
     cols.push({
       id: g.id,
@@ -128,6 +147,7 @@ export function boardColumns(sessions: Session[], groups: SessionGroup[]): Board
       ungrouped: false,
       sessions: list,
       summary: statusSummary(list),
+      ...(dormant.length ? { dormant } : {}),
     })
   })
   if (ungrouped.length) {
@@ -186,7 +206,7 @@ export function withStackColumns(columns: BoardColumn[], sessions: Session[]): B
   const rest: BoardColumn[] = []
   for (const c of columns) {
     const left = c.sessions.filter((s) => !inStack.has(memberKey(s.host, s.session_id)))
-    if (!left.length) continue
+    if (!left.length && !c.dormant?.length) continue
     rest.push(left.length === c.sessions.length ? c : { ...c, sessions: left, summary: statusSummary(left) })
   }
   return [...stackCols, ...rest]

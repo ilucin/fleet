@@ -134,6 +134,27 @@ describe('boardColumns', () => {
   test('filtered-out sessions simply do not appear', () => {
     expect(boardColumns([], [g('g', [['laptop', 'a']])])).toEqual([])
   })
+
+  test('dormant members: dimmed cards after the live ones; a dormant-only group stays; live wins; claimed once', () => {
+    const dormantOf = (m: { host: string; id: string; dormant?: boolean }) =>
+      m.dormant || m.id.startsWith('z') ? { host: m.host, id: m.id, title: `T ${m.id}`, since: null } : null
+    const cols = boardColumns(
+      [sessions[0]],
+      [
+        g('mixed', [['laptop', 'a'], ['laptop', 'z1'], ['laptop', 'gone']]),
+        g('asleep', [['laptop', 'z2'], ['laptop', 'z1']]),
+        { ...g('flagged', []), members: [{ host: 'laptop', id: 'q', dormant: true }] },
+        g('dead', [['laptop', 'gone']]),
+      ],
+      dormantOf,
+    )
+    expect(cols.map((c) => [c.id, c.sessions.map((x) => x.session_id), (c.dormant ?? []).map((d) => d.id)])).toEqual([
+      ['mixed', ['a'], ['z1']],
+      ['asleep', [], ['z2']],
+      ['flagged', [], ['q']],
+    ])
+    expect(withStackColumns(cols, [sessions[0]]).map((c) => c.id)).toEqual(['mixed', 'asleep', 'flagged'])
+  })
 })
 
 test('statusSummary counts unknown statuses as unknown', () => {

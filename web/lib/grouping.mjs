@@ -36,7 +36,8 @@ function publicGroups(report) {
     label: String(g.label),
     description: g.description ?? null,
     source: g.source ?? 'llm',
-    members: (g.members ?? []).map((m) => ({ host: String(m.host), id: String(m.id) })),
+    // `dormant: true` (only when true): the session is dormant on its host (a reboot left it).
+    members: (g.members ?? []).map((m) => ({ host: String(m.host), id: String(m.id), ...(m.dormant === true ? { dormant: true } : {}) })),
   }));
 }
 

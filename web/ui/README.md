@@ -77,6 +77,8 @@ src/
   lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
                       (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
   lib/storage.ts      localStorage that never throws
+  lib/dormant.ts      dormant sessions (a reboot left them): dormantIndex() / dormantMember() (Board cards, the server's
+                      `dormant` flag or the dormant list), dormantTitles() / dormantMeta(), restoreSummary(), dormantMissing()
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
   hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
@@ -104,12 +106,16 @@ src/
                       useNotesSearch() (debounced, aborts the previous), useNoteFile()
   hooks/useOutbox.ts  the session screen's Outbox: keepalive POSTs, flush on unmount / background, pagehide hand-off
   hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
-  providers/          FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
+  hooks/useDormant.ts DormantContext / useDormant(): hosts with dormant sessions, index, resume / resumeAll / forget
+  providers/          DormantProvider (polls every reachable host's /dormant every 30s; restore / forget + toasts),
+                      FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
                       PrefsProvider (text size → <html> font-size, terminal text, progress notes)
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
-                      Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay
+                      Markdown/Linkified, NewSessionDrawer, ViewToggle (List | Board), DropOverlay,
+                      DormantSection (under the list / sidebar, last board column: Resume, Forget, Resume all; ArmButton)
   components/board/   Board (desktop Kanban + header), BoardColumns (columns, drag'n'drop, rename), BoardCard,
+                      DormantCard (a dormant group member: dimmed, Resume),
                       GroupedList (mobile collapsible sections),
                       GroupsStatus (last run + Regroup), StatusSummaryDots
   components/stack/   StackUi (mounted once in App: the sheet + the sibling form), StackSheet, StackChip (list rows),
@@ -176,6 +182,11 @@ src/
   ⌘K → Rename session…, or a long press on a row (touch). Saving is
   optimistic (spinner) → `POST …/rename`; a 409 (session waiting on a prompt) or an error rolls
   back with a toast; success toasts the new title and the tmux rename.
+- **Dormant** (session recovery): sessions a reboot left behind, per host, under the list (mobile
+  list, desktop sidebar) and as the last Board column — tmux name, Claude titles, windows/panes,
+  how long ago. Resume (one click: it is what you came for), Forget and Resume all (two clicks,
+  the first arms for 5 s, like Close session). A dormant group member shows on the Board as a
+  dimmed card with Resume. Hidden for hosts whose server / CLI predates it.
 - **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by
   what they work on. Groups come from `GET /api/groups` (the server's periodic `fleet group`
   pass — stable ids, a 2–4 word label, an optional description); sessions no group claims yet
