@@ -10,6 +10,7 @@ use std::io::{BufRead, Write};
 use colored::Colorize;
 
 use crate::cli::commands::host_label;
+use crate::core::snapshot;
 use crate::core::title;
 use crate::core::tmux::{self, KeptClass, Resolve, StaleReport, TmuxSession};
 use crate::error::{Error, Result};
@@ -48,7 +49,7 @@ fn no_sessions() -> Error {
 }
 
 /// Relative age: just now / 12m ago / 3h ago / 2d ago / never.
-fn rel(now: i64, t: i64) -> String {
+pub(crate) fn rel(now: i64, t: i64) -> String {
     if t <= 0 {
         return "never".into();
     }
@@ -64,7 +65,7 @@ fn rel(now: i64, t: i64) -> String {
     }
 }
 
-fn pad(s: &str, w: usize) -> String {
+pub(crate) fn pad(s: &str, w: usize) -> String {
     let n = crate::cli::render::width_of(s);
     if n >= w {
         s.to_string()
@@ -103,6 +104,51 @@ pub fn format_sessions(v: &[TmuxSession], now: i64) -> String {
         .join("\n")
 }
 
+/// The dormant tmux sessions of this machine (see [`snapshot`]), for the text listing. Read
+/// only — `list` must not write — and empty in fixture mode or on any error.
+fn dormant_tmux() -> Vec<snapshot::DormantView> {
+    if crate::core::discovery::is_fixture() {
+        return Vec::new();
+    }
+    snapshot::current()
+        .map(|s| {
+            snapshot::dormant_views(&s)
+                .into_iter()
+                .filter(|v| v.kind == "tmux")
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Dormant sessions under the live ones: dimmed, marked, with how long they have been down.
+pub fn format_dormant(v: &[snapshot::DormantView], now: i64) -> String {
+    let w = v
+        .iter()
+        .map(|s| crate::cli::render::width_of(&s.name))
+        .max()
+        .unwrap_or(12)
+        .clamp(12, 28);
+    v.iter()
+        .map(|s| {
+            let since = s
+                .since
+                .as_deref()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| format!(" · since {}", rel(now, t.timestamp())))
+                .unwrap_or_default();
+            format!(
+                "◌ {} {} dormant{since} — fleet restore {}",
+                pad(&s.name, w),
+                pad(&format!("{}w", s.windows), 4),
+                crate::core::tools::shq_min(&s.name)
+            )
+            .dimmed()
+            .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn list(quiet: bool, json: bool) -> Result<()> {
     let v = sessions()?;
     if json {
@@ -119,7 +165,8 @@ pub fn list(quiet: bool, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(());
     }
-    if v.is_empty() {
+    let dormant = if quiet { Vec::new() } else { dormant_tmux() };
+    if v.is_empty() && dormant.is_empty() {
         if !quiet {
             note(&format!(
                 "no tmux sessions on {} — try: fleet new <name>",
@@ -128,12 +175,18 @@ pub fn list(quiet: bool, json: bool) -> Result<()> {
         }
         return Ok(());
     }
+    let now = chrono::Utc::now().timestamp();
     if quiet {
         for s in &v {
             println!("{}", s.name);
         }
     } else {
-        println!("{}", format_sessions(&v, chrono::Utc::now().timestamp()));
+        if !v.is_empty() {
+            println!("{}", format_sessions(&v, now));
+        }
+        if !dormant.is_empty() {
+            println!("{}", format_dormant(&dormant, now));
+        }
     }
     Ok(())
 }
@@ -172,13 +225,85 @@ fn resolve(q: &str) -> Result<String> {
     }
 }
 
+/// Attach to the live session `q` names — or, when no live session matches but exactly one
+/// dormant one does, restore it first (`fleet restore`) and attach to that.
 pub fn enter(q: &str) -> Result<()> {
     if q.is_empty() {
         return Err(Error::exit(1, "usage: fleet enter <query>"));
     }
+    let v = sessions()?;
+    if matches!(tmux::resolve_in(&v, q), Resolve::None) {
+        match dormant_match(q)? {
+            DormantHit::One(snap, name) => return restore_and_attach(&snap, &name, q),
+            DormantHit::None => {}
+        }
+    }
     let name = resolve(q)?;
     need_tty(&format!("fleet enter {q}"))?;
     tmux::attach(&name)
+}
+
+enum DormantHit {
+    One(Box<snapshot::Snapshot>, String),
+    None,
+}
+
+/// The dormant tmux session `q` names on this machine, by `enter`'s tiers. Several at the
+/// best tier is exit 2 with the candidates — a restore starts agents, so never a guess.
+fn dormant_match(q: &str) -> Result<DormantHit> {
+    if crate::core::discovery::is_fixture() {
+        return Ok(DormantHit::None);
+    }
+    // Recording first makes the first `enter` after a reboot see the old boot as dormant.
+    let snap = match snapshot::refresh() {
+        Ok(s) => s,
+        Err(e) => {
+            crate::core::hosts::debug(&format!("no dormant lookup: {e}"));
+            return Ok(DormantHit::None);
+        }
+    };
+    let names: Vec<TmuxSession> = snap
+        .dormant
+        .tmux
+        .iter()
+        .map(|t| TmuxSession {
+            name: t.name.clone(),
+            ..Default::default()
+        })
+        .collect();
+    match tmux::resolve_in(&names, q) {
+        Resolve::One(n) => Ok(DormantHit::One(Box::new(snap), n)),
+        Resolve::None => Ok(DormantHit::None),
+        Resolve::Many(m) => {
+            eprintln!(
+                "{} '{q}' matches {} dormant sessions:",
+                "fleet:".red(),
+                m.len()
+            );
+            for n in &m {
+                eprintln!("    {n}");
+            }
+            eprintln!("{}", "hint: fleet enter <full-name>".dimmed());
+            Err(Error::exit(2, ""))
+        }
+    }
+}
+
+/// Restore dormant tmux session `name`, then attach to wherever it landed.
+fn restore_and_attach(snap: &snapshot::Snapshot, name: &str, q: &str) -> Result<()> {
+    need_tty(&format!("fleet enter {q}"))?;
+    eprintln!("restoring dormant session {name}…");
+    let launcher = crate::cli::commands::resolve_launcher();
+    let r = snapshot::restore(snap, &snapshot::Target::Tmux(name.to_string()), &launcher)?;
+    for w in &r.warnings {
+        note(w);
+    }
+    if r.dry_run {
+        for c in &r.commands {
+            println!("{c}");
+        }
+    }
+    tmux::attach(&r.session)
 }
 
 // --- enter across hosts ----------------------------------------------------------
@@ -340,6 +465,13 @@ fn attach_on(host: &str, name: &str, q: &str) -> Result<i32> {
         Scope::SelfHost,
     )? {
         Target::Local { .. } => {
+            if !tmux::has_session(name) {
+                // Not live: a dormant session `enter_dormant_anywhere` picked.
+                if let DormantHit::One(snap, n) = dormant_match(name)? {
+                    restore_and_attach(&snap, &n, q)?;
+                    return Ok(0);
+                }
+            }
             need_tty(&format!("fleet enter {q}"))?;
             tmux::attach(name)?;
             Ok(0)
@@ -412,6 +544,9 @@ pub fn enter_anywhere(q: &str) -> Result<i32> {
             "no host answered — see: fleet doctor",
         )),
         Found::None => {
+            if let Some(code) = enter_dormant_anywhere(q, &s.listed)? {
+                return Ok(code);
+            }
             let names: Vec<&str> = s.listed.iter().map(|(h, _)| h.as_str()).collect();
             eprintln!(
                 "{} no session matching '{q}' on {}",
@@ -424,6 +559,94 @@ pub fn enter_anywhere(q: &str) -> Result<i32> {
                 eprintln!("{}", format_sessions(v, now));
             }
             Err(Error::exit(3, ""))
+        }
+    }
+}
+
+/// One host's dormant tmux session names: this machine's snapshot, or `fleet restore --json`
+/// over ssh. A host that can't say (an older fleet there, a timeout) has none.
+fn dormant_names(host: &str) -> Vec<String> {
+    use crate::core::hosts::{self, Scope, Target};
+    let local = |snap: snapshot::Snapshot| -> Vec<String> {
+        snap.dormant.tmux.iter().map(|t| t.name.clone()).collect()
+    };
+    match hosts::resolve(
+        crate::core::config::get(),
+        Some(host),
+        false,
+        Scope::SelfHost,
+    ) {
+        Ok(Target::Local { .. }) => {
+            if crate::core::discovery::is_fixture() {
+                return Vec::new();
+            }
+            snapshot::refresh().map(local).unwrap_or_default()
+        }
+        Ok(Target::Remote(r)) => {
+            let args = ["restore".to_string(), "--json".into()];
+            match hosts::capture_remote(&r, &args, hosts::remote_timeout()) {
+                Ok(c) if c.ok() => serde_json::from_str::<serde_json::Value>(&c.stdout)
+                    .ok()
+                    .and_then(|v| v["dormant"].as_array().cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|d| d["kind"] == "tmux")
+                    .filter_map(|d| d["name"].as_str().map(str::to_string))
+                    .collect(),
+                _ => Vec::new(),
+            }
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// `enter` found no live session anywhere: try the dormant ones of every host that answered,
+/// ranked by the same tiers. `None` = no dormant match either (the caller reports the miss).
+fn enter_dormant_anywhere(q: &str, listed: &[(String, Vec<TmuxSession>)]) -> Result<Option<i32>> {
+    let dormant: Vec<(String, Vec<TmuxSession>)> = listed
+        .iter()
+        .map(|(h, _)| {
+            let names = dormant_names(h)
+                .into_iter()
+                .map(|name| TmuxSession {
+                    name,
+                    ..Default::default()
+                })
+                .collect();
+            (h.clone(), names)
+        })
+        .collect();
+    let mut best: Option<usize> = None;
+    let mut hits: Vec<(usize, String, String)> = Vec::new();
+    for (h, v) in &dormant {
+        if let Some((tier, names)) = tmux::match_tier(v, q) {
+            best = Some(best.map_or(tier, |b| b.min(tier)));
+            hits.extend(names.into_iter().map(|n| (tier, h.clone(), n)));
+        }
+    }
+    let hits: Vec<(String, String)> = hits
+        .into_iter()
+        .filter(|(t, _, _)| Some(*t) == best)
+        .map(|(_, h, n)| (h, n))
+        .collect();
+    match hits.as_slice() {
+        [] => Ok(None),
+        [(host, name)] => {
+            eprintln!("→ {host}: {name} (dormant)");
+            attach_on(host, name, q).map(Some)
+        }
+        _ => {
+            eprintln!(
+                "{} '{q}' matches {} dormant sessions:",
+                "fleet:".red(),
+                hits.len()
+            );
+            let w = hits.iter().map(|(h, _)| h.len()).max().unwrap_or(0);
+            for (h, n) in &hits {
+                eprintln!("    {}  {n}", pad(h, w));
+            }
+            eprintln!("{}", "hint: fleet -H <host> enter <full-name>".dimmed());
+            Err(Error::exit(2, ""))
         }
     }
 }

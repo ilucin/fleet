@@ -299,6 +299,8 @@ struct Dash {
     naming: Option<NameProgress>,
     /// Frame counter, only ever used to advance the spinner.
     tick: u64,
+    /// Sessions a reboot left dormant on this machine (`fleet restore`), re-read every poll.
+    dormant: usize,
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -723,6 +725,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         tiny: false,
         naming: None,
         tick: 0,
+        dormant: 0,
     };
     let mut naming = Naming::new(&loaded.cfg.naming);
     let sync_tmux = loaded.cfg.naming.sync_tmux();
@@ -790,6 +793,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             }
             log.truncate(EVENT_CAP);
             last_poll = Some(Instant::now());
+            dash.dormant = crate::core::snapshot::dormant_count();
             // New sessions get a title, and a session whose first prompt has
             // landed since gets a better one. A no-op once the fleet is titled.
             naming.autotitle(&rows);
@@ -1059,7 +1063,7 @@ fn draw(
             .unwrap_or_else(|| short_key(&r.key));
         render_rename(f, chunks[0], &who, &r.buf);
     } else {
-        render_header(f, chunks[0], rows, o, &plan, naming, tick);
+        render_header(f, chunks[0], rows, o, &plan, (naming, dash.dormant), tick);
     }
     let ctx = FleetCtx::of(rows, &plan);
     render_sessions(f, chunks[1], rows, sel, &plan, &ctx, dash);
@@ -1155,7 +1159,7 @@ fn render_header(
     rows: &[Session],
     o: &WatchOpts,
     plan: &Plan,
-    naming: Option<NameProgress>,
+    (naming, dormant): (Option<NameProgress>, usize),
     tick: u64,
 ) {
     let busy = rows.iter().filter(|r| r.status == "busy").count();
@@ -1191,6 +1195,14 @@ fn render_header(
             (format!("· {waiting} need you "), alarm)
         } else {
             (format!("· {waiting}⏸ "), alarm)
+        });
+    }
+    // A reboot's leftovers, waiting for `fleet restore` — easy to miss otherwise.
+    if dormant > 0 {
+        segs.push(if wide {
+            (format!("· {dormant} dormant "), dim)
+        } else {
+            (format!("· {dormant}◌ "), dim)
         });
     }
     // A model call is seconds long, so the fleet has to say it's working on one
@@ -1473,6 +1485,7 @@ mod tests {
             tiny: false,
             naming: None,
             tick: 0,
+            dormant: 0,
         }
     }
 

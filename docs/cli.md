@@ -40,7 +40,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | command | does |
 | --- | --- |
 | `fleet` | `watch` on a terminal; a one-shot `list` when stdout is piped |
-| `fleet list [--json] [-a, --all-hosts]` (alias `ls`) | live sessions: title, status, age, context usage (`ctx 62%`), terminal, cwd. `--json` is an array whose rows all carry `host`; `-a` queries every configured host in parallel |
+| `fleet list [--json] [-a, --all-hosts]` (alias `ls`) | live sessions: title, status, age, context usage (`ctx 62%`), terminal, cwd. `--json` is an array whose rows all carry `host`; `-a` queries every configured host in parallel. The text view ends with `N dormant (fleet restore)` when a reboot left [dormant sessions](#session-recovery). Every local `list` also records the [snapshot](#session-recovery) |
 | `fleet peek <target> [--lines N]` | what the session's terminal shows now (default 40 lines) |
 | `fleet send <target> <text>` | type text into the session and press Enter |
 | `fleet rename <target> <title> [--no-tmux-sync] [--force] [--json]` | rename the session's one title: Claude's `/rename` (the source of truth), then its tmux session follows as a slug of it (`Fix Login` → `fix-login`, `-2` on a collision) when the tmux session is that Claude session's own (one window, one pane). A session **waiting on a prompt** is held (exit 1; `--json`: exit 3) — typed keys would be its answer; busy sessions are fine (Claude runs `/rename` mid-turn without disturbing the turn). `--force` overrides the hold. `--json` prints `{ ok, result: renamed\|sent\|held, session_id, pid, host, from, title, held, tmux: { renamed, from, to, note }, message }` |
@@ -216,8 +216,8 @@ alone lists. Alias: `fleet t …`; `enter` (alias `e`), `last` and `new` also ex
 
 | command | does |
 | --- | --- |
-| `fleet tmux list [-q] [--json]` (alias `ls`) | sessions, most recently attached first (`-q`: names only) |
-| `fleet tmux enter <query>` (alias `e`) | attach by exact > prefix > substring match (case-insensitive) |
+| `fleet tmux list [-q] [--json]` (alias `ls`) | sessions, most recently attached first (`-q`: names only). The text view adds [dormant](#session-recovery) sessions, dimmed and marked `◌ … dormant`; `-q` and `--json` list live sessions only |
+| `fleet tmux enter <query>` (alias `e`) | attach by exact > prefix > substring match (case-insensitive); a [dormant](#session-recovery) session is restored first when no live one matches |
 | `fleet tmux last` | attach to the session you were in before the current one |
 | `fleet tmux new [name] [-d] [-C <dir>] [-- cmd]` | attach to, or create, a session (default `main`). `-d` creates without attaching |
 | `fleet tmux kill <query> [-f]` | kill a session (asks first; `-f` skips) |
@@ -231,9 +231,15 @@ Details:
   an `ssh` destination plus this machine, in parallel (web-only peers are skipped). Hits are ranked
   by the same tiers across hosts. One match → `→ laptop: <name>` on stderr, then it attaches there
   (`switch-client` inside tmux when it's this machine). Several → listed with their host, exit 2
-  (pick one with `-H`). None → exit 3 naming the hosts searched. An unreachable host is a warning,
-  not a failure, unless no host answered (exit 4). `kill` and `rename` don't fall back — they act on
-  the target host only.
+  (pick one with `-H`). None → the same search over each answering host's *dormant* sessions
+  (`fleet restore --json` there); one hit is restored on its host and attached (`→ laptop: <name>
+  (dormant)`), several are exit 2. Still none → exit 3 naming the hosts searched. An unreachable
+  host is a warning, not a failure, unless no host answered (exit 4). `kill` and `rename` don't
+  fall back — they act on the target host only.
+- **`enter` restores dormant sessions**: when no live session matches but exactly one
+  [dormant](#session-recovery) tmux session does (same tiers), it prints `restoring dormant session
+  <name>…`, runs `fleet restore <name>` and attaches to the result. A live match always wins over a
+  dormant one; two dormant matches are exit 2 with the candidates.
 - **Names** are sanitized the same way by `new` and `rename`: anything outside `A-Za-z0-9_-`
   becomes `-`, runs collapse, leading/trailing `-` are dropped.
 - One title per session (see [architecture → Session titles](architecture.md#session-titles)):
@@ -256,6 +262,61 @@ JSON shapes:
 - `tmux stale --json` — `{ candidates: [{ name, idle_secs, windows, command }], kept: [{ name,
   reason, class }], claude_checked, claude_problem }`; `class` is one of `here`, `attached`,
   `infra`, `claude`, `unknown`, `running`, `recent`.
+
+## Session recovery
+
+A reboot kills the tmux server and every Claude process. Fleet keeps a per-machine
+[snapshot](architecture.md#session-recovery) of what was running — tmux sessions with their
+windows, panes, cwds and layouts, which pane runs which Claude session and with which flags, and
+Claude sessions outside tmux — recorded by every local `fleet list` (the web server polls it, so
+it is always fresh). After a reboot (a new boot id), whatever the old boot ran is **dormant** until
+you bring it back or forget it. Within one boot, a session you close is closed — never dormant
+(except in the last 5 minutes before a reboot: a restart quits the terminals before the daemons,
+and those sessions must survive that). The `watch` header shows `· N dormant` while there are any.
+
+| command | does |
+| --- | --- |
+| `fleet restore [--list] [--json]` | the dormant sessions on this host: tmux name (or the Claude title), windows/panes, Claude sessions, how long ago |
+| `fleet restore <target> [-n] [--json]` | bring one back. `<target>`: a dormant tmux name (exact > prefix > substring, like `enter`), a session id (whole, or a prefix of 4+ characters — a session inside a dormant tmux session restores that tmux session) or a Claude title (exact > prefix > substring) |
+| `fleet restore --all [-n] [--json]` | bring every dormant session back (a failure is reported and the rest still go) |
+| `fleet restore --forget <target> \| --forget-all [--json]` | drop dormant entries without restoring them |
+
+What a restore does:
+
+- **A tmux session** comes back under its own name — or `<name>-restored` (`-restored-2`, …)
+  when a live session already has that name. Windows are recreated in order (with their names,
+  unless tmux named them itself), panes are split in each pane's recorded cwd and the recorded
+  layout is reapplied (`select-layout`); the active window and pane are selected again. A cwd that
+  no longer exists becomes `$HOME`, with a warning.
+- **Each Claude pane** gets `cd <cwd> && <launcher> <flags> --resume <sessionId>` typed into its
+  shell (the shell loads your profile, like `spawn`). `<launcher>` is what `spawn` uses (`FLEET_CMD`
+  → config `claude` → `claude`); the flags are the replay-safe ones the session was started with —
+  `--dangerously-skip-permissions`, `--chrome`, `--model`, `--permission-mode`, `--add-dir`,
+  `--agent`, `--fallback-model` — minus any the launcher already passes. Prompts, `-n`,
+  `--resume`/`--continue`, `-p`, `--session-id` are never replayed. `--resume` keeps the session
+  id (only `--fork-session` would mint a new one), so groups, stacks and briefs carry over. A
+  session that is already running again (resumed by hand) is not started twice.
+- **Other panes** get a plain shell in their cwd: old commands are never re-run.
+- **A Claude session that was not in tmux** (iTerm, unknown) comes back in a *new tmux session*
+  named after its title (sanitised, made unique) — tmux is the backend a restore can drive
+  reliably, and `fleet enter` / the web UI attach to it from anywhere.
+- On success the entry stops being dormant. `-n` prints every tmux command and launch line and
+  changes nothing. Ambiguous targets are exit 2 with the candidates, unknown ones exit 3 — a
+  restore starts agents, so it never guesses.
+
+`-H <host>` restores on that host (fleet runs there); the default is this machine.
+
+JSON shapes:
+
+- `restore [--list] --json` — `{ host, bootId, dormant: [DormantView…] }`, where DormantView =
+  `{ kind: "tmux"|"claude", target, name, since, windows, panes, sessions: [{ sessionId, name,
+  title, cwd }] }`. `target` is what `fleet restore <target>` takes (the tmux name, or the full
+  session id); `name` is the tmux name or the Claude title; `since` is when it went down (ISO).
+- `restore <target>|--all --json` — `{ host, restored: [{ kind, from, session, renamed, windows,
+  panes, launched: [{ sessionId, title, line }], warnings, commands, dryRun }], failed: [{ target,
+  error }] }`; exit 1 when anything failed. `session` is the tmux session it now lives in;
+  `commands` every tmux command and launch line, in order.
+- `restore --forget …|--forget-all --json` — `{ host, forgotten: [name…] }`.
 
 ## Hosts
 
@@ -322,6 +383,8 @@ fleet init --yes --self laptop \
 | `FLEET_BRIEFS_DIR` | where [briefs](#briefs) live (default `${XDG_STATE_HOME:-~/.local/state}/fleet/briefs`); shared with the web server |
 | `FLEET_STACKS_DIR` | where [stacks](#stacks) live (default `${XDG_STATE_HOME:-~/.local/state}/fleet/stacks`) |
 | `VISUAL`, `EDITOR` | the editor for `fleet brief --edit`, `fleet stack edit` and `fleet config edit` (default `vi`) |
+| `FLEET_SNAPSHOT` | the [session-recovery](#session-recovery) snapshot (default `${XDG_STATE_HOME:-~/.local/state}/fleet/snapshot.json`) |
+| `FLEET_BOOT_ID` | override this boot's id (tests; a different value simulates a reboot) |
 | `FLEET_GROUPS_STATE` | `fleet group` state file (default `${XDG_STATE_HOME:-~/.local/state}/fleet/groups.json`) |
 | `FLEET_FIXTURE=<sessions.json>` | read a canned fleet from a file instead of the live registry (demo/tests; backends are inert) |
 | `NO_COLOR=1` | no colors |
@@ -332,8 +395,8 @@ fleet init --yes --self laptop \
 | --- | --- |
 | 0 | success |
 | 1 | error, bad usage |
-| 2 | tmux and `stack` commands: ambiguous match (candidates are printed) |
-| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; `stack set`/`edit`: the StackBrief changed since it was opened; `stack`: no stack matches; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
+| 2 | tmux, `stack` and `restore` commands: ambiguous match (candidates are printed) |
+| 3 | `rename --json`: held; `brief --set`/`--edit`: the brief changed since it was opened (nothing saved); `brief --regenerate`: hourly cap reached; `stack set`/`edit`: the StackBrief changed since it was opened; `stack`: no stack matches; `restore`: no dormant session matches; tmux commands: nothing to act on — no sessions, no match, or a confirmation was needed but there is no terminal (use `-f`) |
 | 4 | host unreachable |
 | 127 | a required tool (tmux, node) was not found |
 

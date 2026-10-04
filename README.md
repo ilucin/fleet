@@ -79,6 +79,7 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | --- | --- |
 | Claude sessions | `list` · `peek` · `send` · `rename` · `name` · `spawn` · `handoff` · `watch` (default) · `skill` |
 | tmux sessions | `tmux list\|enter\|last\|new\|kill\|rename\|stale` (alias `t`), shortcuts `enter` · `last` · `new` |
+| after a reboot | `restore` — dormant sessions: list, bring back (same tmux layout, `claude --resume`), forget |
 | hosts | `exec` · `ssh` · `doctor` |
 | setup | `init` · `config path\|show\|edit\|set` · `install --host <name>` |
 | web | `web serve` · `web build` · `web install-service` |

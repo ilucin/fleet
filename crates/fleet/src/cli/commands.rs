@@ -120,7 +120,15 @@ pub fn host_label() -> String {
 
 /// The rows `list` prints: discovered, tab-enriched, titled, host-tagged.
 pub fn list_rows() -> Vec<Session> {
-    let mut rows = discovery::discover();
+    // Checked, not `discover()`: an unreadable registry must not be recorded as "nothing
+    // running" (the snapshot would forget the whole fleet).
+    let (mut rows, discovered) = match discovery::discover_checked() {
+        Ok(rows) => (rows, true),
+        Err(e) => {
+            crate::core::hosts::debug(&format!("discovery failed: {e}"));
+            (Vec::new(), false)
+        }
+    };
     // The terminal a session lives in is part of what `list` is for; without this
     // every iTerm-backed row renders as `-`.
     discovery::enrich_iterm_tabs(&mut rows);
@@ -132,6 +140,11 @@ pub fn list_rows() -> Vec<Session> {
     title::stamp_display_titles(&mut rows);
     // Which session stack each row is in (read-only: no sync, no writes).
     crate::core::stack::stamp_stacks(&mut rows);
+    // What runs now, for session recovery after a reboot (core::snapshot). Never fails the
+    // listing; a no-op in fixture mode and when nothing changed.
+    if discovered {
+        crate::core::snapshot::record_quietly(&rows);
+    }
     let host = host_label();
     for r in rows.iter_mut() {
         r.host = Some(host.clone());
@@ -144,7 +157,12 @@ pub fn list(json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
     } else {
-        println!("{}\n", plain_table(&rows));
+        println!("{}", plain_table(&rows));
+        let dormant = crate::core::snapshot::dormant_count();
+        if dormant > 0 {
+            println!("{}", format!("{dormant} dormant (fleet restore)").dimmed());
+        }
+        println!();
     }
     Ok(())
 }

@@ -92,8 +92,17 @@ pub fn read(dir: &Path, id: &str) -> Result<Option<String>> {
 
 /// Write atomically: a temp file next to the target, then rename. Dir `0700`, file `0600`.
 pub fn write(dir: &Path, id: &str, text: &str) -> Result<()> {
+    write_private(&file(dir, id)?, text)
+}
+
+/// [`write`] for any path: the parent dir is created `0700`, the file lands `0600` via a
+/// temp file next to it and a rename, so a reader never sees half of it. Shared by every
+/// fleet state file that is not the config (briefs, the session snapshot).
+pub fn write_private(target: &Path, text: &str) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    let target = file(dir, id)?;
+    let dir = target
+        .parent()
+        .ok_or_else(|| Error::Other(format!("no parent dir: {}", target.display())))?;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -102,7 +111,11 @@ pub fn write(dir: &Path, id: &str, text: &str) -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let tmp = dir.join(format!("{id}.md.{}.{nonce:08x}.tmp", std::process::id()));
+    let base = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let tmp = dir.join(format!("{base}.{}.{nonce:08x}.tmp", std::process::id()));
     let res = (|| -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
@@ -111,7 +124,7 @@ pub fn write(dir: &Path, id: &str, text: &str) -> Result<()> {
             .open(&tmp)?;
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
-        std::fs::rename(&tmp, &target)
+        std::fs::rename(&tmp, target)
     })();
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);

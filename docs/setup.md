@@ -157,7 +157,11 @@ Notes:
 
 - The macOS login keychain is not available to ssh sessions ("User interaction is not allowed"),
   so tools that store secrets in the keychain need a file-based fallback on the workstation.
-- After a reboot the tmux sessions are gone; resume conversations with `claude --resume`.
+- After a reboot the tmux sessions and Claude processes are gone, but fleet remembers them as
+  *dormant*: `fleet restore` lists them, `fleet restore <name>` (or `--all`) recreates each tmux
+  session — windows, panes, cwds, layout — and resumes every Claude session in it with
+  `claude --resume <id>` and its original flags; `fleet enter <name>` does it on the fly. See
+  [cli.md → Session recovery](cli.md#session-recovery).
 
 ## 6. fleet
 

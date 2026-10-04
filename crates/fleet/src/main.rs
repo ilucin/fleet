@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use fleet::cli::{
-    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, skill,
+    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, restore, skill,
     stack as stack_cmds, tmux as tmux_cmds, usage as usage_cmd, web,
 };
 use fleet::core::config;
@@ -21,7 +21,7 @@ use fleet::tui::watch;
     after_help = "Bare `fleet` opens the dashboard on a terminal (a one-shot `list` when piped).\n\
 Host: -H <name> runs the command on that host over ssh (it needs fleet installed there).\n\
 tmux-session and machine commands (tmux, enter, last, new, exec, ssh) default to `defaultHost`; everything else to this machine.\n\
-Env: FLEET_CONFIG FLEET_HOST FLEET_DRY_RUN FLEET_DEBUG FLEET_CONNECT_TIMEOUT FLEET_MUX FLEET_REMOTE_TIMEOUT FLEET_CMD FLEET_TMUX NO_COLOR"
+Env: FLEET_CONFIG FLEET_HOST FLEET_DRY_RUN FLEET_DEBUG FLEET_CONNECT_TIMEOUT FLEET_MUX FLEET_REMOTE_TIMEOUT FLEET_CMD FLEET_TMUX FLEET_SNAPSHOT NO_COLOR"
 )]
 struct Cli {
     /// Target host (a configured name, or any ssh destination); env FLEET_HOST
@@ -338,6 +338,29 @@ enum Commands {
 
     /// Attach to the tmux session you were in before this one (= tmux last)
     Last,
+
+    /// Sessions a reboot left dormant: list them (default), bring one or all back, or forget them
+    Restore {
+        /// Dormant tmux name (exact > prefix > substring), session id (prefix of 4+) or title
+        #[arg(conflicts_with_all = ["all", "forget", "forget_all", "list"])]
+        target: Option<String>,
+        /// List the dormant sessions (the default)
+        #[arg(long, conflicts_with_all = ["all", "forget", "forget_all"])]
+        list: bool,
+        /// Restore every dormant session
+        #[arg(long, conflicts_with_all = ["forget", "forget_all"])]
+        all: bool,
+        /// Drop a dormant session without restoring it
+        #[arg(long, value_name = "TARGET", conflicts_with = "forget_all")]
+        forget: Option<String>,
+        /// Drop every dormant session
+        #[arg(long)]
+        forget_all: bool,
+        /// `{ host, bootId, dormant: [DormantView…] }`; with a target or --all
+        /// `{ host, restored: […], failed: […] }`; with --forget `{ host, forgotten: […] }`
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Attach to, or create, a tmux session (= tmux new)
     New(NewArgs),
@@ -999,6 +1022,20 @@ fn run(cli: Cli) -> Result<i32> {
         },
         Commands::Enter { query } => tmux_cmds::enter(&query)?,
         Commands::Last => tmux_cmds::last()?,
+        Commands::Restore {
+            target,
+            list: _,
+            all,
+            forget,
+            forget_all,
+            json,
+        } => restore::run(restore::RestoreOpts {
+            target,
+            all,
+            forget,
+            forget_all,
+            json,
+        })?,
         Commands::New(a) => tmux_cmds::new(a.name.as_deref(), a.detach, a.dir.as_deref(), &a.cmd)?,
         Commands::Exec { dir, tty, argv } => {
             let t = target(cli.host.as_deref(), cli.local, Scope::DefaultHost)?;

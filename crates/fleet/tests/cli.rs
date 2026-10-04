@@ -28,6 +28,7 @@ fn bare_invocation_is_one_shot_when_piped() {
     let cfg = tempfile::tempdir().unwrap();
     let mut child = std::process::Command::new(bin)
         .env("FLEET_CONFIG", cfg.path().join("none.json"))
+        .env("FLEET_SNAPSHOT", cfg.path().join("snapshot.json"))
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();

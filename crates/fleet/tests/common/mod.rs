@@ -37,6 +37,8 @@ impl Env {
     pub fn cmd(&self) -> assert_cmd::Command {
         let mut c = assert_cmd::Command::cargo_bin("fleet").unwrap();
         c.env("FLEET_CONFIG", self.config_path())
+            // `fleet list` records the session snapshot: never into the real one.
+            .env("FLEET_SNAPSHOT", self.path("snapshot.json"))
             .env("FLEET_MUX", "0")
             .env("FLEET_CONNECT_TIMEOUT", "2")
             .env("NO_COLOR", "1")

@@ -43,6 +43,8 @@ Pure logic plus thin process wrappers; no printing. Everything a future front-en
 - **tools** — binary lookup (`PATH` plus Homebrew fallbacks), `~` expansion.
 - **brief** / **stack** — the [session brief](#session-briefs) and [session stack](#session-stacks)
   files: format, merge rules, storage.
+- **snapshot** — [session recovery](#session-recovery): records what runs, marks it dormant after
+  a reboot, restores it.
 
 ### CLI and TUI
 
@@ -304,7 +306,14 @@ See [cli.md](cli.md#grouping) for the shape. State file: `groups.json` (below).
 
 ### `fleet tmux list --json` / `fleet tmux stale --json`
 
-See [cli.md](cli.md#tmux-sessions) for the shapes.
+See [cli.md](cli.md#tmux-sessions) for the shapes. `tmux list --json` lists live sessions only;
+dormant ones are in `fleet restore --json`.
+
+### `fleet restore --json`
+
+`{ host, bootId, dormant: [DormantView…] }`, and the restore / forget results — see
+[cli.md](cli.md#session-recovery) for the shapes and [Session recovery](#session-recovery) for the
+state file behind them.
 
 ### Web API
 
@@ -630,6 +639,65 @@ Folder line are added when missing. Anything unparseable, a failed call, `--no-l
 `FLEET_FIXTURE` or `stacks.enabled: false` → the skeleton (Summary "Started from <title> in
 <cwd>.", Resources = Git line + Folder): a model failure never blocks creating the stack
 (`generated: false` and a `warning`). There is no regeneration after creation (v1).
+
+## Session recovery
+
+After a reboot fleet shows what was running as **dormant** and brings it back on demand: the same
+tmux session name, windows, panes and cwds, every Claude pane re-launched with
+`<launcher> <flags> --resume <sessionId>`. The session id is unchanged by `--resume` (only
+`--fork-session` mints a new one), so groups, stacks and briefs — all keyed by session id — carry
+over. Code: `core::snapshot` (no printing); CLI: `fleet restore` and `fleet enter`
+([cli.md](cli.md#session-recovery)).
+
+### `snapshot.json`
+
+One per machine: `$FLEET_SNAPSHOT`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/snapshot.json`
+(dir `0700`, file `0600`, written atomically under a `snapshot.json.lock` file lock). Unknown keys
+are preserved at every level on rewrite — it is a contract like `groups.json`.
+
+```json
+{
+  "version": 1, "host": "laptop", "bootId": "1727000000", "updatedAt": "2026-10-04T12:00:00Z",
+  "tmux":  [ TmuxSnap… ],
+  "iterm": [ ClaudeSnap… ],
+  "dormant": { "tmux": [ TmuxSnap… ], "iterm": [ ClaudeSnap… ] }
+}
+TmuxSnap   = { name, windows: [ { index, name, layout, active, autoName,
+                                  panes: [ { index, cwd, active, claude: ClaudeSnap|null } ] } ],
+               since?, goneAt? }
+ClaudeSnap = { sessionId, name, cwd, title, flags: [argv…], since?, goneAt? }
+```
+
+- `tmux` — the live tmux sessions of the current boot; `iterm` — live Claude sessions that are
+  not in a tmux pane fleet can see (iTerm, unknown). `dormant` — what earlier boots ran.
+- `layout` is `#{window_layout}`; `autoName` = tmux named the window itself (a restore then
+  leaves the name to tmux). `title` is the display title when recorded. `flags` is the
+  replay-safe part of the Claude command line (`--dangerously-skip-permissions`, `--chrome`,
+  `--model`, `--permission-mode`, `--add-dir`, `--agent`, `--fallback-model`; `--k=v` is
+  normalised to `--k v`).
+- `since` (dormant entries) — when it went down: the old boot's last `updatedAt`. An unchanged
+  snapshot is still rewritten every 10 minutes so this stays accurate.
+- `goneAt` (live entries) — it vanished this long ago; dropped after 5 minutes. A restart quits
+  the terminal apps (and the Claude sessions in them) before it kills the daemons, and a poll in
+  between must not erase them; a Claude session gone from a pane that is still there lingers in
+  that pane, one whose pane is gone lingers in `iterm`.
+- `bootId` — `$FLEET_BOOT_ID` (tests), else Linux `/proc/sys/kernel/random/boot_id`, else macOS
+  `kern.boottime` seconds. Unknown → nothing is ever marked dormant.
+
+**Recording** happens on every local `fleet list` with a successful discovery (one `tmux
+list-panes -a`, one `ps` for the Claude pids), never in fixture mode, never when tmux fails for a
+reason other than "no server", and only writes when something changed. Rules: a stored boot id
+different from the current one moves the stored `tmux`/`iterm` into `dormant` (merged by tmux name
+/ session id); then `tmux`/`iterm` become the live state; a dormant Claude session that is live
+again (resumed by hand) leaves `dormant` (inside a dormant tmux session its pane becomes a plain
+shell), and a dormant tmux session left with no dormant Claude pane whose name is live again is
+dropped. Readers that do not record (the `watch` header, `fleet tmux list`, the `list` footer)
+apply a pending reboot in memory; `fleet restore` and the dormant lookup of `fleet enter` record
+first, so the first command after a reboot already sees the old boot as dormant.
+
+**For other views** (groups, stacks, the web Board): `core::snapshot::dormant_session_ids()` is the
+set of this machine's dormant session ids; for another host, `fleet -H <host> restore --json` and
+the `sessionId`s under `dormant[].sessions`. A dormant session should count as *present*, not gone.
 
 ## Extension points
 
