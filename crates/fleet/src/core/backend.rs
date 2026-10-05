@@ -94,7 +94,33 @@ end run"#
 fn send_keys(handle: &str, rest: &[&str]) -> Result<()> {
     let mut cmd = crate::core::tools::tmux_cmd();
     cmd.args(["send-keys", "-t", handle]).args(rest);
-    let out = cmd.output()?;
+    tmux_ok(cmd.output()?, &format!("tmux send-keys -t {handle}"))
+}
+
+/// Paste `text` into `handle` as a bracketed paste: tmux (3.6) drops newlines typed by
+/// `send-keys -l`, while a paste keeps them, so a multi-line message stays multi-line.
+fn paste_text(handle: &str, text: &str) -> Result<()> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let buf = format!("fleet-send-{}", std::process::id());
+    let mut load = crate::core::tools::tmux_cmd();
+    load.args(["load-buffer", "-b", &buf, "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = load.spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(text.as_bytes())?;
+    tmux_ok(child.wait_with_output()?, "tmux load-buffer")?;
+    let mut paste = crate::core::tools::tmux_cmd();
+    paste.args(["paste-buffer", "-p", "-r", "-d", "-b", &buf, "-t", handle]);
+    tmux_ok(paste.output()?, &format!("tmux paste-buffer -t {handle}"))
+}
+
+fn tmux_ok(out: std::process::Output, what: &str) -> Result<()> {
     if !out.status.success() {
         let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let why = if why.is_empty() {
@@ -102,7 +128,7 @@ fn send_keys(handle: &str, rest: &[&str]) -> Result<()> {
         } else {
             why
         };
-        return Err(Error::Other(format!("tmux send-keys -t {handle}: {why}")));
+        return Err(Error::Other(format!("{what}: {why}")));
     }
     Ok(())
 }
@@ -137,7 +163,13 @@ end run"#
             // away, not a spawn failure — `?` alone would swallow it and report
             // a `/rename` that never landed as success, after which the tmux
             // session gets renamed anyway.
-            send_keys(handle, &["-l", text])?;
+            if text.contains(['\n', '\r']) {
+                paste_text(handle, text)?;
+                // Let the TUI finish taking the paste, or Enter can land inside it.
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            } else {
+                send_keys(handle, &["-l", text])?;
+            }
             send_keys(handle, &["Enter"])?;
             Ok(())
         }

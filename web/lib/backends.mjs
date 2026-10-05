@@ -102,6 +102,7 @@ export function createBackend({
   enterDelayMs = 150,
 } = {}) {
   if (typeof run !== 'function') throw new TypeError('run must be a function');
+  let pasteSeq = 0;
 
   function requireHandle(session) {
     const handle = session?.handle;
@@ -136,7 +137,15 @@ export function createBackend({
     const backend = backendOf(session);
     const handle = requireHandle(session);
     if (backend === 'tmux') {
-      await run(tmux, ['send-keys', '-t', handle, '-l', '--', text], { timeout: 8000 });
+      if (/[\r\n]/.test(text)) {
+        // tmux (3.6) drops newlines typed by `send-keys -l`, so a multi-line message would reach
+        // Claude as one line. Paste it as a bracketed paste instead: the TUI keeps the newlines.
+        const buf = `fleet-send-${process.pid}-${++pasteSeq}`;
+        await run(tmux, ['load-buffer', '-b', buf, '-'], { input: text, timeout: 8000 });
+        await run(tmux, ['paste-buffer', '-p', '-r', '-d', '-b', buf, '-t', handle], { timeout: 8000 });
+      } else {
+        await run(tmux, ['send-keys', '-t', handle, '-l', '--', text], { timeout: 8000 });
+      }
       await sleep(enterDelayMs);
       await run(tmux, ['send-keys', '-t', handle, 'Enter'], { timeout: 8000 });
       return;

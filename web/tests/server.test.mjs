@@ -277,6 +277,19 @@ test('tmux send writes literal text (with --) then Enter separately', async () =
   assert.deepEqual(calls[1].args, ['send-keys', '-t', '%1', 'Enter']);
 });
 
+test('tmux send pastes a multi-line message so its newlines survive', async () => {
+  const { calls, run } = recorder();
+  const backend = createBackend({ run, tmux: 'tmux', scriptPath: script, sleep: noSleep });
+  await backend.send({ backend: 'tmux', handle: '%1' }, 'line one\nline two');
+  assert.equal(calls.length, 3);
+  const [load, paste, enter] = calls;
+  const buf = load.args[2];
+  assert.deepEqual(load.args, ['load-buffer', '-b', buf, '-']);
+  assert.equal(load.opts.input, 'line one\nline two');
+  assert.deepEqual(paste.args, ['paste-buffer', '-p', '-r', '-d', '-b', buf, '-t', '%1']);
+  assert.deepEqual(enter.args, ['send-keys', '-t', '%1', 'Enter']);
+});
+
 test('tmux keys sends the bare key name', async () => {
   const { calls, run } = recorder();
   const backend = createBackend({ run, tmux: 'tmux', scriptPath: script, sleep: noSleep });
