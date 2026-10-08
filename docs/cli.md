@@ -372,6 +372,21 @@ fleet init --yes --self laptop \
 | `--force` | overwrite an existing config without asking |
 | `--print` | print the config instead of writing it |
 
+## Repos
+
+Keep the git checkouts under a few roots fresh, on every machine. Fetch, then fast-forward only:
+nothing is ever stashed, reset, rebased or merged — a repo that can't fast-forward is reported and
+left alone. Config: `repos` in [the config](architecture.md#config).
+
+| command | does |
+| --- | --- |
+| `fleet repos [--json]` | each repo: branch, position (`↓behind ↑ahead ✎dirty`, as of its last fetch — no network), when it was last fetched, its interval and the last sync's outcome |
+| `fleet repos sync [NAME…] [--due] [--notify] [-q] [--json]` | `git fetch --all --prune` (8 in parallel, 120s timeout, ssh in batch mode), then: `merge --ff-only @{u}` on the checked-out branch when it is only behind; and the remote's default branch (`origin/HEAD`, e.g. `develop`) is fast-forwarded with `update-ref` when it is checked out nowhere. Outcomes: `updated` · `current` · `ahead` · `diverged` (both moved) · `blocked` (local changes in the way) · `busy` (rebase/merge/… in progress — fetched only) · `noUpstream` · `noRemote` · `fetchFailed`. `NAME` is a directory name or a `~/…` path. `--due`: only repos whose interval is up (a daily one is also due on a new local day; a failing fetch backs off 1, 2, 4… ticks). `--notify`: macOS notification when a repo newly diverges or is blocked, or fails to fetch 3 times running. `-q`: print only updates and problems, timestamped. One run at a time (a lock next to the state file; `-q` exits 0 quietly when locked). State: `${XDG_STATE_HOME:-~/.local/state}/fleet/repos.json` (`FLEET_REPOS_STATE`) |
+| `fleet repos install-service` | macOS: a launchd agent `fleet.repos` that runs `fleet --local repos sync --due --notify -q` every 10 minutes and at login (`--uninstall`, `--no-load`, `--print`); logs to `~/Library/Logs/fleet.repos.log`. On another host: `fleet -H <host> repos install-service` |
+
+`--json` of `sync` is the list of results `{ name, path, branch, outcome, pulled, defaultBranch?: { branch, pulled }, detail? }`;
+of `repos` the rows `{ name, path, every, due, branch, upstream, ahead, behind, dirty, busy, lastAttempt, lastFetch, outcome, detail }` (times in ms epoch, `every` in seconds).
+
 ## Web
 
 | command | does |

@@ -82,6 +82,7 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | after a reboot | `restore` — dormant sessions: list, bring back (same tmux layout, `claude --resume`), forget |
 | hosts | `exec` · `ssh` · `doctor` |
 | setup | `init` · `config path\|show\|edit\|set` · `install --host <name>` |
+| git repos | `repos` · `repos sync` · `repos install-service` — fetch + fast-forward every repo under `~/Code`, on a timer |
 | web | `web serve` · `web build` · `web install-service` |
 
 Global flags: `-H, --host <name>`, `--local`, `--json` (where it applies). Full reference:

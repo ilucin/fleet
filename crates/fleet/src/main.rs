@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use fleet::cli::{
-    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, restore, skill,
-    stack as stack_cmds, tmux as tmux_cmds, usage as usage_cmd, web,
+    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, repos as repos_cmd,
+    restore, skill, stack as stack_cmds, tmux as tmux_cmds, usage as usage_cmd, web,
 };
 use fleet::core::config;
 use fleet::core::discovery::Backend;
@@ -411,6 +411,15 @@ enum Commands {
         force: bool,
     },
 
+    /// Keep the git repos under the configured roots fresh (fetch + fast-forward only)
+    Repos {
+        #[command(subcommand)]
+        cmd: Option<ReposCmd>,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
+
     /// The web UI: serve it, or install it as a login service
     Web {
         #[command(subcommand)]
@@ -625,6 +634,43 @@ enum TmuxCmd {
         /// Idle threshold: 30m, 12h, 7d, or hours
         #[arg(long, default_value = "24h")]
         older_than: String,
+    },
+}
+
+#[derive(Subcommand, Clone)]
+enum ReposCmd {
+    /// Each repo's branch, position and last sync (local only, no network) — the default
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch, then fast-forward the checked-out branch and the remote's default branch
+    Sync {
+        /// Repo names or ~/paths (default: every repo)
+        names: Vec<String>,
+        /// Only repos whose interval (repos.every / repos.overrides) is up
+        #[arg(long)]
+        due: bool,
+        /// macOS notification when a repo newly diverges, is blocked, or keeps failing to fetch
+        #[arg(long)]
+        notify: bool,
+        /// Print only updates and problems, timestamped
+        #[arg(long, short = 'q')]
+        quiet: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run `repos sync --due` every 10 minutes and at login (launchd)
+    InstallService {
+        /// Remove the service instead
+        #[arg(long)]
+        uninstall: bool,
+        /// Write the file but don't load/unload it
+        #[arg(long)]
+        no_load: bool,
+        /// Only print the service definition
+        #[arg(long)]
+        print: bool,
     },
 }
 
@@ -1075,6 +1121,31 @@ fn run(cli: Cli) -> Result<i32> {
                 },
             )?
         }
+        Commands::Repos { cmd, json } => match cmd.unwrap_or(ReposCmd::Status { json }) {
+            ReposCmd::Status { json: j } => repos_cmd::status(json || j)?,
+            ReposCmd::Sync {
+                names,
+                due,
+                notify,
+                quiet,
+                json: j,
+            } => repos_cmd::sync(repos_cmd::SyncOpts {
+                names,
+                due,
+                notify,
+                quiet,
+                json: json || j,
+            })?,
+            ReposCmd::InstallService {
+                uninstall,
+                no_load,
+                print,
+            } => repos_cmd::install_service(web::ServiceOpts {
+                uninstall,
+                no_load,
+                print,
+            })?,
+        },
         Commands::Web { action } => match action {
             WebCmd::Serve { port, bind, dir } => web::serve(web::ServeOpts { port, bind, dir })?,
             WebCmd::Build { dir, install } => web::build(web::BuildOpts { dir, install })?,

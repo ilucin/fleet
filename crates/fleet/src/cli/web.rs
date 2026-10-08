@@ -200,7 +200,7 @@ pub const LAUNCHD_LABEL: &str = "fleet.web";
 /// with a `fleet-web.log` left by an older standalone install.
 pub const SERVICE_LOG: &str = "Library/Logs/fleet.web.log";
 
-fn xml_escape(s: &str) -> String {
+pub fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -314,9 +314,6 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         return Ok(());
     }
     let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
-    let plist_path = home
-        .join("Library/LaunchAgents")
-        .join(format!("{LAUNCHD_LABEL}.plist"));
     let log = home.join(SERVICE_LOG);
     // The server fails fast without these; say so now rather than in a log.
     let node = if o.uninstall {
@@ -340,6 +337,16 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         .map(|b| tools::find_binary(b))
         .collect();
     let plist = launchd_plist(&exe, &cfg_path, &node, &service_path(&node, &bins), &log);
+    launchd_agent(LAUNCHD_LABEL, &plist, &log, &o)
+}
+
+/// Write (or remove) `~/Library/LaunchAgents/<label>.plist` and (re)load it — or, with
+/// `--print`, only print it. Shared by every fleet launchd agent.
+pub fn launchd_agent(label: &str, plist: &str, log: &Path, o: &ServiceOpts) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+    let plist_path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{label}.plist"));
     if o.print {
         print!("{plist}");
         return Ok(());
@@ -361,7 +368,7 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
     };
     if o.uninstall {
         if !o.no_load {
-            launchctl(&["bootout", &format!("{domain}/{LAUNCHD_LABEL}")])?;
+            launchctl(&["bootout", &format!("{domain}/{label}")])?;
         }
         if hosts::dry_run() {
             println!("rm {}", plist_path.display());
@@ -379,7 +386,7 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         println!("write {}", plist_path.display());
     } else {
         std::fs::create_dir_all(plist_path.parent().unwrap_or(&home))?;
-        std::fs::write(&plist_path, &plist)?;
+        std::fs::write(&plist_path, plist)?;
         println!(
             "wrote {}",
             tools::tildify(&plist_path.display().to_string())
@@ -392,14 +399,14 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         );
         return Ok(());
     }
-    launchctl(&["bootout", &format!("{domain}/{LAUNCHD_LABEL}")])?;
+    launchctl(&["bootout", &format!("{domain}/{label}")])?;
     let p = plist_path.display().to_string();
     launchctl(&["bootstrap", &domain, &p])?;
     if hosts::dry_run() {
         return Ok(());
     }
     println!(
-        "loaded {LAUNCHD_LABEL} — logs: {}",
+        "loaded {label} — logs: {}",
         tools::tildify(&log.display().to_string())
     );
     Ok(())

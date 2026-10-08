@@ -7,6 +7,7 @@ pub mod group;
 pub mod hosts;
 pub mod init;
 pub mod render;
+pub mod repos;
 pub mod restore;
 pub mod skill;
 pub mod stack;

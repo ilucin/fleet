@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod grouping;
 pub mod hosts;
 pub mod naming;
+pub mod repos;
 pub mod snapshot;
 pub mod stack;
 pub mod title;
