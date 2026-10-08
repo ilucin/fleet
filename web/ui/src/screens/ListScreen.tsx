@@ -68,10 +68,10 @@ export function ListScreen() {
     <div className="flex min-h-app flex-col">
       <ScreenHeader>
         <div onTouchStart={onTouchStart} onTouchEnd={(e) => onTouchEnd(e, false)}>
-        <div className="flex min-h-8 items-center gap-2.5">
-          <h1 className="text-xl font-bold tracking-tight">Fleet</h1>
+        <div className="flex min-h-8 items-center gap-1 sm:gap-2.5">
+          <h1 className="mr-1 shrink-0 text-xl font-bold tracking-tight sm:mr-0">Fleet</h1>
           {fleet ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums" aria-label="Status summary">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-muted-foreground tabular-nums" aria-label="Status summary">
               {summary.waiting > 0 ? (
                 <span className="flex items-center gap-1 font-semibold text-status-waiting">
                   <StatusDot status="waiting" className="size-2" />
@@ -91,7 +91,7 @@ export function ListScreen() {
           {/* Freshness lives in Settings → Status; the header only flags trouble. */}
           <span className="ml-auto" />
           {note.error || unreachable.length ? (
-            <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-destructive [&_svg:not([class*='size-'])]:size-5">
+            <Button asChild variant="ghost" size="icon" className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-destructive [&_svg:not([class*='size-'])]:size-5">
               <a
                 href="#/settings"
                 role="status"
@@ -103,18 +103,18 @@ export function ListScreen() {
             </Button>
           ) : null}
           {notesHosts.length ? (
-            <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
+            <Button asChild variant="ghost" size="icon" className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
               <a href="#/notes" aria-label="Notes" title="Notes">
                 <NotebookTextIcon />
               </a>
             </Button>
           ) : null}
-          <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
+          <Button asChild variant="ghost" size="icon" className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
             <a href="#/usage" aria-label="Usage limits" title="Usage limits">
               <GaugeIcon />
             </a>
           </Button>
-          <Button asChild variant="ghost" size="icon" className="-my-1 size-10 shrink-0 rounded-full text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
+          <Button asChild variant="ghost" size="icon" className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
             <a href="#/settings" aria-label="Settings" title="Settings">
               <Settings2Icon />
             </a>
@@ -124,7 +124,7 @@ export function ListScreen() {
             aria-label="New session"
             title="New session"
             onClick={() => setNewOpen(true)}
-            className="-my-1 size-10 shrink-0 rounded-full [&_svg:not([class*='size-'])]:size-5"
+            className="-my-1 size-9 shrink-0 rounded-full sm:size-10 [&_svg:not([class*='size-'])]:size-5"
           >
             <PlusIcon />
           </Button>
