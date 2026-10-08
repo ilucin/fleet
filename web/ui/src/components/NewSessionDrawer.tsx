@@ -363,7 +363,7 @@ function NewSessionForm({
         'relative',
         dialog
           ? 'no-scrollbar max-h-[calc(100dvh-4rem)] w-full overflow-y-auto px-5 pt-2 pb-5'
-          : 'no-scrollbar mx-auto w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]',
+          : 'no-scrollbar mx-auto min-h-0 w-full max-w-lg overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]',
       )}
       {...drop.bind}
       onSubmit={(e) => {

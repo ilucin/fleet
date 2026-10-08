@@ -3,7 +3,9 @@
  * Keep `--app-h` (used by the `h-app` / `min-h-app` utilities) in sync so a bottom
  * composer stays above the keyboard, and `--app-top` (the visual viewport's offset
  * into the layout viewport — iOS scrolls the page when an input focuses) so a fixed
- * full-screen layout (`fixed-app`) follows the visible area. Call once at startup.
+ * full-screen layout (`fixed-app`) follows the visible area, and `--app-bottom` (how far the
+ * visible area's bottom sits above the layout viewport's — the keyboard) so a bottom-anchored
+ * fixed element (a drawer) sits on top of it. Call once at startup.
  */
 export function installViewportHeight(): void {
   const sync = () => {
@@ -13,6 +15,7 @@ export function installViewportHeight(): void {
     const root = document.documentElement.style
     root.setProperty('--app-h', `${Math.round(height)}px`)
     root.setProperty('--app-top', `${Math.round(top)}px`)
+    root.setProperty('--app-bottom', `${Math.max(0, Math.round(window.innerHeight - top - height))}px`)
   }
   window.visualViewport?.addEventListener('resize', sync)
   window.visualViewport?.addEventListener('scroll', sync)
