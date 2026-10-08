@@ -362,7 +362,10 @@ pub fn launchd_agent(label: &str, plist: &str, log: &Path, o: &ServiceOpts) -> R
             println!("{}", hosts::display_command(&c));
             return Ok(());
         }
-        // `bootout` of an agent that isn't loaded fails; that's fine.
+        // `bootout` of an agent that isn't loaded fails; that's fine (and not worth printing).
+        if args.first() == Some(&"bootout") {
+            c.stderr(std::process::Stdio::null());
+        }
         let _ = c.status();
         Ok(())
     };

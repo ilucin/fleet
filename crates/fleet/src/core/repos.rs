@@ -43,7 +43,8 @@ pub const TICK_SECS: u64 = 600;
 /// A repo is due this much before its interval is up, so tick jitter can't push a 30m
 /// interval to 40m.
 const SLACK_SECS: i64 = 120;
-const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+/// Generous: a checkout that is weeks behind pulls a big pack, and a killed fetch keeps nothing.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(600);
 const PARALLEL: usize = 8;
 /// Consecutive failed fetches before a notification (one failure is usually just offline).
 pub const NOTIFY_AFTER_FAILS: u32 = 3;

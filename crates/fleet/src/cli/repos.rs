@@ -319,8 +319,8 @@ pub fn sync(o: SyncOpts) -> Result<()> {
 /// The launchd agent that runs `fleet repos sync --due` every [`repos::TICK_SECS`].
 pub fn launchd_plist(exe: &Path, config_path: &Path, path_env: &str, log: &Path) -> String {
     let e = |p: &Path| web::xml_escape(&p.display().to_string());
-    // A background job is fine here (unlike the web agent): a throttled git fetch is
-    // still a fetch.
+    // Standard, not Background: a background job's I/O is throttled hard enough that a
+    // catch-up fetch of a stale checkout crawls.
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -342,7 +342,7 @@ pub fn launchd_plist(exe: &Path, config_path: &Path, path_env: &str, log: &Path)
     <key>FLEET_CONFIG</key><string>{cfg}</string>
     <key>PATH</key><string>{path}</string>
   </dict>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Standard</string>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>{tick}</integer>
   <key>StandardOutPath</key><string>{log}</string>
