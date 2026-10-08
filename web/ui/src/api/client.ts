@@ -19,6 +19,9 @@ import type {
   OkResponse,
   PeekResponse,
   RenameResponse,
+  ReposResponse,
+  ReposSettings,
+  RepoSyncResult,
   RestoreResponse,
   SessionKey,
   Settings,
@@ -124,6 +127,17 @@ export const api = {
   /** Replace the host's list (400 `SpawnDirsError` when invalid); `dryRun` validates only. */
   saveSpawnDirs: (host: string, spawnDirs: SpawnDirEntry[], { dryRun = false, ...o }: Opts & { dryRun?: boolean } = {}) =>
     request<SpawnDirsResponse>(`${hostPath(host)}/spawn-dirs`, { ...o, method: 'PUT', body: { spawnDirs, ...(dryRun ? { dryRun } : {}) } }),
+  /** The host's git repos (`fleet repos --json --all`), its `repos` settings and its sync timer. */
+  repos: (host: string, o: Opts = {}) => request<ReposResponse>(`${hostPath(host)}/repos`, o),
+  /** Replace the host's `repos` settings (400 `{ error, errors }` when invalid). */
+  saveRepos: (host: string, settings: ReposSettings, o: Opts = {}) =>
+    request<ReposResponse>(`${hostPath(host)}/repos`, { ...o, method: 'PUT', body: settings }),
+  /** Fetch + fast-forward now (every repo, or `names`); 409 while a sync runs there. */
+  syncRepos: (host: string, names: string[] = [], o: Opts = {}) =>
+    request<{ host: string; results: RepoSyncResult[] }>(`${hostPath(host)}/repos/sync`, { ...o, method: 'POST', body: names.length ? { names } : {} }),
+  /** Turn the host's sync timer (launchd) on or off. */
+  reposService: (host: string, install: boolean, o: Opts = {}) =>
+    request<ReposResponse>(`${hostPath(host)}/repos/service`, { ...o, method: 'POST', body: { install } }),
   autoname: (host: string, o: Opts = {}) =>
     request<AutoNameRun>(`${hostPath(host)}/autoname`, { ...o, method: 'POST', body: {} }),
 

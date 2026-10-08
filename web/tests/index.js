@@ -18,3 +18,4 @@ import './briefs.test.mjs';
 import './notes.test.mjs';
 import './spawn-dirs.test.mjs';
 import './dormant.test.mjs';
+import './repos.test.mjs';

@@ -1,7 +1,7 @@
 // The one place the web server talks to the `fleet` CLI. Everything the server needs
 // from the CLI goes through here, so an alternative UI/TUI server can reuse it and the
 // contracts (`fleet list --json`, `fleet rename --json`, `fleet name --all --apply`, `fleet name <id> --apply`, `fleet group` (+ `--rename` / `--move`),
-// `fleet usage --json`, `fleet config set`, `fleet --local stack … --json`, `fleet --local restore … --json`) are documented in one
+// `fleet usage --json`, `fleet config set`, `fleet --local repos …`, `fleet --local stack … --json`, `fleet --local restore … --json`) are documented in one
 // spot (see ARCHITECTURE.md).
 //
 // Peek/send/keys are NOT done through the CLI: `fleet peek` truncates to terminal width
@@ -271,6 +271,50 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, 'fleet restore');
   }
 
+  /** `fleet --local repos …`: errors carry the CLI's reason, `missing` (no `repos` command), `timedOut`. */
+  async function reposRun(args, t) {
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, ['--local', 'repos', ...args], { timeout: t, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, `fleet repos ${args[0] ?? ''}`.trim(), t);
+      const why = String(err?.stderr ?? '').replace(/^Error:\s*/, '').trim();
+      if (why && !e.timedOut) e.message = why.split('\n').filter((l) => !l.startsWith('warning:')).pop() || why;
+      e.missing = !e.timedOut && /unrecognized subcommand 'repos'|unexpected argument '--all'/i.test(why);
+      throw e;
+    }
+    return stdout ?? '';
+  }
+
+  /** Every repo under this host's roots: `fleet --local repos --json [--all]` (docs/cli.md → Repos). */
+  async function repos({ all = false, timeoutMs: t = 30 * 1000 } = {}) {
+    const out = await reposRun(['--json', ...(all ? ['--all'] : [])], t);
+    try {
+      const v = JSON.parse(out.trim() || '[]');
+      if (Array.isArray(v)) return v;
+    } catch {
+      /* below */
+    }
+    throw new FleetCliError('fleet repos returned non-JSON output');
+  }
+
+  /** Fetch + fast-forward: `fleet --local repos sync --json [-- names…]` → the results array. */
+  async function reposSync(names = [], { timeoutMs: t = 15 * 60 * 1000 } = {}) {
+    const out = await reposRun(['sync', '--json', ...(names.length ? ['--', ...names.map(String)] : [])], t);
+    try {
+      const v = JSON.parse(out.trim() || '[]');
+      if (Array.isArray(v)) return v;
+    } catch {
+      /* below */
+    }
+    throw new FleetCliError('fleet repos sync returned non-JSON output');
+  }
+
+  /** The sync timer: `fleet --local repos install-service [--uninstall]`. */
+  async function reposService({ uninstall = false, timeoutMs: t = 20 * 1000 } = {}) {
+    return reposRun(['install-service', ...(uninstall ? ['--uninstall'] : [])], t);
+  }
+
   // `--flag=value` everywhere: a value starting with "-" must not read as a flag.
   const stackList = () => stack(['list']);
   const stackShow = (id) => stack(['show', id]);
@@ -297,6 +341,9 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     groupEdit,
     usage,
     configSet,
+    repos,
+    reposSync,
+    reposService,
     stackList,
     stackShow,
     stackSet,

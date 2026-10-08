@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronLeftIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
+import { ReposEditor } from '@/components/ReposEditor'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SpawnDirsEditor } from '@/components/SpawnDirsEditor'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,7 @@ const segItem =
 /**
  * `#/settings`: the viewer's global preferences — text size (scales the whole app), theme
  * (colour palette), mode (light/dark), terminal text, progress notes, send delay. Stored in this browser (localStorage).
- * Plus the fleet's Start directories (the New session form's list), stored in each host's config. `screen` = the mobile page
+ * Plus the fleet's Start directories (the New session form's list) and Git repos (`fleet repos`), stored in each host's config. `screen` = the mobile page
  * (back button, swipe back); `pane` = the desktop main pane (✕ / Esc back to `#/`).
  */
 export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
@@ -128,6 +129,9 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
       <p className="pt-4 text-xs text-dimmer">Saved in this browser; every session uses them.</p>
       <Section title="Start directories">
         <SpawnDirsEditor />
+      </Section>
+      <Section title="Git repos">
+        <ReposEditor />
       </Section>
       <FleetStatus />
       <ViewportInfo />

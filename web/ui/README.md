@@ -62,6 +62,8 @@ src/
                       swipeAxis() / swipeBackIntent() / swipeBackBlocked() (session swipe-back)
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
                       font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
+  lib/repos.ts        Settings → Git repos: per-repo interval in a draft (rowInterval()/setRowInterval(), repoKey():
+                      the name, or the ~/path for duplicate names), sameSettings(), repoPosition(), syncSummary()
   lib/spawnDirs.ts    Settings → Start directories: the editable draft (DraftRow), fromDraft()/toDraft(), sameList(),
                       validateDraft() (mirrors lib/spawn-dirs.mjs), moveRow(), hostPathErrors()/checksByPath() (a
                       host's answer → its column), baseHost(), divergedHosts(), withOffered()
@@ -353,7 +355,12 @@ src/
   font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
   it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`); Send
   delay (`fleet.sendDelay`, above). Per
-  viewer (localStorage), for every session. **Start directories** (`components/SpawnDirsEditor.tsx`)
+  viewer (localStorage), for every session. **Git repos** (`components/ReposEditor.tsx`) is per host
+  (a host switcher): Auto-sync (the `fleet.repos` launchd timer, on/off), the default interval, the
+  scanned directories, and every repo with its branch, `↓↑✎` position, last sync and outcome; each row
+  has Sync now and an interval picker (Default / Every 30m…7d / Off = excluded). Save writes the shown
+  host; Save to all hosts writes the same settings everywhere; Sync all now runs `fleet repos sync`.
+  **Start directories** (`components/SpawnDirsEditor.tsx`)
   is fleet-wide instead: the `spawnDirs` the New session form offers, one row per label with a
   path field per host (hosts from `/api/fleet`; empty = not offered there), add / rename / delete /
   move up-down. Loaded with `GET …/spawn-dirs` from every host (this server's list is the one

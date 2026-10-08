@@ -418,6 +418,9 @@ enum Commands {
         /// Machine-readable output
         #[arg(long)]
         json: bool,
+        /// Include excluded repos (marked `excluded`)
+        #[arg(long)]
+        all: bool,
     },
 
     /// The web UI: serve it, or install it as a login service
@@ -643,6 +646,9 @@ enum ReposCmd {
     Status {
         #[arg(long)]
         json: bool,
+        /// Include excluded repos (marked `excluded`)
+        #[arg(long)]
+        all: bool,
     },
     /// Fetch, then fast-forward the checked-out branch and the remote's default branch
     Sync {
@@ -1121,8 +1127,8 @@ fn run(cli: Cli) -> Result<i32> {
                 },
             )?
         }
-        Commands::Repos { cmd, json } => match cmd.unwrap_or(ReposCmd::Status { json }) {
-            ReposCmd::Status { json: j } => repos_cmd::status(json || j)?,
+        Commands::Repos { cmd, json, all } => match cmd.unwrap_or(ReposCmd::Status { json, all }) {
+            ReposCmd::Status { json: j, all: a } => repos_cmd::status(json || j, all || a)?,
             ReposCmd::Sync {
                 names,
                 due,

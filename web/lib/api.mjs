@@ -76,6 +76,7 @@ const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn|\/rename)?$
 const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/stack\/spawn$/;
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
+const REPOS_ROUTE = /^\/api\/hosts\/([^/]+)\/repos(?:\/(sync|service))?$/;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
 const DORMANT_ROUTE = /^\/api\/hosts\/([^/]+)\/dormant(?:\/(restore|forget))?$/;
 /** A restore types launch lines into new tmux panes; `--all` may bring back many sessions. */
@@ -108,6 +109,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
+ *   repos       lib/repos.mjs#createRepos (GET/PUT repos, POST repos/sync|service; absent → 501)
  *   stacks      lib/stacks.mjs#createStacks (…/stacks routes, sibling spawn, sync after kill; absent → 501)
  *   dormant     lib/dormant.mjs#createDormant (…/dormant routes: list / restore / forget; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
@@ -133,6 +135,7 @@ export function createApi({
   briefs = null,
   notes = null,
   spawnDirs = null,
+  repos = null,
   stacks = null,
   dormant = null,
   grouper = null,
@@ -538,6 +541,16 @@ export function createApi({
       return r;
     }
 
+    const rp = REPOS_ROUTE.exec(url.pathname);
+    if (rp) {
+      const action = rp[2] ?? null;
+      const allowed = action ? ['POST'] : ['GET', 'PUT'];
+      if (!allowed.includes(req.method)) throw new HttpError('method not allowed', 405);
+      // A sync of a stale checkout can take minutes: the peer gets as long as the CLI does.
+      const timeoutMs = action === 'sync' ? 16 * 60 * 1000 : peerProxyTimeoutMs;
+      return forHost({ req, url, host: decodeURIComponent(rp[1]), timeoutMs, local: () => localRepos(req, action) });
+    }
+
     const us = USAGE_ROUTE.exec(url.pathname);
     if (us) {
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
@@ -724,6 +737,19 @@ export function createApi({
       const r = await spawnDirs.put(await readJsonBody(req));
       if (r.body?.saved) await refreshFleet({ wait: true }); // the next /api/fleet shows the new list
       return r;
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(err?.message ?? String(err), err?.status ?? 502);
+    }
+  }
+
+  async function localRepos(req, action) {
+    if (!repos) throw new HttpError('git repos are not available on this server', 501);
+    try {
+      if (action === 'sync') return await repos.sync(await readJsonBody(req));
+      if (action === 'service') return await repos.setService(await readJsonBody(req));
+      if (req.method === 'GET') return { status: 200, body: await repos.get() };
+      return await repos.put(await readJsonBody(req));
     } catch (err) {
       if (err instanceof HttpError) throw err;
       throw new HttpError(err?.message ?? String(err), err?.status ?? 502);

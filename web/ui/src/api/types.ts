@@ -715,3 +715,59 @@ export interface ForgetResponse {
   host: string
   forgotten: string[]
 }
+
+// --- Git repos (Settings → Git repos; GET/PUT /api/hosts/:host/repos → `fleet repos`) -----------
+
+/** Config `repos` on one host (defaults filled in). Keys of `overrides` / `exclude`: a dir name or a `~/…` path. */
+export interface ReposSettings {
+  roots: string[]
+  /** `30m` / `12h` / `7d`. */
+  every: string
+  overrides: Record<string, string>
+  exclude: string[]
+}
+
+export type RepoOutcome = 'updated' | 'current' | 'ahead' | 'diverged' | 'blocked' | 'busy' | 'noUpstream' | 'noRemote' | 'fetchFailed'
+
+/** One row of `fleet repos --json --all`. */
+export interface RepoRow {
+  name: string
+  /** `~/…` */
+  path: string
+  /** Sync interval in seconds. */
+  every: number
+  excluded: boolean
+  due: boolean
+  branch: string | null
+  upstream?: string | null
+  ahead: number
+  behind: number
+  dirty: number
+  busy?: string | null
+  lastAttempt?: number | null
+  lastFetch?: number | null
+  outcome?: RepoOutcome | null
+  detail?: string | null
+}
+
+export interface ReposResponse {
+  host: string
+  settings: ReposSettings
+  repos: RepoRow[]
+  /** Listing the repos failed (the settings are still there). */
+  error: string | null
+  service: { installed: boolean; supported: boolean; tickMinutes: number }
+  /** PUT only. */
+  saved?: boolean
+}
+
+/** One result of `fleet repos sync --json`. */
+export interface RepoSyncResult {
+  name: string
+  path: string
+  branch?: string | null
+  outcome: RepoOutcome
+  pulled: number
+  defaultBranch?: { branch: string; pulled: number }
+  detail?: string
+}

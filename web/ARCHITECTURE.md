@@ -31,6 +31,7 @@ lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never t
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    Claude Code transcript JSONL → chat messages
 lib/spawn-dirs.mjs    Settings → Start directories: validate a `spawnDirs` list, write it via `fleet config set`, hot-reload
+lib/repos.mjs         Settings → Git repos: `fleet repos` list/sync/timer, validate + write the `repos` config key
 lib/spawn.mjs         new tmux session + `claude [--model <id>] [-n <name>] '<prompt>'`, auto-accept folder trust
 lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux session/window or iTerm tab
 lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
@@ -172,6 +173,10 @@ JSON everywhere, same origin, no auth. Errors are `{ "error": "message" }`.
 | GET | `/api/hosts/:host/usage` | `?refresh=1` skips the CLI's 60s cache | `{ host, account, limits: [{ kind, group, label, model, percent, severity, resets_at, active }], extra_usage, fetched_at, stale, error }` — `fleet usage --json` (docs/architecture.md → Subscription usage); 502 with the CLI's reason, 504 on timeout. Proxied once to a peer |
 | GET | `/api/hosts/:host/spawn-dirs` | | `{ host, hosts: [names], spawnDirs: [{ label, paths: { host: dir } }], checks: [{ path, resolved, exists, isDir } \| null], offered: [{ label, path }], limits: { maxEntries, maxLabel, maxPath } }` — see **spawn-dirs** |
 | PUT | `/api/hosts/:host/spawn-dirs` | `{ spawnDirs: [{ label, paths }], dryRun? }` | the GET shape for the new list + `saved` (`false` on a dry run). 400 `{ error, errors: [{ index, field, host?, error }], checks }`; 502 when `fleet config set` failed |
+| GET | `/api/hosts/:host/repos` | | `{ host, settings: { roots, every, overrides, exclude }, repos: [fleet repos --json --all rows], error, service: { installed, supported, tickMinutes }, limits }` — see **repos**; 501 when that host's CLI has no `repos` |
+| PUT | `/api/hosts/:host/repos` | `{ roots, every, overrides, exclude }` | the GET shape + `saved`. 400 `{ error, errors: [{ field, error }] }`; 502 when `fleet config set` failed |
+| POST | `/api/hosts/:host/repos/sync` | `{ names? }` | `{ host, results }` — `fleet --local repos sync --json [-- names]`; 409 while a sync runs there; peers get 16 min |
+| POST | `/api/hosts/:host/repos/service` | `{ install: boolean }` | the GET shape after `fleet --local repos install-service [--uninstall]`; 501 off macOS |
 | GET | `/api/groups` | | `{ enabled, host, intervalMinutes, running, updatedAt, lastRun: { at, ms, ok, reason, mode, modelCalls, classified, note?, error? } \| null, groups: [{ id, label, description, source, members: [{ host, id, dormant? }] }], error? }` (`dormant: true` only when that member is dormant on its host) — `enabled: false` (and `groups: []`) when no host runs grouping or the grouping host is unreachable |
 | POST | `/api/groups/edit` | `{ op: "rename", id, label }` \| `{ op: "move", host, session, to }` \| `{ op: "move", host, session, label }` \| `{ op: "create", label }` \| `{ op: "delete", id }` | the same shape after `fleet group --rename/--move/--create/--delete` (400 bad body, 409 refused by the CLI, 501 when grouping is off). Waits for a running pass; edits run one at a time |
 | POST | `/api/groups/run` | `{}` | the same shape after the run (502 when it failed, 501 when grouping is off) |
@@ -246,6 +251,13 @@ so a client can pick from its own server's list for a peer. The UI sends no `nam
 the field stays for other clients.
 The session shows up in `/api/fleet` once Claude registers it; clients poll for a session whose
 `tmux_session` equals `tmuxSession`.
+
+**repos** (Settings → Git repos) is a thin layer over `fleet repos` (docs/cli.md → Repos): GET
+reads the config's `repos` (defaults filled in), lists every repo (`--all`: excluded ones flagged)
+and whether `~/Library/LaunchAgents/fleet.repos.plist` exists. PUT validates (1–20 roots, absolute
+or `~/`; intervals `30m`/`12h`/`7d` ≥ 1m; override/exclude keys a dir name or a `~/` path) and
+writes the whole `repos` object with `fleet --local config set`, keeping keys it doesn't know. Each
+host has its own settings; the UI's "Save to all hosts" PUTs the same object to each.
 
 **spawn-dirs** edits this host's `spawnDirs` (Settings → Start directories). GET reads the config
 file (a `{ label, path }` / bare-string entry is spelled out as a path for every configured host)

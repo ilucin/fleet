@@ -106,10 +106,14 @@ fn pad(s: &str, w: usize) -> String {
 }
 
 /// `fleet repos`: what each repo looks like now (local only, as of its last fetch).
-pub fn status(json: bool) -> Result<()> {
+/// `all` keeps the excluded repos too, flagged.
+pub fn status(json: bool, all: bool) -> Result<()> {
     let s = Settings::load();
     warn_problems(&s);
-    let list = repos::discover(&s);
+    let (list, excluded): (Vec<Repo>, Vec<bool>) = repos::discover_all(&s)
+        .into_iter()
+        .filter(|(_, x)| all || !x)
+        .unzip();
     let st = repos::load_state(&repos::state_path());
     let infos: Vec<Inspect> = std::thread::scope(|sc| {
         let hs: Vec<_> = list
@@ -125,7 +129,8 @@ pub fn status(json: bool) -> Result<()> {
         let rows: Vec<serde_json::Value> = list
             .iter()
             .zip(&infos)
-            .map(|(r, i)| {
+            .zip(&excluded)
+            .map(|((r, i), x)| {
                 let e = st
                     .repos
                     .get(&r.path.display().to_string())
@@ -135,6 +140,7 @@ pub fn status(json: bool) -> Result<()> {
                     "name": r.name,
                     "path": tools::tildify(&r.path.display().to_string()),
                     "every": r.every,
+                    "excluded": x,
                     "due": repos::is_due_state(r.every, Some(&e), &now),
                     "branch": i.branch,
                     "upstream": i.upstream,
@@ -183,7 +189,13 @@ pub fn status(json: bool) -> Result<()> {
         )
         .dimmed()
     );
-    for (((r, i), name), branch) in list.iter().zip(&infos).zip(&names).zip(&branches) {
+    for ((((r, i), name), branch), x) in list
+        .iter()
+        .zip(&infos)
+        .zip(&names)
+        .zip(&branches)
+        .zip(&excluded)
+    {
         let e = st.repos.get(&r.path.display().to_string());
         let synced = e
             .and_then(|e| e.last_fetch)
@@ -207,7 +219,7 @@ pub fn status(json: bool) -> Result<()> {
             pad(branch, bw),
             format!("{}{busy}", position(i)),
             synced,
-            span(r.every),
+            if *x { "off".into() } else { span(r.every) },
         );
     }
     Ok(())

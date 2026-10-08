@@ -174,8 +174,16 @@ fn is_repo(dir: &Path) -> bool {
 }
 
 /// Every repo directly under the configured roots, in root order then by name. A repo
-/// reachable from two roots (or via a symlink) is listed once.
+/// reachable from two roots (or via a symlink) is listed once. Excluded repos are left out.
 pub fn discover(s: &Settings) -> Vec<Repo> {
+    discover_all(s)
+        .into_iter()
+        .filter_map(|(r, excluded)| (!excluded).then_some(r))
+        .collect()
+}
+
+/// [`discover`], keeping the excluded repos (flagged `true`).
+pub fn discover_all(s: &Settings) -> Vec<(Repo, bool)> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for root in &s.roots {
@@ -199,11 +207,9 @@ pub fn discover(s: &Settings) -> Vec<Repo> {
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if s.excluded(&name, &path) {
-                continue;
-            }
+            let excluded = s.excluded(&name, &path);
             let every = s.every_for(&name, &path);
-            out.push(Repo { name, path, every });
+            out.push((Repo { name, path, every }, excluded));
         }
     }
     out
