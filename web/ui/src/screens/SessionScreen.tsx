@@ -25,6 +25,7 @@ import { ChatView } from '@/components/session/ChatView'
 import { Composer, type ComposerApi } from '@/components/session/Composer'
 import { FilePreview } from '@/components/session/FilePreview'
 import { OutboxBubbles } from '@/components/session/OutboxBubbles'
+import type { QuestionActions } from '@/components/session/QuestionCard'
 import { DetailsDrawer, DetailsPanel, type DetailsPanelProps } from '@/components/session/DetailsPanel'
 import { TermView } from '@/components/session/TermView'
 import { Button } from '@/components/ui/button'
@@ -372,6 +373,30 @@ export function SessionScreen({
     }
   }
 
+  const questionActions: QuestionActions | null = lockedReason
+    ? null
+    : {
+        answer: async (toolUseId, answers) => {
+          try {
+            await api.answer(host, id, toolUseId, answers)
+            afterSteer()
+          } catch (err) {
+            steerError(err)
+            throw err
+          }
+        },
+        dismiss: async () => {
+          try {
+            await api.keys(host, id, 'Escape')
+            afterSteer()
+            composerRef.current?.focus()
+          } catch (err) {
+            steerError(err)
+            throw err
+          }
+        },
+      }
+
   const outboxView = (variant: 'chat' | 'strip') => (
     <OutboxBubbles items={outbox} desktop={pane} onUndo={undo} onRetry={retryFailed} onEdit={editFailed} variant={variant} />
   )
@@ -586,6 +611,7 @@ export function SessionScreen({
             fileLinks={fileLinks}
             outbox={outboxView('chat')}
             outboxKey={outbox.map((it) => `${it.id}:${it.state}`).join(',')}
+            questionActions={questionActions}
           />
         ) : (
           <TermView text={peek?.text ?? null} failed={!!peekErr} fontSize={termFont} jumpSignal={jumpSignal} />

@@ -2,7 +2,8 @@
 // static UI; tests mount it on an ephemeral port with fake dependencies.
 // Endpoint reference: ARCHITECTURE.md → "HTTP API".
 import { HttpError, readJsonBody } from './http.mjs';
-import { clampLines, findSession, resolveHost, validateKey, validateSendText, validateTitle } from './util.mjs';
+import { clampLines, findSession, resolveHost, sleep as defaultSleep, validateKey, validateSendText, validateTitle } from './util.mjs';
+import { answerSteps, screenShowsPrompt, validateAnswer } from './questions.mjs';
 import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import {
   fetchPeerHost as defaultFetchPeerHost,
@@ -29,8 +30,8 @@ import { validateDormantRequest } from './dormant.mjs';
 
 export const API_VERSION = 1;
 
-const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|kill|rename)$/;
-const POST_ACTIONS = new Set(['send', 'keys', 'kill', 'rename']);
+const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|rename)$/;
+const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'rename']);
 
 const GROUP_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
 const MEMBER_HOST_RE = /^[^/\s]{1,128}$/;
@@ -154,6 +155,8 @@ export function createApi({
   fleetRefreshMs = 3000,
   fleetIdleAfterMs = 90 * 1000,
   logError = () => {},
+  sleep = defaultSleep,
+  answerKeyGapMs = 80,
 }) {
   // Each host advertises whether it has a notes explorer (like its spawnDirs).
   const notesInfo = () => (notes ? { notes: { name: notes.name ?? null } } : {});
@@ -289,11 +292,42 @@ export function createApi({
       return { status: 200, body: { ok: true } };
     }
 
+    if (action === 'answer') return answerQuestion(id, body);
+
     // keys
     const check = validateKey(body.key);
     if (!check.ok) throw new HttpError(check.error, 400);
     const session = await resolveLocalSession(id);
     await backend.keys(session, check.key);
+    return { status: 200, body: { ok: true } };
+  }
+
+  /**
+   * Answer the session's pending AskUserQuestion prompt by typing what a human would. Only the
+   * prompt named by `toolUseId`, only while it is unanswered, the session waits, and the
+   * terminal shows it untouched — anything else is a 409 and nothing is typed.
+   */
+  async function answerQuestion(id, body) {
+    const session = await resolveLocalSession(id);
+    const toolUseId = typeof body.toolUseId === 'string' ? body.toolUseId : '';
+    if (!toolUseId) throw new HttpError('toolUseId is required', 400);
+    const result = await transcripts.messages(session, 500);
+    const prompt = result?.messages.find((m) => m.kind === 'question' && m.id === toolUseId);
+    if (!prompt) throw new HttpError('no such question in this session', 404);
+    if (prompt.answers || prompt.declined) throw new HttpError('this question has already been answered', 409);
+    if (session.status !== 'waiting') throw new HttpError('the session is not waiting on a question', 409);
+    const check = validateAnswer(body, prompt.questions);
+    if (!check.ok) throw new HttpError(check.error, 400);
+    const screen = await backend.peek(session, 80);
+    if (!screenShowsPrompt(screen, prompt.questions)) {
+      throw new HttpError('the terminal is not showing this question untouched — answer it there', 409);
+    }
+    for (const step of answerSteps(prompt.questions, check.answers)) {
+      if (step.text) await backend.type(session, step.text);
+      else await backend.keys(session, step.key);
+      await sleep(answerKeyGapMs);
+    }
+    refreshFleet();
     return { status: 200, body: { ok: true } };
   }
 

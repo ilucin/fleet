@@ -407,3 +407,34 @@ test('fleet CLI usage runs `fleet --local usage --json [--refresh]` and surfaces
   fail = true;
   await assert.rejects(cli.usage(), /^FleetCliError: no Claude Code login found/);
 });
+
+test('answer types the keys for the pending question, only when it is safe to', async (t) => {
+  const id = 'cccccccc-0000-0000-0000-000000000003';
+  const host = fakeHost('solo', [{ session_id: id, name: 'q', status: 'waiting', backend: 'tmux', handle: '%3', updated_at: 3 }]);
+  const questions = [{ question: 'Merge it?', header: 'Merge', multiSelect: false, options: [{ label: 'Yes', description: '' }, { label: 'No', description: '' }] }];
+  let answered = null;
+  host.transcripts = { messages: async () => ({ messages: [{ role: 'assistant', kind: 'question', id: 'tq1', questions, text: '', ...answered }], total: 1, truncated: false }) };
+  let screen = 'Merge it?\n❯ 1. Yes\n  2. No\nEnter to select · ↑/↓ to navigate';
+  host.backend.peek = async () => screen;
+  host.backend.type = async (s, text) => void host.calls.push(['type', s.session_id, text]);
+  const config = normalizeConfig({ self: 'solo' }, { env: {}, home: '/home/tester' });
+  const api = createApi({ config, ...host, warmFleet: false, sleep: async () => {} });
+  const server = createHttpServer({ handleApi: api, uiDir: os.tmpdir() });
+  const base = await listen(server);
+  t.after(() => server.close());
+  const call = async (body) => (await post(`${base}/api/hosts/solo/sessions/${id}/answer`, body)).status;
+
+  assert.equal(await call({ toolUseId: 'nope', answers: [{ options: [1] }] }), 404);
+  assert.equal(await call({ toolUseId: 'tq1', answers: [{ options: [0, 1] }] }), 400);
+  screen = 'Merge it?\n  1. Yes\n❯ 2. No\nEnter to select';
+  assert.equal(await call({ toolUseId: 'tq1', answers: [{ options: [1] }] }), 409, 'moved in the terminal');
+  assert.equal(host.calls.filter((c) => c[0] === 'keys' || c[0] === 'type').length, 0, 'nothing typed yet');
+  screen = 'Merge it?\n❯ 1. Yes\n  2. No\nEnter to select';
+  assert.equal(await call({ toolUseId: 'tq1', answers: [{ text: 'later' }] }), 200);
+  assert.deepEqual(
+    host.calls.filter((c) => c[0] === 'keys' || c[0] === 'type').map((c) => c[2]),
+    ['Down', 'Down', 'later', 'Enter'],
+  );
+  answered = { answers: ['later'] };
+  assert.equal(await call({ toolUseId: 'tq1', answers: [{ options: [0] }] }), 409, 'already answered');
+});

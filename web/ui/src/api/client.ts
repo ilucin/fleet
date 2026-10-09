@@ -18,6 +18,7 @@ import type {
   NotesTree,
   OkResponse,
   PeekResponse,
+  QuestionAnswer,
   RenameResponse,
   ReposResponse,
   ReposSettings,
@@ -115,6 +116,8 @@ export const api = {
     request<OkResponse>(sessionPath(host, id, 'send'), { ...o, method: 'POST', body: { text } }),
   keys: (host: string, id: string, key: SessionKey, o: Opts = {}) =>
     request<OkResponse>(sessionPath(host, id, 'keys'), { ...o, method: 'POST', body: { key } }),
+  answer: (host: string, id: string, toolUseId: string, answers: QuestionAnswer[], o: Opts = {}) =>
+    request<OkResponse>(sessionPath(host, id, 'answer'), { ...o, method: 'POST', body: { toolUseId, answers } }),
   rename: (host: string, id: string, title: string, o: Opts = {}) =>
     request<RenameResponse>(sessionPath(host, id, 'rename'), { ...o, method: 'POST', body: { title } }),
   kill: (host: string, id: string, o: Opts = {}) =>

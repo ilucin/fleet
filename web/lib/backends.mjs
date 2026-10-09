@@ -46,6 +46,11 @@ on run argv
       tell theSession to write text ""
     end tell
     return "ok"
+  else if theMode is "type" then
+    tell application "iTerm2"
+      tell theSession to write text (item 3 of argv) without newline
+    end tell
+    return "ok"
   else if theMode is "enter" then
     tell application "iTerm2"
       tell theSession to write text ""
@@ -164,11 +169,22 @@ export function createBackend({
     await run(osascript, [scriptPath(), mode, handle], { timeout: 15000 });
   }
 
+  /** Type `text` without submitting it (no Enter). */
+  async function type(session, text) {
+    const backend = backendOf(session);
+    const handle = requireHandle(session);
+    if (backend === 'tmux') {
+      await run(tmux, ['send-keys', '-t', handle, '-l', '--', text], { timeout: 8000 });
+      return;
+    }
+    await run(osascript, [scriptPath(), 'type', handle, text], { timeout: 15000 });
+  }
+
   /** Close the iTerm tab/pane hosting the session (best effort; the process should be dead already). */
   async function closeIterm(session) {
     const handle = requireHandle(session);
     await run(osascript, [scriptPath(), 'close', handle], { timeout: 15000 });
   }
 
-  return { peek, send, keys, closeIterm };
+  return { peek, send, keys, type, closeIterm };
 }

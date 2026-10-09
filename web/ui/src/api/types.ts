@@ -234,7 +234,21 @@ export interface PeekResponse {
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system'
-export type MessageKind = 'user' | 'assistant' | 'command' | 'system'
+export type MessageKind = 'user' | 'assistant' | 'command' | 'system' | 'question'
+
+/** One question of Claude's AskUserQuestion prompt. */
+export interface Question {
+  question: string
+  header: string
+  multiSelect: boolean
+  options: { label: string; description: string }[]
+}
+
+/** POST …/answer: one entry per question, in order (option indexes and/or typed text). */
+export interface QuestionAnswer {
+  options: number[]
+  text?: string | null
+}
 
 export interface Message {
   role: MessageRole
@@ -247,6 +261,14 @@ export interface Message {
   name?: string
   /** kind 'command': what was typed after the command, when anything was. */
   args?: string
+  /** kind 'question': the AskUserQuestion tool call's id (what …/answer names). */
+  id?: string
+  /** kind 'question': the prompt (`text` is its markdown rendering). */
+  questions?: Question[]
+  /** kind 'question': the answers, per question, once answered. */
+  answers?: (string | null)[]
+  /** kind 'question': dismissed (Esc, "Chat about this", interrupted). */
+  declined?: boolean
 }
 
 /** GET /api/hosts/:host/sessions/:id/messages */

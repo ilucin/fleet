@@ -67,3 +67,26 @@ test('classifyUserText handles commands, task notifications, local-command noise
   assert.equal(classifyUserText('<system-reminder>ignore me</system-reminder>'), null);
   assert.deepEqual(classifyUserText('<system-reminder>ctx</system-reminder>\nReal question?'), { kind: 'user', text: 'Real question?' });
 });
+
+test('parseTranscript turns AskUserQuestion into a question message with its outcome', () => {
+  const input = { questions: [{ question: 'Merge it?', header: 'Merge', multiSelect: false, options: [{ label: 'Yes', description: 'squash' }, { label: 'No' }] }] };
+  const jsonl = [
+    asst([{ type: 'text', text: 'Before I go on:' }], { id: 'msg_q', stop: 'tool_use' }),
+    asst([{ type: 'tool_use', id: 'tq1', name: 'AskUserQuestion', input }], { id: 'msg_q', stop: 'tool_use' }),
+    line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tq1', content: 'answered' }] }, toolUseResult: { questions: input.questions, answers: { 'Merge it?': 'Yes' } } }),
+    asst([{ type: 'tool_use', id: 'tq2', name: 'AskUserQuestion', input }], { id: 'msg_r', stop: 'tool_use' }),
+    user([{ type: 'tool_result', tool_use_id: 'tq2', content: 'rejected', is_error: true }]),
+    asst([{ type: 'tool_use', id: 'tq3', name: 'AskUserQuestion', input }], { id: 'msg_s', stop: 'tool_use' }),
+  ].join('\n');
+  const out = parseTranscript(jsonl);
+  assert.deepEqual(
+    out.map((m) => [m.kind, m.id ?? null]),
+    [['assistant', null], ['question', 'tq1'], ['question', 'tq2'], ['question', 'tq3']],
+  );
+  assert.deepEqual(out[1].answers, ['Yes']);
+  assert.equal(out[1].questions[0].options[0].description, 'squash');
+  assert.match(out[1].text, /\*\*Merge: Merge it\?\*\*\n- Yes\n- No/);
+  assert.equal(out[2].declined, true);
+  assert.equal(out[3].answers, undefined, 'still pending');
+  assert.equal(out[3].declined, undefined);
+});

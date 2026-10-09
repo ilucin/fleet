@@ -5,6 +5,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { QUESTION_TOOL, normalizeQuestions, questionOutcome, questionsText } from './questions.mjs';
+
 export const MAX_TAIL_BYTES = 6 * 1024 * 1024;
 
 /** Mirror of the fleet CLI's `encode_cwd`: `/` and `.` become `-`. */
@@ -117,10 +119,13 @@ export function classifyUserText(raw) {
  *   { role: 'user'|'assistant'|'system', kind, text, ts, final? }
  * Assistant text blocks that end a turn (`stop_reason` != 'tool_use') are `final: true`;
  * interim narration between tool calls is `final: false`.
+ * An AskUserQuestion call is `{ role: 'assistant', kind: 'question', id, questions, text }`
+ * (`text`: a markdown fallback), plus `answers` or `declined: true` once it has a result.
  */
 export function parseTranscript(text) {
   const out = [];
   let lastAssistantId = null;
+  const asked = new Map(); // tool_use id -> its question message, until answered
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let entry;
@@ -136,6 +141,14 @@ export function parseTranscript(text) {
 
     if (entry.type === 'user') {
       if (entry.isMeta) continue;
+      if (asked.size && Array.isArray(msg.content)) {
+        for (const b of msg.content) {
+          const q = b?.type === 'tool_result' ? asked.get(b.tool_use_id) : null;
+          if (!q) continue;
+          Object.assign(q, questionOutcome(q.questions, entry, b));
+          asked.delete(b.tool_use_id);
+        }
+      }
       const raw = textOfContent(msg.content);
       if (!raw.trim()) continue; // pure tool_result
       const classified = classifyUserText(raw);
@@ -148,19 +161,29 @@ export function parseTranscript(text) {
 
     if (entry.type === 'assistant') {
       const body = textOfContent(msg.content).trim();
-      if (!body) continue;
-      const final = msg.stop_reason !== 'tool_use';
-      const prev = out[out.length - 1];
-      // Streamed messages arrive as one JSONL line per block; glue blocks of the same
-      // API message back together instead of showing them as separate bubbles.
-      if (prev && prev.role === 'assistant' && msg.id && msg.id === lastAssistantId) {
-        prev.text = `${prev.text}\n\n${body}`;
-        prev.final = prev.final || final;
-        prev.ts = ts ?? prev.ts;
-      } else {
-        out.push({ role: 'assistant', kind: 'assistant', text: body, ts, final });
+      if (body) {
+        const final = msg.stop_reason !== 'tool_use';
+        const prev = out[out.length - 1];
+        // Streamed messages arrive as one JSONL line per block; glue blocks of the same
+        // API message back together instead of showing them as separate bubbles.
+        if (prev && prev.kind === 'assistant' && msg.id && msg.id === lastAssistantId) {
+          prev.text = `${prev.text}\n\n${body}`;
+          prev.final = prev.final || final;
+          prev.ts = ts ?? prev.ts;
+        } else {
+          out.push({ role: 'assistant', kind: 'assistant', text: body, ts, final });
+        }
+        lastAssistantId = msg.id ?? null;
       }
-      lastAssistantId = msg.id ?? null;
+      for (const b of Array.isArray(msg.content) ? msg.content : []) {
+        if (b?.type !== 'tool_use' || b.name !== QUESTION_TOOL || !b.id) continue;
+        const questions = normalizeQuestions(b.input);
+        if (!questions) continue;
+        const q = { role: 'assistant', kind: 'question', id: b.id, questions, text: questionsText(questions), ts, final: true };
+        out.push(q);
+        asked.set(b.id, q);
+        lastAssistantId = null;
+      }
     }
   }
   return out;

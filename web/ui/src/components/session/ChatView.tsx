@@ -3,6 +3,7 @@ import { ChevronRightIcon, ChevronsUpIcon, ClipboardIcon, HandIcon, Loader2Icon,
 
 import type { Message } from '@/api/types'
 import { LatestButton } from '@/components/session/LatestButton'
+import { QuestionCard, type QuestionActions } from '@/components/session/QuestionCard'
 import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
 import { FileLinksContext, type FileStats } from '@/hooks/useFileLinks'
@@ -10,6 +11,7 @@ import { useFollowScroll } from '@/hooks/useFollowScroll'
 import { useNow } from '@/hooks/useNow'
 import { clockTime } from '@/lib/format'
 import { msgKind, sameGroup, splitPasted, visibleMessages } from '@/lib/chat'
+import { pendingQuestion } from '@/lib/questions'
 import { pathCandidates } from '@/lib/paths'
 import { CHAT_FONT_REM } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
@@ -37,6 +39,8 @@ export interface ChatViewProps {
   /** The outbox's optimistic bubbles, after the transcript; `outboxKey` changes when they do (keeps the tail followed). */
   outbox?: React.ReactNode
   outboxKey?: string
+  /** Answer / dismiss Claude's pending question from its card; absent = the card is read-only. */
+  questionActions?: QuestionActions | null
 }
 
 /** Longer pastes start collapsed. */
@@ -77,9 +81,17 @@ function CommandChip({ name, shell }: { name: string; shell: boolean }) {
   )
 }
 
-const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: string }) {
+const Bubble = memo(function Bubble({ m, caption, actions }: { m: Message; caption: string; actions?: QuestionActions | null }) {
   const kind = msgKind(m)
   const text = typeof m.text === 'string' ? m.text : ''
+  if (kind === 'question' && Array.isArray(m.questions)) {
+    return (
+      <>
+        <QuestionCard m={m} actions={actions} />
+        {caption ? <div className="-mt-2 px-1 pt-0.5 text-[0.625rem] text-dimmer tabular-nums">{caption}</div> : null}
+      </>
+    )
+  }
   if (kind === 'command' && m.name && m.args?.trim()) {
     // A command with arguments is a prompt in disguise: a user bubble headed by the command.
     const shell = m.name === '!'
@@ -136,7 +148,7 @@ const Bubble = memo(function Bubble({ m, caption }: { m: Message; caption: strin
   )
 })
 
-function Typing({ status, waitingFor }: { status: string; waitingFor?: string | null }) {
+function Typing({ status, waitingFor, asking }: { status: string; waitingFor?: string | null; asking: boolean }) {
   if (status === 'busy') {
     return (
       <div className="flex items-center gap-2 px-1 pt-3 text-xs text-dimmer" aria-live="polite">
@@ -153,7 +165,7 @@ function Typing({ status, waitingFor }: { status: string; waitingFor?: string | 
     return (
       <div className="flex items-center gap-2 px-1 pt-3 text-xs font-medium text-status-waiting" aria-live="polite">
         <HandIcon className="size-3.5" />
-        Needs you{waitingFor?.trim() ? ` · ${waitingFor.trim()}` : ' — Claude is waiting for an answer'}
+        {asking ? 'Needs you · answer the question above' : `Needs you${waitingFor?.trim() ? ` · ${waitingFor.trim()}` : ' — Claude is waiting for an answer'}`}
       </div>
     )
   }
@@ -164,6 +176,8 @@ function Typing({ status, waitingFor }: { status: string; waitingFor?: string | 
 export function ChatView(p: ChatViewProps) {
   const { ref, following, setFollow, setTop, stick, jump, onScroll } = useFollowScroll<HTMLDivElement>(60)
   const list = visibleMessages(p.messages, p.hideNotes)
+  // Only the prompt Claude waits on right now takes answers.
+  const asking = p.status === 'waiting' ? pendingQuestion(p.messages) : null
   const now = useNow(60_000) // captions: "today" vs a date
 
   // Remember the scroll geometry of the last commit, so "Load older" (which prepends)
@@ -216,7 +230,12 @@ export function ChatView(p: ChatViewProps) {
     body = (
       <div className="flex flex-col gap-2.5">
         {list.map((m, i) => (
-          <Bubble key={i} m={m} caption={sameGroup(m, list[i + 1]) ? '' : clockTime(m.ts, now)} />
+          <Bubble
+            key={i}
+            m={m}
+            caption={sameGroup(m, list[i + 1]) ? '' : clockTime(m.ts, now)}
+            actions={m === asking ? p.questionActions : null}
+          />
         ))}
       </div>
     )
@@ -243,7 +262,7 @@ export function ChatView(p: ChatViewProps) {
           ) : null}
           {p.fileLinks ? <FileLinksContext.Provider value={p.fileLinks.api}>{body}</FileLinksContext.Provider> : body}
           {p.outbox}
-          {p.messages ? <Typing status={p.status} waitingFor={p.waitingFor} /> : null}
+          {p.messages ? <Typing status={p.status} waitingFor={p.waitingFor} asking={!!asking && !!p.questionActions} /> : null}
         </div>
       </div>
       <LatestButton show={!following} onClick={jump} />
