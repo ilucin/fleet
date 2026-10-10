@@ -45,6 +45,7 @@ describe('matchShortcut', () => {
     expect(cmd('j')).toBe('mode')
     expect(cmd('e')).toBe('rename')
     expect(cmd('E', { shiftKey: true })).toBe('notes')
+    expect(cmd('S', { shiftKey: true })).toBe('scratchpad')
   })
 
   it('uses ⌘ on macOS and Ctrl elsewhere, never both', () => {

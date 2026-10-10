@@ -22,6 +22,7 @@ export type ShortcutAction =
   | 'view'
   | 'rename'
   | 'notes'
+  | 'scratchpad'
   | 'close'
 
 export interface KeyLike {
@@ -80,6 +81,7 @@ export const BINDINGS: readonly Binding[] = [
   { action: 'mode', combo: ['mod', 'J'] },
   { action: 'rename', combo: ['mod', 'E'] },
   { action: 'notes', combo: ['mod', 'shift', 'E'] },
+  { action: 'scratchpad', combo: ['mod', 'shift', 'S'] },
   { action: 'close', combo: ['mod', 'Backspace'] },
 ]
 
@@ -244,6 +246,7 @@ export const SHORTCUT_HELP: { title: string; items: ShortcutHelp[] }[] = [
       { action: 'sidebar', label: 'Toggle the sidebar' },
       { action: 'inspector', label: 'Toggle the details panel (brief: summary, todos, resources)' },
       { action: 'notes', label: 'Notes explorer (Esc back to the sessions)' },
+      { action: 'scratchpad', label: 'Scratchpad: a floating, autosaved text buffer (again or Esc closes it)' },
       { action: 'help', label: 'This help' },
     ],
   },

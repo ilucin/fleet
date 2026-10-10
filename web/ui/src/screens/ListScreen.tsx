@@ -8,6 +8,7 @@ import { ClosedSection } from '@/components/ClosedSection'
 import { DormantSection } from '@/components/DormantSection'
 import { HostDot } from '@/components/HostBadge'
 import { NewSessionDrawer } from '@/components/NewSessionDrawer'
+import { ScratchpadButton } from '@/components/Scratchpad'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
 import { SessionRow } from '@/components/SessionRow'
@@ -102,6 +103,7 @@ export function ListScreen() {
               </a>
             </Button>
           ) : null}
+          <ScratchpadButton className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-muted-foreground [&_svg:not([class*='size-'])]:size-5" />
           {notesHosts.length ? (
             <Button asChild variant="ghost" size="icon" className="-my-1 size-9 shrink-0 rounded-full sm:size-10 text-muted-foreground [&_svg:not([class*='size-'])]:size-5">
               <a href="#/notes" aria-label="Notes" title="Notes">

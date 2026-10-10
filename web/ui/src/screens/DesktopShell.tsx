@@ -10,6 +10,7 @@ import {
   MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
+  NotebookPenIcon,
   NotebookTextIcon,
   PaletteIcon,
   PanelLeftIcon,
@@ -48,6 +49,7 @@ import { editorLabel } from '@/lib/brief'
 import { canAttachInApp, copyWithToast, sessionAttachCommand, sessionAttachLink } from '@/lib/clipboard'
 import { boardOrder } from '@/lib/groups'
 import { notesHref, parseNotesLocation } from '@/lib/notes'
+import { scratchpad } from '@/lib/scratchpad'
 import { PALETTES } from '@/lib/palettes'
 import { STATUS_FILTERS, allSessions, byLastActivity, findSession, sessionHref, statusLabel, withoutSession } from '@/lib/sessions'
 import {
@@ -235,7 +237,7 @@ export function DesktopShell() {
   const run = (action: ShortcutAction, target: HTMLElement | null): boolean => {
     const cur = cursorKey ? byKey.get(cursorKey) : null
     // The session list isn't on screen in the notes explorer: its keys do nothing there.
-    if (notesOpen && !['search', 'new', 'back', 'blur', 'palette', 'help', 'notes'].includes(action)) return false
+    if (notesOpen && !['search', 'new', 'back', 'blur', 'palette', 'help', 'notes', 'scratchpad'].includes(action)) return false
     switch (action) {
       case 'next':
         moveCursor(1)
@@ -290,6 +292,9 @@ export function DesktopShell() {
         return true
       case 'notes':
         navigate(notesOpen ? '/' : notesHref())
+        return true
+      case 'scratchpad':
+        scratchpad.toggle(!!target?.closest('[data-scratchpad]'))
         return true
       case 'close': {
         const s = selectedSession ?? cur
@@ -454,6 +459,7 @@ export function DesktopShell() {
         ...(editorUrl && editorText
           ? [{ id: 'editor', label: editorText, icon: <CodeXmlIcon />, keywords: ['editor', 'vscode', 'cursor', 'code'], run: () => window.location.assign(editorUrl) }]
           : []),
+        { id: 'scratchpad', label: 'Scratchpad', icon: <NotebookPenIcon />, shortcut: shortcutHint('scratchpad'), keywords: ['editor', 'text', 'paste', 'clipboard', 'draft'], run: () => scratchpad.show() },
         ...(notesHosts.length
           ? [{ id: 'notes', label: 'Notes…', icon: <NotebookTextIcon />, shortcut: shortcutHint('notes'), keywords: ['notes', 'markdown', 'knowledge', 'wiki', 'search'], run: () => navigate(notesHref()) }]
           : []),

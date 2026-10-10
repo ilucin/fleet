@@ -28,6 +28,7 @@ import { OutboxBubbles } from '@/components/session/OutboxBubbles'
 import type { QuestionActions } from '@/components/session/QuestionCard'
 import { DetailsDrawer, DetailsPanel, type DetailsPanelProps } from '@/components/session/DetailsPanel'
 import { TermView } from '@/components/session/TermView'
+import { ScratchpadButton } from '@/components/Scratchpad'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useFileDrop } from '@/hooks/useAttach'
@@ -551,6 +552,8 @@ export function SessionScreen({
               <PanelRightIcon className="size-5" />
             </Button>
           ) : (
+            <>
+            <ScratchpadButton className="size-11 shrink-0 rounded-xl text-muted-foreground [&_svg:not([class*='size-'])]:size-5" />
             <Button
               variant="ghost"
               size="icon"
@@ -561,6 +564,7 @@ export function SessionScreen({
             >
               <EllipsisIcon className="size-5" />
             </Button>
+            </>
           )}
           {pane && onClose ? (
             <Button variant="ghost" size="icon" aria-label="Close session" title="Close (Esc)" onClick={onClose} className="size-11 shrink-0 rounded-xl">

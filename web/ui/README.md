@@ -52,6 +52,8 @@ src/
                       typing context → action), shortcutHint() (per browser / Fleet.app), isTypingTarget(),
                       stepCursor(), sessionKey(), SHORTCUT_HELP (the ⌘? dialog)
   lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
+  lib/scratchpad.ts   the ⌘⇧S scratchpad: autosaved text (localStorage), floating-panel rect clampRect()/defaultRect(),
+                      the open-state store scratchpad.show()/hide()/toggle() (components/Scratchpad.tsx renders it)
   lib/paths.ts        chat file paths: isPathLike(), pathTokens(), splitPaths(), pathCandidates() (per message, cached),
                       parsePathRef() (`:line[:col]` / `#L12`), POSIX helpers normalizePath() / dirname() / resolveFrom()
   lib/attach.ts       attachments: insertPaths() (paths at the caret, padded), formatPath() (quote on spaces),

@@ -1,6 +1,7 @@
 import { Redirect, Route, Router, Switch } from 'wouter'
 import { useHashLocation } from 'wouter/use-hash-location'
 
+import { Scratchpad } from '@/components/Scratchpad'
 import { StackUi } from '@/components/stack/StackUi'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -64,6 +65,8 @@ export default function App() {
               )}
               {/* Session stacks: the Stack sheet + Spawn sibling form, opened from rows, columns, the session screen. */}
               <StackUi />
+              {/* ⌘⇧S / header buttons: the floating (desktop) or drawer (mobile) scratchpad. */}
+              <Scratchpad />
             </Router>
             <Toaster position={desktop ? 'bottom-right' : 'top-center'} offset={desktop ? { bottom: 112, right: 16 } : undefined} />
           </TooltipProvider>

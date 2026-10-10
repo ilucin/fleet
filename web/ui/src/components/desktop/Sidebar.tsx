@@ -8,6 +8,7 @@ import { SessionListSkeleton } from '@/components/SessionListSkeleton'
 import { SessionRow } from '@/components/SessionRow'
 import { StatusDot } from '@/components/StatusDot'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ScratchpadButton } from '@/components/Scratchpad'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -277,6 +278,7 @@ export function SidebarRail({
       <Button variant="ghost" size="icon" aria-label="Keyboard shortcuts" title={withHint('Keyboard shortcuts', 'help')} onClick={onHelp} className="mt-auto">
         <KeyboardIcon />
       </Button>
+      <ScratchpadButton />
       <NotesLink />
       <Button asChild variant="ghost" size="icon">
         <a href="#/usage" aria-label="Usage limits" title="Usage limits">
