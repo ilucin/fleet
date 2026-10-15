@@ -167,7 +167,9 @@ export function parseTranscript(text) {
     if (!msg || typeof msg !== 'object') continue;
 
     if (entry.type === 'user') {
-      if (entry.isMeta) continue;
+      // A compaction writes its summary as a user entry, and a manual `/compact` also as plain text
+      // just before it; the `<command-name>` entry after the summary is the one shown.
+      if (entry.isMeta || entry.isCompactSummary || msg.content === '/compact') continue;
       if (asked.size && Array.isArray(msg.content)) {
         for (const b of msg.content) {
           const q = b?.type === 'tool_result' ? asked.get(b.tool_use_id) : null;

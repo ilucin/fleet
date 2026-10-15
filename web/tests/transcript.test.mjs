@@ -53,6 +53,27 @@ test('parseTranscript glues streamed blocks of one API message and skips sidecha
   assert.equal(out[1].final, true);
 });
 
+test('parseTranscript shows a compaction once: no summary, one /compact', () => {
+  const jsonl = [
+    user('Hello there'),
+    asst([{ type: 'text', text: 'Done.' }]),
+    user('/compact'),
+    line({ type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }),
+    user('This session is being continued from a previous conversation.', { isCompactSummary: true }),
+    user('<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>'),
+    user('Next'),
+  ].join('\n');
+  assert.deepEqual(
+    parseTranscript(jsonl).map((m) => [m.role, m.kind, m.text]),
+    [
+      ['user', 'user', 'Hello there'],
+      ['assistant', 'assistant', 'Done.'],
+      ['system', 'command', '/compact'],
+      ['user', 'user', 'Next'],
+    ],
+  );
+});
+
 test('classifyUserText handles commands, task notifications, local-command noise and reminders', () => {
   assert.deepEqual(classifyUserText('<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>'), { kind: 'command', text: '/model opus', name: '/model', args: 'opus' });
   assert.deepEqual(classifyUserText('<command-message>p-dev:overview</command-message>\n<command-name>/p-dev:overview</command-name>\n<command-args>onboard me https://example.com/pull/1</command-args>'), {
