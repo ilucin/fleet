@@ -202,6 +202,11 @@ if (config.slack.enabled) {
     },
     file: path.join(fleetStateDir(process.env), 'slack-links.json'),
     download: createSlackDownload({ getToken: getBotToken }),
+    // The owner's DM about a blocked session links to it in the web UI of the session's host.
+    sessionUrl: (host, id) => {
+      const base = host === config.self ? config.selfWeb : config.peers[host];
+      return base ? `${base}/#/s/${encodeURIComponent(host)}/${encodeURIComponent(id)}` : null;
+    },
     log,
   });
 }

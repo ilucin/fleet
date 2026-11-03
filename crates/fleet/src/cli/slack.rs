@@ -505,6 +505,63 @@ pub fn file(id: &str, file_id: &str, out: Option<&str>, json: bool) -> Result<()
     Ok(())
 }
 
+/// Why a linked session may not ask with AskUserQuestion: Slack cannot show the prompt, and the
+/// session would sit on it while the thread waits.
+const GUARD_REASON: &str = "This session is linked to Slack, where an AskUserQuestion prompt cannot be shown or answered — the session would block on it. Ask in the thread instead: `fleet slack reply <link> \"…\"` (offer the options as a short list; mention the owner if the question is for them), then end your turn and wait for the answer.";
+
+/// The active link of `session_id` in a `GET /api/slack` body, if any.
+fn active_link_of<'a>(v: &'a Value, session_id: &str, now_ms: i64) -> Option<&'a Value> {
+    v["links"].as_array()?.iter().find(|l| {
+        l["session"].as_str() == Some(session_id)
+            && l["until"].as_i64().is_none_or(|until| until > now_ms)
+    })
+}
+
+/// The PreToolUse hook's answer for one tool call (`input`: the hook's stdin), given the bridge's
+/// links: a deny for AskUserQuestion in a linked session, else nothing.
+fn guard_decision(
+    input: &Value,
+    links: impl FnOnce() -> Option<Value>,
+    now_ms: i64,
+) -> Option<Value> {
+    if input["tool_name"].as_str() != Some("AskUserQuestion") {
+        return None;
+    }
+    let session = input["session_id"].as_str().filter(|s| !s.is_empty())?;
+    let v = links()?;
+    let link = active_link_of(&v, session, now_ms)?;
+    let reason = GUARD_REASON.replace("<link>", link["id"].as_str().unwrap_or("<link>"));
+    Some(json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
+}
+
+/// `fleet slack guard`: a Claude Code PreToolUse hook (matcher `AskUserQuestion`). It denies the
+/// prompt while the session is linked to Slack and tells it to ask in the thread. Fails open: no
+/// web server, no bridge or bad input lets the call through — a hook must never wedge a session.
+pub fn guard() -> Result<()> {
+    use std::io::Read;
+    let mut raw = String::new();
+    if std::io::stdin().read_to_string(&mut raw).is_err() {
+        return Ok(());
+    }
+    let Ok(input) = serde_json::from_str::<Value>(&raw) else {
+        return Ok(());
+    };
+    let links = || {
+        let (status, v) = request_within("GET", "/api/slack", None, 4).ok()?;
+        status.starts_with('2').then_some(v)
+    };
+    if let Some(out) = guard_decision(&input, links, chrono::Utc::now().timestamp_millis()) {
+        println!("{out}");
+    }
+    Ok(())
+}
+
 /// `fleet spawn --slack <url> --slack-for <duration>`: the link a new session starts with.
 pub struct SpawnLink {
     pub url: String,
@@ -575,6 +632,34 @@ pub fn link_spawned(tmux: &str, link: &SpawnLink, first: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_guard_denies_ask_user_question_only_in_a_linked_session() {
+        let links = || {
+            Some(json!({ "links": [
+                { "id": "sl-aaaaaa", "session": "s-linked", "until": 2000 },
+                { "id": "sl-bbbbbb", "session": "s-forever", "until": null },
+                { "id": "sl-cccccc", "session": "s-expired", "until": 500 },
+            ] }))
+        };
+        let ask = |sid: &str| json!({ "tool_name": "AskUserQuestion", "session_id": sid });
+        let out = guard_decision(&ask("s-linked"), links, 1000).unwrap();
+        let o = &out["hookSpecificOutput"];
+        assert_eq!(o["permissionDecision"], "deny");
+        assert!(
+            o["permissionDecisionReason"]
+                .as_str()
+                .unwrap()
+                .contains("fleet slack reply sl-aaaaaa")
+        );
+        assert!(guard_decision(&ask("s-forever"), links, 1000).is_some());
+        assert!(guard_decision(&ask("s-expired"), links, 1000).is_none());
+        assert!(guard_decision(&ask("s-other"), links, 1000).is_none());
+        let bash = json!({ "tool_name": "Bash", "session_id": "s-linked" });
+        assert!(guard_decision(&bash, links, 1000).is_none());
+        // No bridge to ask: the call goes through.
+        assert!(guard_decision(&ask("s-linked"), || None, 1000).is_none());
+    }
 
     #[test]
     fn base64_round_trips_what_node_sends() {

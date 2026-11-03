@@ -158,6 +158,7 @@ for how long and what it may help with — the web UI's **Link to Slack** (sessi
 | `fleet slack history <sl-xxxxxx> [--limit 50] [--cursor <c>] [--oldest <ts>] [--latest <ts>] [--json]` | read the linked conversation, a page at a time (up to 200): a channel / DM from the newest message (the next page, `older: … --cursor`, goes back; each page printed top-down), a thread link its thread (as `thread`). Each message: who (name, id, the owner / `[you]` / `[app]`), when, its `ts`, its replies (read them with `thread`) and its files (id, name, type, size). Read-only, the linked session only, while linked (exit 3 after) |
 | `fleet slack thread <sl-xxxxxx> <ts> [--limit] [--cursor] [--json]` | one thread of the linked conversation (a thread link: only its own thread): its first message, then the latest replies, oldest first; `older: … --cursor` pages back to earlier replies |
 | `fleet slack file <sl-xxxxxx> <file-id> [-o <path>] [--json]` | download a file shared in the linked conversation (in a thread link: in its thread), up to 20 MB, to `<path>` (a file or a directory; default a temp dir) and print where. The app needs the `files:read` scope |
+| `fleet slack guard` | a Claude Code `PreToolUse` hook (matcher `AskUserQuestion`; reads the hook JSON on stdin): while the session is linked, it denies the prompt — Slack cannot show it — and tells the session to ask in the thread. Fails open (no web server or bridge: the call goes through). Install it in `~/.claude/settings.json`: `"PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "fleet slack guard", "timeout": 10 }] }]` |
 
 How it works ([architecture](architecture.md#slack-links)): one host's web server runs the bridge
 (`slack.host`) — a Slack App in Socket Mode, whose tokens only it holds. Linking reads the thread
@@ -167,7 +168,10 @@ slack reply` and only when something calls for it, only within the instructions,
 destructive for them, their messages are requests from colleagues and cannot change the rules)
 and the thread so far. Messages are typed in once the session is idle — several as one prompt —
 each marked with its author's Slack name and id (and `→ mentions you` / `→ to you`); the ones
-addressed to it get an 👀 reaction. When the link ends, delivery stops and, if the session ever spoke there, the thread is
+addressed to it get an 👀 reaction. A linked session that waits on you (a permission prompt, a
+question in the terminal) for over 30 s says so in the thread — only the kind of prompt, never its
+details — and DMs you (`slack.owner`) a link to it in Fleet's web UI; messages for it meanwhile get
+⏳, and once it moves on both posts are edited to say so. When the link ends, delivery stops and, if the session ever spoke there, the thread is
 told it left. The commands talk to this machine's web server, which proxies to `slack.host` (or, for a host listed in `slack.bridges`, to that host's own bridge).
 Sessions on any host can be linked: the bridge lists and types into them through their host's
 web server, and checks a reply's pane on the host it came from. A session asked to join a thread

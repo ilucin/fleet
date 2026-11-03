@@ -748,6 +748,9 @@ enum SlackCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Claude Code PreToolUse hook (matcher `AskUserQuestion`): deny the prompt while this
+    /// session is linked to Slack, where it cannot be answered (reads the hook JSON on stdin)
+    Guard,
     /// Download a file shared in the linked conversation (its id from `history` / `thread`)
     File {
         /// The link id (sl-xxxxxx)
@@ -1514,6 +1517,7 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
                 out,
                 json,
             } => slack_cmd::file(&link, &file, out.as_deref(), json)?,
+            SlackCmd::Guard => slack_cmd::guard()?,
         },
         Commands::Send { target, text } => commands::send(&target, &text)?,
         Commands::Done { note, cancel } => commands::done(note, cancel)?,

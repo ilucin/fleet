@@ -12,6 +12,8 @@ import { createHttpServer } from '../lib/app.mjs';
 import { normalizeConfig } from '../lib/config.mjs';
 import {
   createSlackApi,
+  BLOCKED_AFTER_MS,
+  blockedWhat,
   createSlackBridge,
   createSlackDownload,
   SlackError,
@@ -56,7 +58,7 @@ function fakeSlack() {
   return { call, calls, handlers };
 }
 
-function fixture(t, { status = 'idle', download = null, settings = { owner: 'UOWNER' }, spawn = null, self = null } = {}) {
+function fixture(t, { status = 'idle', download = null, settings = { owner: 'UOWNER' }, spawn = null, self = null, sessionUrl = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-slack-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const slack = fakeSlack();
@@ -75,6 +77,7 @@ function fixture(t, { status = 'idle', download = null, settings = { owner: 'UOW
     spawn,
     file: path.join(dir, 'slack-links.json'),
     download,
+    sessionUrl,
     now: () => clock,
   });
   return { bridge, slack, sessions, sent, dir, advance: (ms) => (clock += ms) };
@@ -255,6 +258,77 @@ test('delivery waits while the session is busy or waiting', async (t) => {
   fx.sessions[0].status = 'idle';
   await fx.bridge.tick();
   assert.equal(fx.sent.length, 1);
+});
+
+test('blocked: a session waiting on its owner says so in the thread and DMs the owner, then says it continued', async (t) => {
+  const fx = fixture(t, { sessionUrl: (host, id) => `http://workstation:7777/#/s/${host}/${id}` });
+  fx.slack.handlers['conversations.open'] = () => ({ channel: { id: 'DOWNER' } });
+  fx.slack.handlers['chat.update'] = () => ({});
+  fx.slack.handlers['reactions.remove'] = () => ({});
+  const link = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  await fx.bridge.tick(); // the intro goes in
+  assert.equal(fx.sent.length, 1);
+  const posts = () => fx.slack.calls.filter((c) => c.method === 'chat.postMessage');
+
+  // A prompt answered quickly: nothing said.
+  fx.sessions[0].status = 'waiting';
+  fx.sessions[0].waiting_for = 'permission `rm -rf /tmp/x`';
+  fx.advance(16_000);
+  await fx.bridge.tick();
+  fx.advance(16_000);
+  await fx.bridge.tick();
+  assert.equal(posts().length, 0);
+
+  // Waiting past BLOCKED_AFTER_MS: one notice in the thread (the label only), one DM to the owner.
+  fx.advance(BLOCKED_AFTER_MS);
+  await fx.bridge.tick();
+  const [notice, dm] = posts();
+  assert.equal(notice.params.channel, 'C0123ABCDEF');
+  assert.equal(notice.params.thread_ts, THREAD);
+  assert.match(notice.params.text, /waiting on its owner/);
+  assert.doesNotMatch(notice.params.text, /`/);
+  assert.equal(dm.params.channel, 'DOWNER');
+  assert.match(dm.params.text, /artifacts-demo\* is blocked/);
+  assert.ok(dm.params.text.includes(`<http://workstation:7777/#/s/h/${SID}|Open it in Fleet>`));
+  assert.ok(dm.params.text.includes(link.id));
+  assert.equal((await fx.bridge.list()).links[0].blocked.what, blockedWhat('permission `rm -rf /tmp/x`'));
+  fx.advance(16_000);
+  await fx.bridge.tick();
+  assert.equal(posts().length, 2, 'said once');
+
+  // A message for it meanwhile: ⏳, and it waits.
+  await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: '1792778000.000009', thread_ts: THREAD, user: 'U1', text: '<@UBOT> still there?' });
+  assert.ok(fx.slack.calls.some((c) => c.method === 'reactions.add' && c.params.name === 'hourglass_flowing_sand' && c.params.timestamp === '1792778000.000009'));
+  assert.equal(fx.sent.length, 1);
+
+  // It moves on: both posts edited, the message goes in and loses its ⏳.
+  fx.sessions[0].status = 'idle';
+  fx.advance(16_000);
+  await fx.bridge.tick();
+  const updates = fx.slack.calls.filter((c) => c.method === 'chat.update');
+  assert.deepEqual(updates.map((c) => c.params.channel), ['C0123ABCDEF', 'DOWNER']);
+  assert.match(updates[0].params.text, /Continued/);
+  assert.match(updates[1].params.text, /no longer blocked/);
+  assert.equal(fx.sent.length, 2);
+  assert.ok(fx.slack.calls.some((c) => c.method === 'reactions.remove' && c.params.timestamp === '1792778000.000009'));
+  assert.equal((await fx.bridge.list()).links[0].blocked, null);
+});
+
+test('blocked: nothing is said for a session that never got to the thread', async (t) => {
+  const fx = fixture(t, { status: 'waiting' });
+  await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  for (let i = 0; i < 6; i++) {
+    await fx.bridge.tick();
+    fx.advance(16_000);
+  }
+  assert.equal(fx.sent.length, 0);
+  assert.equal(fx.slack.calls.filter((c) => c.method === 'chat.postMessage').length, 0);
+});
+
+test('blockedWhat: a short label without Slack markup', () => {
+  assert.equal(blockedWhat(null), 'input needed');
+  assert.equal(blockedWhat('exec `approval`  <now>'), 'exec approval now');
+  assert.ok(blockedWhat('x'.repeat(200)).length <= 60);
 });
 
 test('reply: posts in the thread, only for the linked session, only while linked', async (t) => {
