@@ -371,6 +371,63 @@ test('several owners (slack.owners): each is marked; the blocked DM goes to the 
   assert.deepEqual((await fx.bridge.status()).owners, ['UOWNER']);
 });
 
+test('two sessions on one app: each gets the other\'s posts, marked, never its own or the bridge\'s; posts as "<app> (<session>)"', async (t) => {
+  const fx = fixture(t);
+  fx.slack.handlers['bots.info'] = () => ({ bot: { id: 'B1', name: 'Mac Studio' } });
+  const a = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  const b = await fx.bridge.link({ session: OTHER, url: URL_, minutes: 60, host: 'h' });
+  await fx.bridge.tick();
+  fx.advance(10_000);
+  await fx.bridge.tick(); // both intros in
+  assert.equal(fx.sent.length, 2);
+  const posted = (r, text) => ({ type: 'message', subtype: 'bot_message', channel: 'C0123ABCDEF', ts: r.ts, thread_ts: THREAD, user: 'UBOT', bot_id: 'B1', username: 'x', text });
+
+  // A posts (so its thread wakes it), as "Mac Studio (artifacts-demo)".
+  const ra = await fx.bridge.reply({ link: a.id, text: 'I am on it', pane: '%5' });
+  assert.equal(fx.slack.calls.findLast((c) => c.method === 'chat.postMessage').params.username, 'Mac Studio (artifacts-demo)');
+  await fx.bridge.handleEvent(posted(ra, 'I am on it'));
+  // B's post: its event arrives before its reply returned (unmatched), then goes in to A only.
+  const ts = '1792779999.000099';
+  await fx.bridge.handleEvent(posted({ ts }, 'The owner says: fix forward'));
+  fx.slack.handlers['chat.postMessage'] = () => ({ ts });
+  await fx.bridge.reply({ link: b.id, text: 'The owner says: fix forward', pane: '%6' });
+  // The bridge's own notice (no session posted it): nobody.
+  await fx.bridge.handleEvent(posted({ ts: '1792779999.000100' }, ':double_vertical_bar: _Paused_'));
+  fx.advance(10_000);
+  await fx.bridge.tick();
+  const toA = fx.sent.filter((x) => x.id === SID).at(-1).text;
+  assert.match(toA, /session "other" \(another Claude Code session, posting through this same Slack app\)[^\n]*:\nThe owner says: fix forward/);
+  assert.doesNotMatch(toA, /Paused/);
+  assert.equal(fx.sent.filter((x) => x.id === OTHER).length, 1, 'B: its intro only — not its own post, not A\'s (B never posted before A did… and A\'s came first)');
+  const { links } = await fx.bridge.list();
+  assert.equal(links.find((l) => l.id === b.id).pending, 1, 'A\'s post waits in B as context');
+
+  // History: B's post is a session's, not "you", for A.
+  fx.slack.handlers['conversations.replies'] = () => ({ messages: [{ ts, thread_ts: THREAD, user: 'UBOT', bot_id: 'B1', subtype: 'bot_message', text: 'x' }, { ts: ra.ts, thread_ts: THREAD, user: 'UBOT', bot_id: 'B1', text: 'y' }] });
+  const h = await fx.bridge.history({ link: a.id, pane: '%5' });
+  assert.deepEqual(h.messages.map((m) => [m.session, m.you]), [['other', false], [null, true]]);
+});
+
+test('two sessions answering each other: at most 5 wakes per 10 min, the rest is context', async (t) => {
+  const fx = fixture(t);
+  const a = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  const b = await fx.bridge.link({ session: OTHER, url: URL_, minutes: 60, host: 'h' });
+  await fx.bridge.reply({ link: a.id, text: 'hi', pane: '%5' });
+  for (let i = 0; i < 7; i++) {
+    const r = await fx.bridge.reply({ link: b.id, text: `ping ${i}`, pane: '%6' });
+    await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: r.ts, thread_ts: THREAD, user: 'UBOT', bot_id: 'B1', text: `ping ${i}` });
+  }
+  // What A's link holds: 5 that wake it, 2 capped (context only).
+  const st = JSON.parse(fs.readFileSync(path.join(fx.dir, 'slack-links.json'), 'utf8'));
+  const pending = (st.links ?? st).find((l) => l.id === a.id).pending;
+  assert.deepEqual(pending.map((m) => Boolean(m.capped)), [false, false, false, false, false, true, true]);
+  fx.advance(11 * 60_000);
+  const r = await fx.bridge.reply({ link: b.id, text: 'later', pane: '%6' });
+  await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: r.ts, thread_ts: THREAD, user: 'UBOT', bot_id: 'B1', text: 'later' });
+  const st2 = JSON.parse(fs.readFileSync(path.join(fx.dir, 'slack-links.json'), 'utf8'));
+  assert.equal((st2.links ?? st2).find((l) => l.id === a.id).pending.at(-1).capped, false);
+});
+
 test('blockedWhat: a short label without Slack markup', () => {
   assert.equal(blockedWhat(null), 'input needed');
   assert.equal(blockedWhat('exec `approval`  <now>'), 'exec approval now');

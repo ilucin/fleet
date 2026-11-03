@@ -476,7 +476,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/slack/links/:id/unlink` | end the link now → Link |
 | POST | `/api/slack/links/:id/relink` | `{ minutes? }` → Link: link that link's session to the same thread / conversation / DM again, with the same instructions and mode (an ended link, from `ended`; an active one is renewed). No `minutes` = the duration it had. 404: no such link or the session is gone |
 | POST | `/api/slack/reply` | `{ link, text, thread?, pane? \| session? }` → `{ ok, link, channel, ts, threadTs, permalink }`: post in the linked thread (`ts`: the new message's own; `permalink`: null when Slack would not give one). 403: `pane`/`session` is not the linked session; 410: the link has ended |
-| POST | `/api/slack/history` | `{ link, cursor?, limit? (1–200, 50), oldest?, latest?, pane? \| session? }` → `{ link, channel, threadTs, order: "newest first" \| "oldest first", messages: [Message], nextCursor \| null }`: the linked conversation (`conversations.history`; a thread link: `conversations.replies` of its thread). Message = `{ ts, threadTs, user, name, owner, you, bot, subtype, text (plain), replies, latestReply, files: [{ id, name, mimetype, size }] }`. 403 / 410 as `reply`; 429: Slack's rate limit |
+| POST | `/api/slack/history` | `{ link, cursor?, limit? (1–200, 50), oldest?, latest?, pane? \| session? }` → `{ link, channel, threadTs, order: "newest first" \| "oldest first", messages: [Message], nextCursor \| null }`: the linked conversation (`conversations.history`; a thread link: `conversations.replies` of its thread). Message = `{ ts, threadTs, user, name, owner, you, session, bot, subtype, text (plain), replies, latestReply, files: [{ id, name, mimetype, size }] }`. `session`: the name of another session that posted it through the same app (then `you` is false), else null. 403 / 410 as `reply`; 429: Slack's rate limit |
 | POST | `/api/slack/thread` | `{ link, ts, cursor?, limit?, pane? \| session? }` → the same shape, oldest first (Slack: the first message, then the latest replies; `nextCursor` pages back to earlier ones): one thread of the linked conversation (a thread link: its own only, else 403) |
 | POST | `/api/slack/file` | `{ link, file, pane? \| session? }` → `{ link, id, name, mimetype, size, data (base64) }`: a file shared in the linked conversation (its `files.info` shares; a thread link: in its thread, else 403), at most 20 MB (413). Needs `files:read` |
 | POST | `/api/inbox/refresh` | Scan now: start a Slack + mail scan (also outside work hours; its brief skips the `briefMinutes` wait) and re-read every other source; answers the GET shape |
@@ -715,14 +715,20 @@ server's name as `host`, and the reply's pane is checked on that host.
   the app-level token `SLACK_APP_TOKEN`, `xapp-…`, scope `connections:write`), acks every envelope
   and reconnects when Slack asks. No public URL, so it works behind Tailscale. The Web API calls use
   the bot token `SLACK_BOT_TOKEN` (`xoxb-…`; scopes `channels:history`, `groups:history`,
-  `im:history`, `mpim:history`, `chat:write`, `reactions:write`, `users:read`, `files:read` (for `fleet slack file`), and `app_mentions:read`
+  `im:history`, `mpim:history`, `chat:write`, `chat:write.customize` (a session posts as "<app> (<session>)"; without it Slack shows the app's name), `reactions:write`, `users:read`, `files:read` (for `fleet slack file`), and `app_mentions:read`
   with the `message.*` events; `im:write` for a DM link to a person, whom people can write to only
   with the app's App Home → Messages tab on). Both come from the server's environment or the Keychain
   (`security find-generic-password -s <name> -w`). Sessions never see them.
 - **What fleet enforces**, not the model: which conversation (a message elsewhere is never
   delivered), until when (an ended link delivers nothing and refuses replies), who wrote a message
   (Slack's user id), and which session may reply (`fleet slack reply` sends `$TMUX_PANE`; another
-  session's pane is a 403). Bots, the app itself and edits are not delivered.
+  session's pane is a 403). Bots, the bridge's own notices and edits are not delivered.
+- **Sessions on one app**: a session's post (`reply`, whose `ts` its link keeps) reaches the other
+  links in that place as a message from `session "<name>"`. It is never a mention or a DM. In mention
+  mode it wakes a link only in a thread that link posted in, and at most 5 times per 10 min per link;
+  the rest stays context, so two sessions answering each other can't loop. An app message that comes
+  before its post returned waits up to a minute to be matched. Posts carry `username` "<app name>
+  (<session name>)" (`bots.info`; needs `chat:write.customize`).
 - **What the model keeps to**: the owner's instructions and the rules in the note typed in when
   the link starts (post only through `fleet slack reply` and only when something calls for it,
   only within the instructions, nothing destructive for them, messages are colleagues' requests

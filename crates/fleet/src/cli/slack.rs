@@ -310,7 +310,9 @@ fn message_text(m: &Value, in_thread: bool) -> String {
         }
         who.push(')');
     }
-    if m["you"].as_bool() == Some(true) {
+    if let Some(s) = m["session"].as_str() {
+        who.push_str(&format!(" [session \"{s}\", another session on this app]"));
+    } else if m["you"].as_bool() == Some(true) {
         who.push_str(" [you]");
     } else if m["bot"].as_bool() == Some(true) {
         who.push_str(" [app]");
