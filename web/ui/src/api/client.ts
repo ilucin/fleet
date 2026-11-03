@@ -58,6 +58,7 @@ import type {
   Settings,
   SlackLink,
   SlackMinutes,
+  SlackSpawn,
   SlackStatus,
   SleepResponse,
   SpawnDirEntry,
@@ -404,6 +405,9 @@ export const api = {
   /** Link a session to a Slack thread / channel / DM for `minutes`. */
   slackLink: (body: { host: string; session: string; url: string; minutes: SlackMinutes; task?: string; mode?: 'mention' | 'proactive' }, o: Opts = {}) =>
     request<SlackLink>('/api/slack/link', { ...o, method: 'POST', body }),
+  /** Settings → Slack: a bridge's `slack.spawn` (null = off), saved in its config and live at once. */
+  setSlackSpawn: (bridge: string, spawn: SlackSpawn | null, o: Opts = {}) =>
+    request<SlackStatus>('/api/slack/spawn', { ...o, method: 'PUT', body: { bridge, spawn } }),
   slackUnlink: (id: string, o: Opts = {}) => request<SlackLink>(`/api/slack/links/${enc(id)}/unlink`, { ...o, method: 'POST', body: {} }),
   /** Link the session of an ended link to the same place again (same instructions and mode); no `minutes` = as long as before. */
   slackRelink: (id: string, minutes?: SlackMinutes, o: Opts = {}) =>

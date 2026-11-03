@@ -861,3 +861,53 @@ test('config slack.spawn: defaults, from, and what it refuses', () => {
   assert.throws(() => cfg('yes'), /slack.spawn must be an object/);
   assert.throws(() => cfg({ dir: 3 }), /slack.spawn.dir must be a string/);
 });
+
+test('PUT /api/slack/spawn: saved in the bridge\'s config and live at once; proxied from a peer; null turns it off', async (t) => {
+  const bridgeConfig = normalizeConfig({ self: 'workstation', hosts: { laptop: { web: 'http://127.0.0.1:9' } }, slack: { host: 'workstation', owner: 'UOWNER' } }, { env: {}, home: '/home/tester' });
+  const spawns = [];
+  const fx = fixture(t, { settings: bridgeConfig.slack, spawn: async (host, body) => (spawns.push({ host, body }), {}) });
+  const sets = [];
+  const cli = { configSet: async (o) => void sets.push(o) };
+  const servers = {};
+  const start = async (k, config, slack) => {
+    const fleet = { localHost: async () => ({ name: config.self, ok: true, sessions: fx.sessions }) };
+    const api = createApi({ config, fleet, backend: {}, transcripts: {}, spawner: {}, slack, cli, warmFleet: false });
+    t.after(() => api.stop());
+    const server = createHttpServer({ handleApi: api, uiDir: null });
+    await new Promise((res) => server.listen(0, '127.0.0.1', res));
+    t.after(() => server.close());
+    servers[k] = `http://127.0.0.1:${server.address().port}`;
+  };
+  await start('bridge', bridgeConfig, fx.bridge);
+  await start('peer', normalizeConfig({ self: 'laptop', hosts: { workstation: { web: servers.bridge } }, slack: { host: 'workstation' } }, { env: {}, home: '/home/tester' }), null);
+  const put = async (base, body) => {
+    const res = await fetch(`${base}/api/slack/spawn`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+
+  // Refused: no spawn key, a bad duration, a host that is neither here nor a peer, an unknown bridge.
+  assert.equal((await put(servers.bridge, {})).status, 400);
+  assert.equal((await put(servers.bridge, { spawn: { minutes: '0' } })).status, 400);
+  assert.equal((await put(servers.bridge, { spawn: { host: 'nowhere' } })).status, 400);
+  assert.equal((await put(servers.peer, { bridge: 'elsewhere', spawn: null })).status, 404);
+  assert.equal(sets.length, 0);
+
+  const on = await put(servers.peer, { bridge: 'workstation', spawn: { host: 'laptop', dir: '~/Code/project', model: 'opus', minutes: '8h', from: 'anyone' } });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  assert.deepEqual(sets.at(-1), { key: 'slack.spawn', value: { host: 'laptop', dir: '~/Code/project', model: 'opus', minutes: '8h', from: 'anyone' }, configFile: null });
+  assert.equal(on.body.spawn.host, 'laptop');
+  assert.equal(on.body.spawn.minutes, '8h');
+  // Live: the next mention opens one, without a restart.
+  await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: '1792778400.000001', user: 'U1', text: '<@UBOT> go' });
+  await settle();
+  assert.equal(spawns.length, 1);
+  assert.equal(spawns[0].body.slack.minutes, '8h');
+
+  const off = await put(servers.bridge, { spawn: null });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.spawn, null);
+  assert.deepEqual(sets.at(-1).value, null);
+  await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: '1792778400.000002', user: 'U1', text: '<@UBOT> again' });
+  await settle();
+  assert.equal(spawns.length, 1);
+});

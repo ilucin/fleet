@@ -17,7 +17,7 @@ import {
 import { createSnapshot } from './snapshot.mjs';
 import { DISABLED_GROUPS } from './grouping.mjs';
 import { checkInboxSettings } from './inbox.mjs';
-import { DEFAULT_MODELS, spawnRoots } from './config.mjs';
+import { DEFAULT_MODELS, slackSpawn, spawnRoots } from './config.mjs';
 import { parseNameOutput } from './autoname.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
 import { validThreadId } from './reviews.mjs';
@@ -810,9 +810,55 @@ export function createApi({
         enabled: all.some(([, s]) => s.enabled),
         links: [primary, ...rest].flatMap((s) => s.links ?? []),
         ended,
-        bridges: all.map(([b, s]) => ({ host: b, enabled: !!s.enabled, ...(s.error ? { error: s.error } : {}), socket: s.socket ?? null, bot: s.bot ?? null })),
+        bridges: all.map(([b, s]) => ({ host: b, enabled: !!s.enabled, ...(s.error ? { error: s.error } : {}), socket: s.socket ?? null, bot: s.bot ?? null, spawn: s.spawn ?? null })),
       },
     };
+  }
+
+  /**
+   * PUT /api/slack/spawn `{ bridge?, spawn: { … } | null }` → that bridge's status: sets its
+   * `slack.spawn` (a mention opens a session; null = off) in its config and live at once. Served
+   * by the bridge (`bridge`, default `slack.host`); the others proxy there once.
+   */
+  async function handleSlackSpawn(req, url) {
+    const body = await readJsonBody(req);
+    const bridge = typeof body?.bridge === 'string' && body.bridge ? body.bridge : config.slack?.host ?? null;
+    if (!bridge) return { status: 409, body: { error: 'no server runs Slack links (slack.host)' } };
+    if (bridge !== config.self) {
+      if (url.searchParams.get('local') === '1') throw new HttpError(`this server is not the Slack bridge ${bridge}`, 400); // never chain
+      if (!allBridges().includes(bridge)) throw new HttpError(`unknown Slack bridge: ${bridge}`, 404);
+      const peerUrl = config.peers[bridge];
+      if (!peerUrl) return { status: 409, body: { error: `Slack bridge "${bridge}" is not a peer with a web URL` } };
+      return proxyToPeer(peerUrl, { method: 'PUT', pathname: '/api/slack/spawn', body: JSON.stringify(body), timeoutMs: peerProxyTimeoutMs });
+    }
+    if (!slack) return { status: 409, body: { error: 'Slack links are off on this server (FLEET_WEB_SLACK)' } };
+    if (!body || !('spawn' in body)) throw new HttpError('spawn is required: { host, dir, model, minutes, from } or null', 400);
+    let spawn;
+    try {
+      spawn = slackSpawn(body.spawn);
+    } catch (err) {
+      throw new HttpError(err.message.replace(/^config\./, ''), 400);
+    }
+    if (spawn) {
+      try {
+        linkMinutes(spawn.minutes);
+      } catch (err) {
+        throw new HttpError(`spawn.${err.message}`, 400);
+      }
+      if (spawn.mode && !MODES.includes(spawn.mode)) throw new HttpError(`spawn.mode must be one of: ${MODES.join(', ')}`, 400);
+      if (spawn.host && spawn.host !== config.self && !config.peers[spawn.host]) throw new HttpError(`spawn.host: ${spawn.host} is not this host or a peer with a web URL`, 400);
+    }
+    if (typeof cli?.configSet !== 'function') throw new HttpError('config writes are not available on this server', 501);
+    // Only what is set goes in the file; the rest keeps its default.
+    const value = spawn ? Object.fromEntries(Object.entries(spawn).filter(([, v]) => v != null)) : null;
+    try {
+      await cli.configSet({ key: 'slack.spawn', value, configFile: config.configFile ?? null });
+    } catch (err) {
+      throw new HttpError(`could not save slack.spawn: ${err?.message ?? err}`, 502);
+    }
+    // The bridge reads `config.slack` (its settings) on every mention: live from now on.
+    config.slack.spawn = spawn;
+    return { status: 200, body: { host: config.self, ...(await slack.status()) } };
   }
 
   async function handleSlack(req, url, action, id = null) {
@@ -1076,6 +1122,11 @@ export function createApi({
     if (url.pathname === '/api/inbox/settings') {
       if (req.method !== 'PUT') throw new HttpError('method not allowed', 405);
       return handleInbox(req, url, 'settings');
+    }
+
+    if (url.pathname === '/api/slack/spawn') {
+      if (req.method !== 'PUT') throw new HttpError('method not allowed', 405);
+      return handleSlackSpawn(req, url);
     }
 
     if (url.pathname === '/api/slack') {

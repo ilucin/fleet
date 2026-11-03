@@ -298,8 +298,46 @@ export interface SlackStatus {
   host: string | null
   error?: string
   socket?: { connected: boolean; error: string | null }
+  bot?: SlackBot | null
+  /** This bridge's `slack.spawn` (a mention opens a session); null = off. */
+  spawn?: SlackSpawn | null
   links: SlackLink[]
   ended: SlackLink[]
+  /** With `slack.bridges`: every bridge (a host with its own Slack app). */
+  bridges?: SlackBridge[]
+}
+
+export interface SlackBot {
+  userId?: string
+  name?: string | null
+  team?: string | null
+  url?: string | null
+  error?: string
+}
+
+export interface SlackBridge {
+  host: string
+  enabled: boolean
+  error?: string
+  socket: { connected: boolean; error: string | null } | null
+  bot: SlackBot | null
+  spawn?: SlackSpawn | null
+}
+
+/**
+ * `slack.spawn`: a mention of the app in a channel thread no session follows opens a session on
+ * `host`, linked to the thread for `minutes`. `from`: 'anyone', user ids, or null = the owner only.
+ */
+export interface SlackSpawn {
+  host: string
+  dir?: string | null
+  model?: string | null
+  harness?: string | null
+  ghIdentity?: string | null
+  mode?: 'mention' | 'proactive' | null
+  task?: string | null
+  minutes: string | number
+  from: 'anyone' | string[] | null
 }
 
 export interface FocusStatus {

@@ -285,7 +285,7 @@ const SLACK_USER_RE = /^[UW][A-Z0-9]+$/;
  * home; none = its first), `minutes` the link's duration (default `1d`), `from` who may start one:
  * `"anyone"` in a channel the app is in, or a list of Slack user ids (default: `[owner]`).
  */
-function slackSpawn(raw) {
+export function slackSpawn(raw) {
   if (raw == null || raw === false) return null;
   if (!isObject(raw)) throw new Error('config.slack.spawn must be an object { host, dir, model, harness, minutes, mode, task, from }');
   const str = (k) => {

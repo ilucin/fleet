@@ -177,7 +177,8 @@ links itself (`fleet slack link <url> --for 2h`).
 (`fleet config set slack.spawn.host <host>`, `.dir`, `.model`, `.minutes` (default `1d`), `.from`
 (`anyone` or user ids; default you only)), mentioning the app in a channel thread no session
 follows opens a new session on that host, linked to the thread, the message as its first request
-([architecture](architecture.md#slack-links)).
+([architecture](architecture.md#slack-links)). The web UI's Settings → Slack turns it on and off per
+Slack app (bridge) and sets host, directory, model, duration and who may — live, no restart.
 
 ### Briefs
 

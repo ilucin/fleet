@@ -8,6 +8,7 @@ import {
   GitBranchIcon,
   InboxIcon,
   KeyboardIcon,
+  MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -21,6 +22,7 @@ import type { InboxSettings } from '@/api/types'
 import { ModelsEditor } from '@/components/ModelsEditor'
 import { ReposEditor } from '@/components/ReposEditor'
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { SlackSpawnEditor } from '@/components/SlackSpawnEditor'
 import { SpawnDirsEditor } from '@/components/SpawnDirsEditor'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -43,7 +45,7 @@ import { cn } from '@/lib/utils'
 const segItem =
   'h-9 flex-1 gap-1.5 rounded-md px-3 text-[0.8125rem] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-accent'
 
-type SectionId = 'general' | 'models' | 'start-dirs' | 'repos' | 'inbox' | 'status'
+type SectionId = 'general' | 'models' | 'start-dirs' | 'repos' | 'inbox' | 'slack' | 'status'
 
 /** Settings' sub-pages, in nav order: `#/settings/<id>`. */
 const SECTIONS: { id: SectionId; label: string; hint: string; icon: ReactNode }[] = [
@@ -52,6 +54,7 @@ const SECTIONS: { id: SectionId; label: string; hint: string; icon: ReactNode }[
   { id: 'start-dirs', label: 'Start directories', hint: 'Where new sessions can start', icon: <FolderOpenIcon /> },
   { id: 'repos', label: 'Git repos', hint: 'Repos fleet keeps in sync', icon: <GitBranchIcon /> },
   { id: 'inbox', label: 'Inbox', hint: 'When Slack and email are scanned', icon: <InboxIcon /> },
+  { id: 'slack', label: 'Slack', hint: 'Sessions started from a mention', icon: <MessageSquareIcon /> },
   { id: 'status', label: 'Status', hint: 'Hosts and diagnostics', icon: <ActivityIcon /> },
 ]
 
@@ -179,6 +182,12 @@ function SectionBody({ id }: { id: SectionId }) {
       )
     case 'inbox':
       return <InboxSchedule />
+    case 'slack':
+      return (
+        <Section title="Sessions from Slack">
+          <SlackSpawnEditor />
+        </Section>
+      )
     case 'status':
       return (
         <>

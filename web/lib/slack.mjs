@@ -487,7 +487,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
   async function whoami() {
     if (bot) return bot;
     const r = await call('auth.test');
-    bot = { userId: r.user_id, botId: r.bot_id ?? null, team: r.team ?? null, url: r.url ?? null };
+    bot = { userId: r.user_id, botId: r.bot_id ?? null, name: r.user ?? null, team: r.team ?? null, url: r.url ?? null };
     if (bot.userId) names[bot.userId] = 'you'; // a mention of the app reads as "@you"
     return bot;
   }
@@ -1092,7 +1092,8 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
         socket: socket?.status() ?? { connected: false, error: 'no socket' },
         bot: me,
         owner: settings.owner ?? null,
-        spawn: settings.spawn ? { host: settings.spawn.host || self, from: settings.spawn.from ?? 'owner' } : null,
+        // slack.spawn as set (`host` resolved: none = this bridge's); `from: null` = the owner only.
+        spawn: settings.spawn ? { ...settings.spawn, host: settings.spawn.host || self } : null,
         links: links.map(view),
         ended: ended.map(view),
       };
