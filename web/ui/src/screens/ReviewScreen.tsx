@@ -516,7 +516,7 @@ function ReviewView({ layout, source }: { layout: Layout; source: ReviewSource }
                 onClick={() => toggleKind(kind)}
                 className={cn(
                   'h-8 rounded-[10px] px-2.5 text-xs font-medium text-muted-foreground tabular-nums disabled:opacity-40',
-                  shown[kind] ? 'bg-background text-foreground shadow-sm dark:bg-accent' : counts[kind] > 0 && 'line-through decoration-dimmer',
+                  shown[kind] && 'bg-background text-foreground shadow-sm dark:bg-accent',
                 )}
               >
                 {label} <span className="text-dimmer">{counts[kind]}</span>
