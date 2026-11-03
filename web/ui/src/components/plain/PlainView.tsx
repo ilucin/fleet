@@ -513,7 +513,8 @@ function Index({ diff, diffed }: { diff: PlainDiff; diffed: boolean }) {
 export const PlainView = memo(function PlainView({ diff, name, diffed, index = false, commenting, onOpenModule, source, onOpenFile }: PlainViewProps) {
   const prefix = `${useId().replace(/[^A-Za-z0-9_-]/g, '')}-`
   const [hl, setHl] = useState(true)
-  const [onlyRaw, setOnly] = useState(false)
+  // A spec diff opens on what changed; the whole module is a click away.
+  const [onlyRaw, setOnly] = useState(true)
   const only = diffed && onlyRaw
   const showHl = diffed && hl
   const { mod } = diff
