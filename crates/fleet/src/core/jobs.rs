@@ -25,7 +25,10 @@
 //! job's sessions *and* everything they spawn — it travels as `FLEET_CMD`. `harness` and
 //! `model` as for `fleet spawn`. `ghIdentity` names a GitHub identity (`ghIdentities`) the
 //! job's sessions act as on GitHub — see [`crate::core::gh_identity`]. `enabled: false` pauses
-//! the job. `keep` (default `72h`, `"never"` to keep forever): a run's sessions are closed once
+//! the job. `pull: true` brings `dir`'s git checkout up to date before each run (fetch, then a
+//! fast-forward only, as `fleet repos sync`); when it can't (local changes, diverged, offline)
+//! the run starts all the same, with the reason in the run's `pull` and a line in its prompt.
+//! `keep` (default `72h`, `"never"` to keep forever): a run's sessions are closed once
 //! they are idle and the run is older than this; a session waiting for input is never closed.
 //!
 //! The launchd agent runs `fleet jobs tick` every minute. A tick fires a job when its latest
@@ -412,6 +415,8 @@ pub struct Job {
     pub enabled: bool,
     /// Seconds after a run starts that its idle sessions are closed; `None` = never.
     pub keep: Option<i64>,
+    /// `pull`: fast-forward `dir`'s checkout before each run.
+    pub pull: bool,
     /// The config section it came from: `bots`, or the legacy `jobs`.
     pub section: &'static str,
 }
@@ -552,6 +557,11 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         Some(Value::Bool(b)) => *b,
         Some(other) => return Err(format!("enabled must be true or false, not {other}")),
     };
+    let pull = match o.get("pull") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(other) => return Err(format!("pull must be true or false, not {other}")),
+    };
     let gh_identity = text("ghIdentity")?;
     if let Some(g) = &gh_identity
         && !crate::core::gh_identity::valid_name(g)
@@ -576,8 +586,64 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         gh_identity,
         enabled,
         keep,
+        pull,
         section: "bots",
     })
+}
+
+// --- pull ----------------------------------------------------------------------
+
+/// `pull: true`: bring the git checkout `dir` is in up to date — `fleet repos sync` on that one
+/// repo: fetch, then a fast-forward only (and the default branch when it is checked out
+/// nowhere). Never stashes, resets or merges; what can't fast-forward is a warning.
+pub fn pull_dir(dir: &Path) -> Pull {
+    let top = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+    let Some(top) = top else {
+        return Pull {
+            outcome: "notARepo".into(),
+            pulled: 0,
+            warning: Some("dir is not in a git checkout".into()),
+        };
+    };
+    let name = top
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let r = crate::core::repos::sync_one(&crate::core::repos::Repo {
+        name,
+        path: top,
+        every: 0,
+    });
+    use crate::core::repos::Outcome;
+    let warning = match r.outcome {
+        Outcome::Updated | Outcome::Current | Outcome::Ahead => None,
+        o => Some(match &r.detail {
+            Some(d) => format!("{}: {d}", o.label()),
+            None => o.label().to_string(),
+        }),
+    };
+    Pull {
+        outcome: serde_json::to_value(r.outcome)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default(),
+        pulled: r.pulled,
+        warning,
+    }
+}
+
+/// The line a run's prompt starts with when its `dir` could not be brought up to date.
+pub fn pull_warning_line(dir: &str, warning: &str) -> String {
+    format!(
+        "Note from fleet: `{dir}` could not be updated before this run ({warning}), so files you read there may be out of date."
+    )
 }
 
 // --- tags ----------------------------------------------------------------------
@@ -690,6 +756,21 @@ pub struct Run {
     /// What started a triggered run (`trigger: github`): the branch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<Subject>,
+    /// `pull: true`: how bringing `dir` up to date went before the run started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<Pull>,
+}
+
+/// The pull before a run (`pull: true`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Pull {
+    /// A `fleet repos sync` outcome (`updated`, `current`, `blocked`, …), or `notARepo`.
+    pub outcome: String,
+    /// Commits fast-forwarded.
+    pub pulled: usize,
+    /// Why it could not fast-forward; `None` when `dir` is up to date.
+    pub warning: Option<String>,
 }
 
 /// The branch a GitHub-triggered run is about.
@@ -1079,6 +1160,87 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(Settings::from_value(&json!([1]), "bots").problems.len(), 1);
+    }
+
+    #[test]
+    fn pull_is_a_boolean_default_off() {
+        let s = Settings::from_value(
+            &json!({
+                "a": { "schedule": "@daily", "dir": "/tmp" },
+                "b": { "schedule": "@daily", "dir": "/tmp", "pull": true },
+                "c": { "schedule": "@daily", "dir": "/tmp", "pull": "yes" }
+            }),
+            "bots",
+        );
+        assert!(!s.get("a").unwrap().pull);
+        assert!(s.get("b").unwrap().pull);
+        assert!(
+            s.problems
+                .iter()
+                .any(|p| p.contains("pull must be true or false"))
+        );
+    }
+
+    fn sh(dir: &Path, script: &str) {
+        let ok = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{script}");
+    }
+
+    #[test]
+    fn pull_dir_fast_forwards_a_subdir_checkout_and_warns_when_it_cannot() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        sh(
+            d,
+            "git init -q -b main seed && cd seed && mkdir -p bots/x && echo v1 > bots/x/run.md \
+               && git add . && git commit -q -m one && git clone -q --bare . ../origin.git",
+        );
+        sh(d, "git clone -q origin.git work");
+        sh(
+            d,
+            "cd seed && echo v2 > bots/x/run.md && git commit -qam two && git push -q ../origin.git main",
+        );
+        // `dir` may be a directory inside the checkout.
+        let p = pull_dir(&d.join("work/bots/x"));
+        assert_eq!(
+            (p.outcome.as_str(), p.pulled, p.warning.clone()),
+            ("updated", 1, None),
+            "{p:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(d.join("work/bots/x/run.md")).unwrap(),
+            "v2\n"
+        );
+
+        sh(
+            d,
+            "cd seed && echo v3 > bots/x/run.md && git commit -qam three && git push -q ../origin.git main",
+        );
+        sh(d, "cd work && git commit -q --allow-empty -m local");
+        let p = pull_dir(&d.join("work"));
+        assert_eq!(p.outcome, "diverged");
+        assert!(
+            p.warning.as_deref().unwrap().starts_with("diverged"),
+            "{p:?}"
+        );
+        assert!(
+            pull_warning_line("~/work", p.warning.as_deref().unwrap())
+                .contains("may be out of date")
+        );
+
+        let plain = tempfile::tempdir().unwrap();
+        assert_eq!(pull_dir(plain.path()).outcome, "notARepo");
     }
 
     #[test]

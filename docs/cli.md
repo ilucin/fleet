@@ -581,7 +581,7 @@ workflow's statuses are in position order, closed ones last. `column` is `closed
 
 ## Repos
 
-Keep the git checkouts under a few roots fresh, on every machine. Fetch, then fast-forward only:
+Keep the git checkouts under a few roots fresh, on every machine. A root that is a checkout itself (e.g. `~/work`) is that one repo; the repos inside it need their own root (`~/work/repos`). Fetch, then fast-forward only:
 nothing is ever stashed, reset, rebased or merged — a repo that can't fast-forward is reported and
 left alone. Config: `repos` in [the config](architecture.md#config), or the web UI's Settings → Git repos.
 
@@ -624,6 +624,7 @@ section is still read (a name in both: the `bots` one wins), and the names below
 | --- | --- |
 | `schedule` | 5-field cron in local time: `*`, lists, ranges, steps (`*/15`, `5/20`), names (`mon-fri`, `jan`), `7` = Sunday, `@hourly` / `@daily` / `@weekly` / `@monthly`. Both day fields set → either matches (classic cron) |
 | `dir` | where the session starts (must exist) |
+| `pull` | `true`: bring the git checkout `dir` is in up to date before each run, as [`fleet repos sync`](#repos) does for one repo (fetch, then fast-forward only; never stash, reset or merge). When it can't (local changes, diverged, offline, not a checkout) the run starts anyway: the run records it (`pull: { outcome, pulled, warning }`, shown by `fleet bots show`) and the prompt starts with a line saying files there may be out of date. Default `false` |
 | `prompt` / `promptFile` | the first prompt, inline or read from a file at run time (one of them, or neither); a file's YAML frontmatter (`---` … `---`) is left out, so a note can be the prompt |
 | `command` | launcher for the bot's sessions **and everything they spawn** (it travels as `FLEET_CMD`); default config `claude` |
 | `harness`, `model` | as for `fleet spawn` |

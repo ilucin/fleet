@@ -105,6 +105,7 @@ fn job_json(j: &Job, st: &jobs::JobState, rows: &[Session], runs: usize) -> Valu
         "model": j.model,
         "command": j.command,
         "keep": j.keep,
+        "pull": j.pull,
         "prompt": prompt,
         "nextRun": j.enabled.then(|| j.next_run(Local::now()).map(|t| t.timestamp_millis())).flatten(),
         "lastSlot": st.last_slot,
@@ -224,7 +225,15 @@ pub fn show(name: &str, json_out: bool) -> Result<()> {
                 .unwrap_or_else(|| "never".into())
         ),
     }
-    println!("  dir       {}", j.dir);
+    println!(
+        "  dir       {}{}",
+        j.dir,
+        if j.pull {
+            "  (pulled before each run)"
+        } else {
+            ""
+        }
+    );
     match &j.prompt {
         PromptSrc::None => println!("  prompt    (none)"),
         PromptSrc::Inline(p) => println!("  prompt    {}", crate::cli::render::fit(p, 80)),
@@ -286,6 +295,15 @@ pub fn show(name: &str, json_out: bool) -> Result<()> {
                 .unwrap_or_default(),
             about.dimmed()
         );
+        if let Some(p) = &r.pull {
+            match &p.warning {
+                Some(w) => println!("    {} {}", "! not pulled:".yellow(), w),
+                None if p.pulled > 0 => {
+                    println!("    {}", format!("pulled {} commits", p.pulled).dimmed())
+                }
+                None => {}
+            }
+        }
         for sess in &r.sessions {
             let live: Vec<&Session> = rows
                 .iter()
@@ -408,6 +426,18 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
         Ok(m) => m.flatten(),
         Err(e) => return fail(run, e.to_string()),
     };
+    // `pull: true`: before the prompt is read — a promptFile in `dir` is read fresh.
+    let pull_note = if j.pull && !crate::core::hosts::dry_run() {
+        let p = jobs::pull_dir(Path::new(&dir));
+        let note = p
+            .warning
+            .as_deref()
+            .map(|w| jobs::pull_warning_line(&j.dir, w));
+        run.pull = Some(p);
+        note
+    } else {
+        None
+    };
     let text = match read_prompt(j) {
         Ok(t) => t,
         Err(e) => return fail(run, e),
@@ -418,6 +448,10 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
         }
         Some(b) => gh_watch::render(&text, &j.name, repo, b),
         None => text,
+    };
+    let text = match pull_note {
+        Some(n) if !text.trim().is_empty() => format!("{n}\n\n{text}"),
+        _ => text,
     };
     // A bot session closes itself once its work is done and nothing waits on the user.
     let text = if text.trim().is_empty() {
@@ -462,6 +496,12 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
     };
     if crate::core::hosts::dry_run() {
         let line = backend::launch_command(&dir, prompt, Some(&name), &launcher, j.harness);
+        if j.pull {
+            println!(
+                "dry-run: would pull {} first (fetch, fast-forward only)",
+                j.dir
+            );
+        }
         println!("dry-run: would start {} ({}): {line}", j.name, tag.run);
         return Ok(run);
     }
