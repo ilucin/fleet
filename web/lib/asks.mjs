@@ -105,13 +105,13 @@ export function createAsks({ bin = 'claude', spawn = nodeSpawn, ttlMs = 30 * 60 
    * for a fork, the session's cwd (claude finds the transcript by it).
    * → the ask: { id, status: running, text: '', question, label, startedAt }
    */
-  function start({ cwd, resume = null, prompt, question, label = null }) {
+  function start({ cwd, resume = null, prompt, question, label = null, tools = ASK_TOOLS }) {
     prune();
     if (typeof cwd !== 'string' || !cwd) throw new AskError('no working directory to ask in', 409);
     if (resume != null && !SESSION_ID_RE.test(resume)) throw new AskError('invalid session id', 400);
     if (running() >= maxRunning) throw new AskError(`${maxRunning} side questions are already running — wait for one`, 429);
     const id = `q-${randomBytes(6).toString('hex')}`;
-    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--no-session-persistence', '--allowedTools', ...ASK_TOOLS];
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--no-session-persistence', '--allowedTools', ...tools];
     if (model) args.push('--model', model);
     if (resume) args.push('--resume', resume, '--fork-session');
     const ask = { id, status: 'running', question, label, text: '', activity: null, error: null, costUsd: null, forked: Boolean(resume), startedAt: now(), endedAt: null };

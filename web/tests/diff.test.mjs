@@ -271,3 +271,54 @@ test('diff: a .plain spec carries both whole texts; other files do not', async (
   assert.deepEqual(by['spec/new.plain'].plain, { old: null, new: '- fresh\n' });
   assert.equal(by['b.txt'].plain, undefined);
 });
+
+test('prDiff: a PR from a clone, no checkout — refs fetched privately, diffed from the merge-base', async (t) => {
+  const origin = repo(t);
+  origin.write('a.txt', 'one\ntwo\n');
+  origin.write('docs/x.plain', '***definitions***\n\n- A thing.\n');
+  origin.git('add', '-A');
+  origin.git('commit', '-qm', 'init');
+  origin.git('checkout', '-qb', 'feature');
+  origin.write('a.txt', 'one\nTWO\n');
+  origin.write('docs/x.plain', '***definitions***\n\n- A better thing.\n');
+  origin.git('commit', '-qam', 'change');
+  origin.git('update-ref', 'refs/pull/7/head', 'feature');
+  origin.git('checkout', '-q', 'main');
+  // main moves on after the branch: not part of the PR.
+  origin.write('later.txt', 'x\n');
+  origin.git('add', '-A');
+  origin.git('commit', '-qm', 'later');
+
+  const clone = repo(t);
+  clone.git('remote', 'add', 'origin', origin.dir);
+  clone.git('fetch', '-q', 'origin');
+  clone.git('checkout', '-q', '-b', 'main', 'origin/main');
+  clone.write('local.txt', 'my own uncommitted work\n');
+  const before = clone.git('status', '--porcelain');
+
+  const differ = createDiffer({ run, home: '/nonexistent' });
+  const d = await differ.prDiff(clone.dir, { number: 7, baseBranch: 'main', headBranch: 'feature' });
+  assert.equal(d.unchanged, false);
+  assert.deepEqual(d.files.map((f) => f.path).sort(), ['a.txt', 'docs/x.plain']);
+  assert.equal(d.head, origin.git('rev-parse', 'feature').trim());
+  assert.equal(d.base.sha, origin.git('rev-parse', 'main~1').trim());
+  assert.equal(d.branch, 'feature');
+  assert.match(d.files.find((f) => f.path === 'docs/x.plain').plain.new, /better/);
+  // The clone's checkout, index and branches are untouched; only refs/fleet/pr/… are new.
+  assert.equal(clone.git('status', '--porcelain'), before);
+  assert.equal(clone.git('rev-parse', '--abbrev-ref', 'HEAD').trim(), 'main');
+  assert.deepEqual(clone.git('for-each-ref', '--format=%(refname)', 'refs/fleet').trim().split('\n').sort(), ['refs/fleet/pr/7/base', 'refs/fleet/pr/7/head']);
+  // Unchanged since → no files; a new commit on the PR shows after a refetch.
+  assert.equal((await differ.prDiff(clone.dir, { number: 7, baseBranch: 'main', since: d.fingerprint })).unchanged, true);
+  origin.git('checkout', '-q', 'feature');
+  origin.write('b.txt', 'new\n');
+  origin.git('add', '-A');
+  origin.git('commit', '-qm', 'more');
+  origin.git('update-ref', 'refs/pull/7/head', 'feature');
+  assert.equal((await differ.prDiff(clone.dir, { number: 7, baseBranch: 'main', since: d.fingerprint })).unchanged, true, 'no refetch within the minute');
+  const again = await differ.prDiff(clone.dir, { number: 7, baseBranch: 'main', since: d.fingerprint, refetch: true });
+  assert.equal(again.unchanged, false);
+  assert.ok(again.files.some((f) => f.path === 'b.txt'));
+  await assert.rejects(differ.prDiff(clone.dir, { number: 8, baseBranch: 'main' }), { status: 502 });
+  await assert.rejects(differ.prDiff(clone.dir, { number: 7, baseBranch: '--upload-pack=x' }), { status: 400 });
+});

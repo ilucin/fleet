@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiffFile, DiffHunk, ReviewThread } from '@/api/types'
 
 import { diffPlain } from './plain'
-import { fileKind, kindCounts, allClauses, clauseAt, placeOnClauses, diffBar, fileKey, rowsToRange, fileSignature, fileTree, orphanThreads, orphanThreadsByKey, repoViews, threadKey, parseReviewLocation, placeThreads, reviewHref, selectLine, selectionCode, splitRows, treeOrder } from './review'
+import { parsePrReviewLocation, prReviewHref, fileKind, kindCounts, allClauses, clauseAt, placeOnClauses, diffBar, fileKey, rowsToRange, fileSignature, fileTree, orphanThreads, orphanThreadsByKey, repoViews, threadKey, parseReviewLocation, placeThreads, reviewHref, selectLine, selectionCode, splitRows, treeOrder } from './review'
 
 const file = (path: string, o: Partial<DiffFile> = {}): DiffFile => ({
   path,
@@ -216,5 +216,15 @@ describe('fileKind', () => {
   it('counts kinds across checkouts', () => {
     const f = (path: string) => ({ path, oldPath: null, status: 'modified' as const, additions: 1, deletions: 0, hunks: [] })
     expect(kindCounts([{ root: '/a', label: 'a', files: [f('a.plain'), f('x.ts')] }, { root: '/b', label: 'b', files: [f('x.test.ts'), f('y.md')] }] as never)).toEqual({ spec: 1, docs: 1, code: 1, tests: 1 })
+  })
+})
+
+describe('PR review locations', () => {
+  it('round-trips host, owner, repo and number; a session review is not one', () => {
+    const href = prReviewHref('work station', { owner: 'acme', repo: 'api.js', number: 12 })
+    expect(href).toBe('/review/pr/work%20station/acme/api.js/12')
+    expect(parsePrReviewLocation(href)).toEqual({ host: 'work station', owner: 'acme', repo: 'api.js', number: 12 })
+    expect(parsePrReviewLocation('/review/laptop/abc')).toBeNull()
+    expect(parsePrReviewLocation('/review/pr/h/o/r/x')).toBeNull()
   })
 })

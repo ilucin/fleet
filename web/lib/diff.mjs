@@ -319,7 +319,43 @@ export function createDiffer({ run, tmpDir = os.tmpdir(), home = os.homedir() })
     return { fingerprint, unchanged: false, repos };
   }
 
-  return { diff, roots, diffAll };
+  const prFetched = new Map(); // `${root}#${number}` → when its refs were last fetched (ms)
+
+  /**
+   * A pull request's diff from a local clone, with no worktree and no checkout: its head and
+   * base are fetched into private refs (`refs/fleet/pr/<n>/head`, `…/base`) and diffed from
+   * their merge-base, like GitHub's "Files changed". Fetches at most every `fetchEveryMs` unless
+   * `refetch`. → the same shape as one checkout of diffAll: { root, branch, head, base, tree,
+   * fingerprint, unchanged, files, stats, truncated }
+   */
+  async function prDiff(root, { number, baseBranch, headBranch = null, since = null, refetch = false, fetchEveryMs = 60_000, now = Date.now() } = {}) {
+    if (!Number.isInteger(number) || number <= 0) throw new DiffError('invalid PR number', 400);
+    if (!validRef(baseBranch)) throw new DiffError('invalid base branch', 400);
+    const top = await revParse(root, ['--show-toplevel']);
+    if (!top) throw new DiffError('the local clone is not a git repository', 409);
+    const headRef = `refs/fleet/pr/${number}/head`;
+    const baseRef = `refs/fleet/pr/${number}/base`;
+    const key = `${top}#${number}`;
+    const have = await revParse(top, ['--verify', '--quiet', `${headRef}^{commit}`]);
+    if (refetch || !have || now - (prFetched.get(key) ?? 0) > fetchEveryMs) {
+      try {
+        await git(top, ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/pull/${number}/head:${headRef}`, `+refs/heads/${baseBranch}:${baseRef}`], { timeout: 60_000 });
+        prFetched.set(key, now);
+      } catch (err) {
+        // Offline or no access: an earlier fetch still shows something.
+        if (!have) throw new DiffError(`could not fetch the PR: ${String(err?.message ?? err).split('\n').pop()}`, 502);
+      }
+    }
+    const head = await revParse(top, ['--verify', '--quiet', `${headRef}^{commit}`]);
+    const baseTip = await revParse(top, ['--verify', '--quiet', `${baseRef}^{commit}`]);
+    if (!head || !baseTip) throw new DiffError('the PR refs are missing after the fetch', 502);
+    const mb = await git(top, ['merge-base', baseTip, head]).then((r) => r.stdout.trim(), () => null);
+    const meta = { root: top, branch: headBranch, head, base: { ref: baseBranch, sha: mb || baseTip }, tree: head, fingerprint: `${mb || baseTip}:${head}` };
+    if (since && since === meta.fingerprint) return { ...meta, unchanged: true };
+    return { ...meta, unchanged: false, ...(await filesOf(meta)) };
+  }
+
+  return { diff, roots, diffAll, prDiff };
 }
 
 function cutHunks(hunks, max) {

@@ -1667,6 +1667,37 @@ export interface DiffsResponse {
   repos?: DiffRepo[]
 }
 
+/** A PR as the reviewer sees it (GET …/prs/:owner/:repo/:n/diff, /notes). */
+export interface PrReviewInfo {
+  owner: string
+  repo: string
+  number: number
+  title: string
+  url: string
+  author: string
+  headBranch: string
+  baseBranch: string
+  headOid: string | null
+  draft: boolean
+}
+
+/** GET /api/hosts/:host/prs/:owner/:repo/:n/diff: the PR's diff from the host's clone, as one checkout. */
+export interface PrDiffResponse extends Omit<DiffsResponse, 'id'> {
+  id: null
+  pr: PrReviewInfo
+}
+
+/** A review note on a PR without a session: a draft thread kept in Fleet; `posted` once it went to GitHub. */
+export type PrNote = ReviewThread & { posted?: { url: string | null; at: number } | null }
+export interface PrNotesState {
+  host: string
+  pr: PrReviewInfo
+  threads: PrNote[]
+  reviews: never[]
+  /** notes not on GitHub */
+  drafts: number
+}
+
 /** One source of GET /api/inbox — a missing key in `sources` means that source is off. */
 export interface InboxSource {
   /** ms epoch of the last read */

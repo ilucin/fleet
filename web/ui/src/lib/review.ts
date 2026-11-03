@@ -4,6 +4,20 @@ import { clauseKey, flatClauses, type Clause, type PlainDiff } from '@/lib/plain
 /** `#/review/<host>/<id>`: the diff reviewer for that session. */
 export const reviewHref = (host: string, id: string) => `/review/${encodeURIComponent(host)}/${encodeURIComponent(id)}`
 
+/** `#/review/pr/<host>/<owner>/<repo>/<n>`: the diff reviewer over a PR from that host's clone, without a session. */
+export const prReviewHref = (host: string, pr: { owner: string; repo: string; number: number }) =>
+  `/review/pr/${encodeURIComponent(host)}/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/${pr.number}`
+
+export function parsePrReviewLocation(location: string): { host: string; owner: string; repo: string; number: number } | null {
+  const m = /^\/review\/pr\/([^/]+)\/([^/]+)\/([^/]+)\/(\d+)\/?$/.exec(location)
+  if (!m) return null
+  try {
+    return { host: decodeURIComponent(m[1]), owner: decodeURIComponent(m[2]), repo: decodeURIComponent(m[3]), number: Number(m[4]) }
+  } catch {
+    return null
+  }
+}
+
 export function parseReviewLocation(location: string): { host: string; id: string } | null {
   const m = /^\/review\/([^/]+)\/([^/]+)\/?$/.exec(location)
   if (!m) return null

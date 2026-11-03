@@ -544,6 +544,19 @@ const DIFF_FILES = {
   }`), 'import { round } from \'../money\'')]),
   ],
 }
+// The reviewer over a PR without a session (…/prs/:o/:r/:n/diff | notes | ask): the first checkout of the demo diff, two notes.
+function prReview(host, owner, repo, number, what, b) {
+  const pr = { owner, repo, number, title: 'Checkout: retry Stripe confirmation on network errors', url: `https://github.com/${owner}/${repo}/pull/${number}`, author: 'ana', headBranch: 'stripe-retry', baseBranch: 'main', headOid: 'c'.repeat(40), draft: false }
+  if (what === 'ask') return { host, ask: { ...sideAsk(b), forked: false } }
+  if (what === 'diff') {
+    const r = diffs('workstation', SID(1)).repos[0]
+    return { host, id: null, cwd: `${H}/Code/${repo}`, pr, fingerprint: 'pr-fp', unchanged: false, repos: [{ ...r, label: `${owner}/${repo}`, branch: 'stripe-retry', head: 'c'.repeat(40) }] }
+  }
+  const note = (id, path, start, end, body, posted) => ({ id, root: null, path, side: 'new', start, end, code: [], status: 'draft', resolved: false, reviewId: null, createdAt: now() - 30 * M, entries: [{ body, sentAt: null, state: 'draft', replies: [] }], posted })
+  const threads = [note('c-0000a1', 'src/billing/currency.ts', 23, 25, 'Does `Math.round` here still lose a cent for x.xx5 amounts in 3-decimal currencies?', null), note('c-0000a2', 'src/billing/invoice_total.ts', 14, 15, 'Nice — summing in cents fixes #1777.', { url: `https://github.com/${owner}/${repo}/pull/${number}#discussion_r1`, at: now() - 10 * M })]
+  return { host, pr, threads, reviews: [], drafts: 1 }
+}
+
 // A side question (…/ask): answered at once with a canned reply.
 function sideAsk(b, id = 'q-0000000001') {
   return { id, status: 'done', question: b.question || 'Why sum in BigInt instead of number?', label: b.path ? `${b.path}:${b.start}–${b.end}` : 'src/billing/invoice_total.ts:14–15', text: 'Because `invoiceTotal` also sums **monthly statements**: up to ~40k lines in KWD (3 decimals). In minor units that can pass `2^53`, where `number` stops being exact. BigInt keeps the sum exact; the cost is ~40 ns per line.', activity: null, error: null, costUsd: 0.004, forked: true, startedAt: now() - 9000, endedAt: now() }
@@ -670,6 +683,7 @@ function route(method, p, q, b) {
     return { ok: true, host, id, result: 'renamed', title: b.title }
   }
   if ((s = rest.match(/^asks\/([^/]+)$/))) return { host, ask: sideAsk({}, decodeURIComponent(s[1])) }
+  if ((s = rest.match(/^prs\/([^/]+)\/([^/]+)\/(\d+)\/(diff|ask|notes)(?:\/(.*))?$/))) return prReview(host, decodeURIComponent(s[1]), decodeURIComponent(s[2]), Number(s[3]), s[4], b)
   if (rest === 'harnesses') return HARN(host)
   if (rest === 'spawn-dirs') return spawnDirs(host)
   if (rest === 'jobs') return jobs(host)

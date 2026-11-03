@@ -1,4 +1,4 @@
-import { CheckIcon, CircleDotIcon, LoaderIcon, SparklesIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
+import { CheckIcon, CircleDotIcon, ExternalLinkIcon, LoaderIcon, SendIcon, SparklesIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ReviewEntry, ReviewThread as Thread } from '@/api/types'
@@ -110,7 +110,7 @@ const STATE_TEXT: Record<ReviewEntry['state'], string> = {
   done: '',
 }
 
-function Entry({ entry, first }: { entry: ReviewEntry; first: boolean }) {
+function Entry({ entry, first, stateText }: { entry: ReviewEntry; first: boolean; stateText?: string }) {
   // Interim narration between tool calls is noise here; the final answer(s) are the reply.
   const finals = entry.replies.filter((r) => r.final)
   const shown = finals.length ? finals : entry.replies.slice(-1)
@@ -129,7 +129,7 @@ function Entry({ entry, first }: { entry: ReviewEntry; first: boolean }) {
       {entry.state !== 'done' ? (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {entry.state === 'draft' ? <CircleDotIcon className="size-3.5 text-status-waiting" /> : <LoaderIcon className="size-3.5 animate-spin" />}
-          {STATE_TEXT[entry.state]}
+          {stateText ?? STATE_TEXT[entry.state]}
         </p>
       ) : null}
     </div>
@@ -143,14 +143,20 @@ export interface ThreadActions {
   remove: (thread: string) => Promise<boolean>
 }
 
-/** A comment thread under its lines: the comment, the session's answer(s), follow-ups. */
-export function ReviewThreadCard({ thread, outdated, actions }: { thread: Thread; outdated: boolean; actions: ThreadActions }) {
+/** A PR note (no session): kept in Fleet until posted to GitHub. */
+export interface NoteProps {
+  posted: { url: string | null; at: number } | null
+  onPost: () => Promise<boolean>
+}
+
+/** A comment thread under its lines: the comment, the session's answer(s), follow-ups. `note`: a PR note instead. */
+export function ReviewThreadCard({ thread, outdated, actions, note }: { thread: Thread; outdated: boolean; actions: ThreadActions; note?: NoteProps }) {
   const [open, setOpen] = useState(!thread.resolved)
   const [replying, setReplying] = useState(false)
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const draft = thread.status === 'draft'
+  const draft = thread.status === 'draft' && !note?.posted
 
   const run = async (fn: () => Promise<boolean>) => {
     setBusy(true)
@@ -174,9 +180,39 @@ export function ReviewThreadCard({ thread, outdated, actions }: { thread: Thread
           <button type="button" className="min-w-0 flex-1 truncate text-left text-muted-foreground" onClick={() => setOpen(!open)} aria-expanded={open}>
             {thread.path.split('/').at(-1)} · {rangeText(thread)}
           </button>
-          {draft ? <span className="rounded border border-status-waiting/40 px-1.5 text-status-waiting">Pending</span> : null}
+          {note?.posted ? (
+            note.posted.url ? (
+              <a href={note.posted.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-primary/40 px-1.5 text-primary hover:underline">
+                On GitHub <ExternalLinkIcon className="size-3" />
+              </a>
+            ) : (
+              <span className="rounded border border-primary/40 px-1.5 text-primary">On GitHub</span>
+            )
+          ) : note ? (
+            <span className="rounded border border-status-waiting/40 px-1.5 text-status-waiting">Note</span>
+          ) : draft ? (
+            <span className="rounded border border-status-waiting/40 px-1.5 text-status-waiting">Pending</span>
+          ) : null}
+          {note && !note.posted ? (
+            <Button variant="ghost" size="xs" className="h-6 px-1.5 text-xs" title="Post this note as a review comment on the PR, as your gh login" disabled={busy} onClick={() => void run(note.onPost)}>
+              {busy ? <LoaderIcon className="size-3.5 animate-spin" /> : <SendIcon className="size-3.5" />}
+              Post to GitHub
+            </Button>
+          ) : null}
           {outdated ? <span className="rounded border px-1.5 text-muted-foreground" title="The lines changed since this comment">Outdated</span> : null}
           {thread.resolved ? <span className="rounded border px-1.5 text-muted-foreground">Resolved</span> : null}
+          {draft && note ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={thread.resolved ? 'Reopen' : 'Resolve'}
+              title={thread.resolved ? 'Reopen' : 'Resolve (a resolved note is not handed to a session)'}
+              onClick={() => void run(() => actions.resolve(thread.id, !thread.resolved))}
+            >
+              {thread.resolved ? <RotateCcwIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
+            </Button>
+          ) : null}
           {draft ? (
             <Button
               variant="ghost"
@@ -211,8 +247,8 @@ export function ReviewThreadCard({ thread, outdated, actions }: { thread: Thread
             variant="ghost"
             size="icon"
             className="size-6"
-            aria-label={draft ? 'Delete draft' : 'Remove from the review'}
-            title={draft ? 'Delete draft' : 'Remove from the review (the conversation keeps it)'}
+            aria-label={note ? 'Delete note' : draft ? 'Delete draft' : 'Remove from the review'}
+            title={note ? (note.posted ? 'Delete the note here (GitHub keeps the comment)' : 'Delete note') : draft ? 'Delete draft' : 'Remove from the review (the conversation keeps it)'}
             onClick={() => void run(() => actions.remove(thread.id))}
           >
             <Trash2Icon className="size-3.5" />
@@ -221,7 +257,7 @@ export function ReviewThreadCard({ thread, outdated, actions }: { thread: Thread
         {open ? (
           <>
             {thread.entries.map((e, i) => (
-              <Entry key={i} entry={e} first={i === 0} />
+              <Entry key={i} entry={e} first={i === 0} stateText={note ? (note.posted ? 'Posted on GitHub' : 'Only in Fleet — post it, or hand the notes to a session') : undefined} />
             ))}
             <div className="border-t px-3 py-2">
               {replying ? (
@@ -260,7 +296,7 @@ export function ReviewThreadCard({ thread, outdated, actions }: { thread: Thread
                     </Button>
                   </div>
                 </>
-              ) : draft ? null : (
+              ) : draft || note ? null : (
                 <button type="button" onClick={() => setReplying(true)} className="w-full rounded-md border bg-background px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:border-ring">
                   Reply…
                 </button>

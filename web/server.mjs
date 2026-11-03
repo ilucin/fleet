@@ -25,6 +25,7 @@ import { createCompleter } from './lib/complete.mjs';
 import { createDiffer } from './lib/diff.mjs';
 import { createReviews } from './lib/reviews.mjs';
 import { createAsks } from './lib/asks.mjs';
+import { createPrNotes } from './lib/pr-notes.mjs';
 import { createFiles } from './lib/files.mjs';
 import { createNotes } from './lib/notes.mjs';
 import { createSpawnDirsEditor } from './lib/spawn-dirs.mjs';
@@ -102,6 +103,7 @@ const grouper = config.grouping.enabled
       log,
     })
   : null;
+const ghBin = resolveBinary('gh');
 const claudeBin = resolveBinary('claude', { extraDirs: [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.claude', 'local')] });
 // Session briefs: GET/PUT always work; background generation only with web.briefs.enabled.
 const briefs = createBriefs({
@@ -268,6 +270,8 @@ const handleApi = createApi({
   differ: createDiffer({ run }),
   // Diff reviewer side questions: a read-only `claude -p` fork of the session, kept in memory only.
   asks: createAsks({ bin: claudeBin }),
+  // PR review notes (the reviewer on a PR without a session); posting one runs this host's gh.
+  prNotes: createPrNotes({ dir: path.join(fleetStateDir(process.env), 'pr-notes'), gh: (args, opts) => run(ghBin, args, opts) }),
   // Diff reviewer threads: typed into the session like a send, answers read from its transcript.
   reviews: createReviews({
     dir: path.join(fleetStateDir(process.env), 'reviews'),

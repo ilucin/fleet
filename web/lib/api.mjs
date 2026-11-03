@@ -21,7 +21,8 @@ import { DEFAULT_MODELS, slackSpawn, spawnRoots } from './config.mjs';
 import { parseNameOutput } from './autoname.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
 import { displayPath, validThreadId } from './reviews.mjs';
-import { askPrompt, validAskId } from './asks.mjs';
+import { askPrompt, validAskId, ASK_TOOLS } from './asks.mjs';
+import { notesPrompt, validNoteId } from './pr-notes.mjs';
 import { validItemId } from './queue.mjs';
 import { editorUrl, editorViewer, withBriefEditor, withSessionEditors } from './editor.mjs';
 import {
@@ -108,6 +109,11 @@ const JOBS_ROUTE = /^\/api\/hosts\/([^/]+)\/jobs(?:\/([^/]+)(?:\/(run|enabled))?
 const JOB_RUN_PROXY_MS = 90 * 1000;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
 const PRS_ROUTE = /^\/api\/hosts\/([^/]+)\/prs(?:\/(checkout|spawn|seen))?$/;
+/** A PR in the diff reviewer without a session: …/prs/:owner/:repo/:n/diff | ask | notes[/:note[/post]] | notes/handoff. */
+const PR_REVIEW_ROUTE = /^\/api\/hosts\/([^/]+)\/prs\/([^/]+)\/([^/]+)\/(\d{1,9})\/(diff|ask|notes)(?:\/([^/]+)(?:\/(post))?)?$/;
+const SHA_RE = /^[0-9a-f]{40}$/;
+/** What a side question about a PR may run: read-only git, to see the PR's files rather than the clone's working tree. */
+const PR_ASK_TOOLS = [...ASK_TOOLS, 'Bash(git show:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git blame:*)'];
 /** `owner/repo#123` — what the PR screen sends; the CLI parses it again. */
 const PR_REF_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}#[1-9][0-9]{0,9}$/;
 /** A checkout fetches the PR's head (a big repo, a slow link): the peer gets as long as the CLI. */
@@ -177,6 +183,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   touched     lib/touched.mjs index — the files a session worked on (…/diffs finds their checkouts)
  *   reviews     lib/reviews.mjs#createReviews (…/review: comment threads sent to the session; absent → 501)
  *   asks        lib/asks.mjs#createAsks (…/ask, /asks/:id: side questions in a fork of the session; absent → 501)
+ *   prNotes     lib/pr-notes.mjs#createPrNotes (…/prs/:owner/:repo/:n/notes: review notes on a PR without a session; absent → 501)
  *   queue       lib/queue.mjs#createPromptQueue (…/queue: prompts that wait for the run to end; absent → 501)
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
@@ -218,6 +225,7 @@ export function createApi({
   touched = null,
   reviews = null,
   asks = null,
+  prNotes = null,
   queue = null,
   notes = null,
   spawnDirs = null,
@@ -1286,6 +1294,26 @@ export function createApi({
       return forHost({ req, url, host: decodeURIComponent(us[1]), local: () => localUsage(url) });
     }
 
+    const prr = PR_REVIEW_ROUTE.exec(url.pathname);
+    if (prr) {
+      const [, rawHost, rawOwner, rawRepo, rawNum, what, rawNote, post] = prr;
+      const ref = { owner: decodeURIComponent(rawOwner), repo: decodeURIComponent(rawRepo), number: Number(rawNum) };
+      const note = rawNote == null ? null : decodeURIComponent(rawNote);
+      const op =
+        what === 'diff' ? 'diff' : what === 'ask' ? 'ask' : note == null ? (req.method === 'GET' ? 'list' : 'create') : note === 'handoff' ? 'handoff' : post ? 'post' : req.method === 'DELETE' ? 'remove' : 'update';
+      const method = { diff: 'GET', ask: 'POST', list: 'GET', create: 'POST', handoff: 'POST', post: 'POST', remove: 'DELETE', update: 'PUT' }[op];
+      if (req.method !== method || ((what === 'diff' || what === 'ask') && note != null)) throw new HttpError('method not allowed', 405);
+      if (note != null && op !== 'handoff' && !validNoteId(note)) throw new HttpError('invalid note id', 400);
+      return forHost({
+        req,
+        url,
+        host: decodeURIComponent(rawHost),
+        timeoutMs: PR_CHECKOUT_PROXY_MS,
+        bodyLimit: REVIEW_BODY_LIMIT,
+        local: () => localPrReview(req, url, ref, op, note),
+      });
+    }
+
     const pr = PRS_ROUTE.exec(url.pathname);
     if (pr) {
       const action = pr[2] ?? null;
@@ -1761,14 +1789,107 @@ export function createApi({
     }
   }
 
+  /** The PR as this host's `fleet prs` knows it (its clone under the repos roots), or an HttpError. */
+  async function findPr({ owner, repo, number }) {
+    if (typeof cli?.prs !== 'function') throw new HttpError('pull requests are not available on this server', 501);
+    let list;
+    try {
+      list = await cli.prs({ refresh: false });
+    } catch (err) {
+      if (err?.missing) throw new HttpError('this host’s fleet CLI has no `prs` command — update it', 501);
+      throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+    }
+    const lc = (x) => String(x ?? '').toLowerCase();
+    const pr = (list?.prs ?? []).find((p) => lc(p.owner) === lc(owner) && lc(p.repo) === lc(repo) && p.number === number);
+    if (!pr) throw new HttpError(`${owner}/${repo}#${number} is not in this host’s pull requests`, 404);
+    return pr;
+  }
+
+  /**
+   * The diff reviewer over a PR, with no session and no worktree: the diff from this host's
+   * clone (refs fetched into refs/fleet/pr/<n>/…), review notes kept in Fleet (each can be
+   * posted to GitHub), side questions in a fresh read-only `claude -p` in the clone, and
+   * `handoff`: the notes as the first prompt of a session on the PR's worktree.
+   */
+  async function localPrReview(req, url, ref, op, noteId) {
+    const pr = await findPr(ref);
+    const prRef = `${pr.owner}/${pr.repo}#${pr.number}`;
+    const repoPath = typeof pr.local?.repoPath === 'string' && path.isAbsolute(pr.local.repoPath) ? pr.local.repoPath : null;
+    const fail = (err) => {
+      if (err?.status) throw new HttpError(err.message, err.status);
+      throw err;
+    };
+    const info = { owner: pr.owner, repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, author: pr.author, headBranch: pr.headBranch, baseBranch: pr.baseBranch, headOid: pr.headOid ?? null, draft: pr.draft };
+    if (op === 'diff') {
+      if (!differ?.prDiff) throw new HttpError('the diff reviewer is not available on this server', 501);
+      if (!repoPath) throw new HttpError(`no local clone of ${pr.owner}/${pr.repo} on this host — clone it under the fleet repos roots`, 409);
+      try {
+        const d = await differ.prDiff(repoPath, { number: pr.number, baseBranch: pr.baseBranch, headBranch: pr.headBranch, since: url.searchParams.get('since'), refetch: url.searchParams.get('refetch') === '1' });
+        const { unchanged, fingerprint, ...repoDiff } = d;
+        const body = { host: config.self, id: null, cwd: repoPath, pr: info, fingerprint, unchanged };
+        if (!unchanged) body.repos = [{ ...repoDiff, fingerprint, label: `${pr.owner}/${pr.repo}` }];
+        return { status: 200, body };
+      } catch (err) {
+        return fail(err);
+      }
+    }
+    if (op === 'ask') {
+      if (!asks) throw new HttpError('side questions are not available on this server', 501);
+      if (!repoPath) throw new HttpError(`no local clone of ${pr.owner}/${pr.repo} on this host`, 409);
+      const body = await readJsonBody(req, REVIEW_BODY_LIMIT);
+      const head = typeof body?.head === 'string' && SHA_RE.test(body.head) ? body.head : null;
+      const base = typeof body?.base === 'string' && SHA_RE.test(body.base) ? body.base : null;
+      const context = [
+        `This is pull request ${prRef} by ${pr.author}: "${pr.title}" (${pr.url}).`,
+        head
+          ? `The working tree of this clone is NOT the PR. The PR's code is commit ${head}${base ? `, diffed against ${base} (its merge-base with ${pr.baseBranch})` : ''}: read a file with \`git show ${head}:<path>\`, the change with \`git diff ${base ?? pr.baseBranch}...${head} -- <path>\`.`
+          : `The working tree of this clone is NOT the PR; its head is refs/fleet/pr/${pr.number}/head (read files with \`git show refs/fleet/pr/${pr.number}/head:<path>\`).`,
+      ].join(' ');
+      try {
+        const file = typeof body?.path === 'string' ? body.path : null;
+        const prompt = askPrompt({ ...body, path: file, display: file, context });
+        const label = file && Number.isInteger(body.start) ? `${file}:${body.start}${body.end !== body.start ? `–${body.end}` : ''}` : null;
+        const ask = asks.start({ cwd: repoPath, resume: null, prompt, question: String(body.question).trim(), label, tools: PR_ASK_TOOLS });
+        return { status: 200, body: { host: config.self, ask } };
+      } catch (err) {
+        return fail(err);
+      }
+    }
+    if (!prNotes) throw new HttpError('PR review notes are not available on this server', 501);
+    const key = { owner: pr.owner, repo: pr.repo, number: pr.number };
+    if (op === 'handoff') {
+      const body = await readJsonBody(req, REVIEW_BODY_LIMIT);
+      const notes = await prNotes.pending(key).catch(fail);
+      if (!notes.length) throw new HttpError('no notes to hand over', 409);
+      const prompt = notesPrompt(notes, { summary: typeof body?.summary === 'string' ? body.summary : '' });
+      return localPrAction(req, 'spawn', { ...body, pr: prRef, prompt });
+    }
+    try {
+      const body = op === 'create' || op === 'update' || op === 'post' ? await readJsonBody(req, REVIEW_BODY_LIMIT) : null;
+      const r =
+        op === 'list'
+          ? await prNotes.list(key)
+          : op === 'create'
+            ? await prNotes.create(key, body)
+            : op === 'update'
+              ? await prNotes.update(key, noteId, body)
+              : op === 'remove'
+                ? await prNotes.remove(key, noteId)
+                : await prNotes.post(key, noteId, { headOid: body?.headOid });
+      return { status: 200, body: { host: config.self, pr: info, ...r } };
+    } catch (err) {
+      return fail(err);
+    }
+  }
+
   /**
    * POST prs/checkout `{ pr }` → `{ host, worktree }`; POST prs/spawn `{ pr, prompt?, name?,
    * model?, harness? }` → `{ host, worktree, spawn }`: the PR's worktree (made when missing),
    * then a new session there whose first prompt is the PR's context line + `prompt`.
    */
-  async function localPrAction(req, action) {
+  async function localPrAction(req, action, given = null) {
     if (typeof cli?.prCheckout !== 'function') throw new HttpError('pull requests are not available on this server', 501);
-    const body = await readJsonBody(req);
+    const body = given ?? (await readJsonBody(req));
     const ref = typeof body?.pr === 'string' ? body.pr.trim() : '';
     if (!PR_REF_RE.test(ref)) throw new HttpError('pr must look like owner/repo#123', 400);
     if (action === 'seen') return localPrSeen(ref);

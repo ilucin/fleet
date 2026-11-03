@@ -52,6 +52,9 @@ import type {
   ReviewState,
   ReviewThread,
   SideAsk,
+  PrDiffResponse,
+  PrNote,
+  PrNotesState,
   ScheduleAddBody,
   ScheduleResponse,
   ScheduledEntry,
@@ -140,6 +143,13 @@ export async function request<T>(path: string, { signal, method = 'GET', body, f
 
 const enc = encodeURIComponent
 const hostPath = (host: string) => `/api/hosts/${enc(host)}`
+/** A PR by owner / repo / number. */
+export interface PrKey {
+  owner: string
+  repo: string
+  number: number
+}
+const prPath = (host: string, pr: PrKey) => `${hostPath(host)}/prs/${enc(pr.owner)}/${enc(pr.repo)}/${pr.number}`
 const sessionPath = (host: string, id: string, suffix: string) => `${hostPath(host)}/sessions/${enc(id)}/${suffix}`
 
 type Opts = { signal?: AbortSignal }
@@ -380,6 +390,23 @@ export const api = {
   prSeen: (host: string, pr: string, o: Opts = {}) =>
     request<{ host: string; pr: string; seenAt: number | null }>(`${hostPath(host)}/prs/seen`, { ...o, method: 'POST', body: { pr } }),
   /** Check it out, then start a session in the worktree whose first prompt says what the PR is. */
+  /** The diff reviewer over a PR without a session: the diff from the host's clone (`refetch`: fetch now). */
+  prDiff: (host: string, pr: PrKey, since: string | null, refetch = false, o: Opts = {}) =>
+    request<PrDiffResponse>(`${prPath(host, pr)}/diff?${new URLSearchParams({ ...(since ? { since } : {}), ...(refetch ? { refetch: '1' } : {}) })}`, o),
+  prNotes: (host: string, pr: PrKey, o: Opts = {}) => request<PrNotesState>(`${prPath(host, pr)}/notes`, o),
+  prNoteCreate: (host: string, pr: PrKey, body: ReviewAnchor & { body: string; base?: string | null }, o: Opts = {}) =>
+    request<PrNotesState & { thread: PrNote }>(`${prPath(host, pr)}/notes`, { ...o, method: 'POST', body }),
+  prNoteUpdate: (host: string, pr: PrKey, note: string, patch: { body?: string; resolved?: boolean }, o: Opts = {}) =>
+    request<PrNotesState & { thread: PrNote }>(`${prPath(host, pr)}/notes/${enc(note)}`, { ...o, method: 'PUT', body: patch }),
+  prNoteDelete: (host: string, pr: PrKey, note: string, o: Opts = {}) => request<PrNotesState>(`${prPath(host, pr)}/notes/${enc(note)}`, { ...o, method: 'DELETE' }),
+  /** Post one note as a GitHub review comment on its lines (as the host's gh login). */
+  prNotePost: (host: string, pr: PrKey, note: string, headOid: string, o: Opts = {}) =>
+    request<PrNotesState & { thread: PrNote }>(`${prPath(host, pr)}/notes/${enc(note)}/post`, { ...o, method: 'POST', body: { headOid } }),
+  /** A session on the PR's worktree whose first prompt is the open notes. */
+  prHandoff: (host: string, pr: PrKey, summary: string, o: Opts = {}) =>
+    request<PrSpawnResponse>(`${prPath(host, pr)}/notes/handoff`, { ...o, method: 'POST', body: { summary } }),
+  prAsk: (host: string, pr: PrKey, body: Partial<ReviewAnchor> & { question: string; head?: string | null; base?: string | null }, o: Opts = {}) =>
+    request<{ host: string; ask: SideAsk }>(`${prPath(host, pr)}/ask`, { ...o, method: 'POST', body }),
   prSpawn: (host: string, body: { pr: string; prompt?: string; name?: string; model?: string; harness?: string }, o: Opts = {}) =>
     request<PrSpawnResponse>(`${hostPath(host)}/prs/spawn`, { ...o, method: 'POST', body }),
 
