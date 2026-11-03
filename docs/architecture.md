@@ -738,7 +738,9 @@ server's name as `host`, and the reply's pane is checked on that host.
   asked; a colleague's request stays a colleague's (the rules above hold). A failed spawn is said
   in the thread. One spawn per thread at a time; an event Slack sends twice opens one session.
   The session runs as the host's user — with `from: "anyone"`, everyone in those channels can make
-  it act on that host.
+  it act on that host. The app needs the `message.channels` (and, for private channels,
+  `message.groups`) events; the server reads `slack.spawn` at start (restart it after a change;
+  `null` turns it off).
 - **State** (`<fleet state>/slack-links.json`, 0600): the active links with their undelivered
   messages and the last 20 ended ones.
 
