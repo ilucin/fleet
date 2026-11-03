@@ -17,7 +17,7 @@ import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { relTime } from '@/lib/format'
-import { fileAnchor, fileSignature, orphanThreadsByKey, parseReviewLocation, rangeText, repoViews, rowsToRange, selectLine, selectionCode, threadKey, type LineRow, type LineSelection, type Side } from '@/lib/review'
+import { DEFAULT_KINDS, FILE_KINDS, fileAnchor, fileKey, fileSignature, kindCounts, orphanThreadsByKey, parseReviewLocation, rangeText, repoViews, rowsToRange, selectLine, selectionCode, threadKey, type FileKind, type LineRow, type LineSelection, type Side } from '@/lib/review'
 import type { DiffRepo, ReviewThread } from '@/api/types'
 import { findSession, sessionHref } from '@/lib/sessions'
 import { storage } from '@/lib/storage'
@@ -29,6 +29,10 @@ const FRESH_MS = 10_000
 const NO_THREADS: ReviewThread[] = []
 const parseView = (r: string) => (r === 'split' || r === 'unified' ? r : undefined)
 const parseBool = (r: string) => (r === 'true' ? true : r === 'false' ? false : undefined)
+const KIND_NAMES = new Set<string>(FILE_KINDS.map((k) => k.kind))
+const DEFAULT_SHOWN = FILE_KINDS.filter((k) => DEFAULT_KINDS[k.kind]).map((k) => k.kind).join(',')
+/** The shown kinds, stored as `spec,code`; anything unknown falls back to the default. */
+const parseKinds = (r: string) => (r === '' || r.split(',').every((k) => KIND_NAMES.has(k)) ? r : undefined)
 
 /**
  * `#/review/<host>/<id>`: GitHub's "Files changed" over every checkout the session works in
@@ -52,7 +56,17 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
   const [showTree, setShowTree] = usePersistentState<boolean>('fleet.reviewTree', true, parseBool)
   const [showChat, setShowChat] = usePersistentState<boolean>('fleet.reviewChat', true, parseBool)
 
-  const views = useMemo(() => repoViews(data?.repos ?? []), [data])
+  const [shownRaw, setShownRaw] = usePersistentState<string>('fleet.reviewKinds', DEFAULT_SHOWN, parseKinds)
+  const shown = useMemo(() => {
+    const on = new Set(shownRaw.split(','))
+    return Object.fromEntries(FILE_KINDS.map((k) => [k.kind, on.has(k.kind)])) as Record<FileKind, boolean>
+  }, [shownRaw])
+  const toggleKind = (kind: FileKind) => setShownRaw(FILE_KINDS.filter((k) => (k.kind === kind ? !shown[k.kind] : shown[k.kind])).map((k) => k.kind).join(','))
+  const counts = useMemo(() => kindCounts(data?.repos ?? []), [data])
+  const views = useMemo(() => repoViews(data?.repos ?? [], shown), [data, shown])
+  // Every changed file's key, shown or not: a thread on a hidden file is not an orphan.
+  const allKeys = useMemo(() => new Set((data?.repos ?? []).flatMap((r) => (r.files ?? []).map((f) => fileKey(r.root, f.path)))), [data])
+  const hiddenCount = allKeys.size - views.reduce((n, v) => n + v.files.length, 0)
   const clean = useMemo(() => (data?.repos ?? []).filter((r) => !r.error && !r.files?.length), [data])
   // Every file across checkouts, by key (root + path).
   const entries = useMemo(() => new Map(views.flatMap((v) => v.files.map((f) => [f.key, { ...f, repo: v.repo }] as const))), [views])
@@ -136,7 +150,7 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
     }
     return m
   }, [threads, defaultRoot])
-  const orphans = useMemo(() => (data ? orphanThreadsByKey(new Set(entries.keys()), threads, defaultRoot) : []), [data, entries, threads, defaultRoot])
+  const orphans = useMemo(() => (data ? orphanThreadsByKey(allKeys, threads, defaultRoot) : []), [data, allKeys, threads, defaultRoot])
   const [selection, setSelection] = useState<LineSelection | null>(null)
   const [composing, setComposing] = useState(false)
   const onLine = useCallback((path: string, side: Side, n: number, extend: boolean) => {
@@ -287,6 +301,28 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
           </>
         ) : null}
       </div>
+      {data && allKeys.size ? (
+        <div className="px-2 pb-1.5">
+          <div role="group" aria-label="Show files" className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-xl bg-muted p-0.5">
+            {FILE_KINDS.map(({ kind, label }) => (
+              <button
+                key={kind}
+                type="button"
+                aria-pressed={shown[kind]}
+                disabled={!counts[kind]}
+                title={`${shown[kind] ? 'Hide' : 'Show'} ${label.toLowerCase()}`}
+                onClick={() => toggleKind(kind)}
+                className={cn(
+                  'h-8 rounded-[10px] px-2.5 text-xs font-medium text-muted-foreground tabular-nums disabled:opacity-40',
+                  shown[kind] ? 'bg-background text-foreground shadow-sm dark:bg-accent' : counts[kind] > 0 && 'line-through decoration-dimmer',
+                )}
+              >
+                {label} <span className="text-dimmer">{counts[kind]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </header>
   )
 
@@ -306,7 +342,15 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
       ) : null}
       {error ? <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       {!data && !error ? <p className="px-1 py-6 text-center text-sm text-muted-foreground">Loading the diff…</p> : null}
-      {data && !files.length ? (
+      {data && !files.length && hiddenCount ? (
+        <div className="px-1 py-12 text-center">
+          <p className="text-base font-semibold">Everything is filtered out</p>
+          <p className="mt-1 text-sm text-dimmer">
+            {hiddenCount === 1 ? '1 changed file is' : `${hiddenCount} changed files are`} hidden. Turn on Specs, Docs, Code or Tests above.
+          </p>
+        </div>
+      ) : null}
+      {data && !files.length && !hiddenCount ? (
         <div className="px-1 py-12 text-center">
           <p className="text-base font-semibold">No changes</p>
           <p className="mt-1 text-sm text-dimmer">
@@ -318,6 +362,7 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
         <section key={v.repo.root} aria-label={v.repo.label} className="space-y-3">
           {views.length > 1 || v.repo.error ? <RepoHeader repo={v.repo} /> : null}
           {v.repo.error ? <p className="rounded-lg border border-destructive/40 px-3 py-2 text-sm text-destructive">{v.repo.error}</p> : null}
+          {!v.files.length && !v.repo.error ? <p className="px-1 text-xs text-dimmer">All changed files here are filtered out.</p> : null}
           {v.repo.truncated ? <p className="text-xs text-muted-foreground">The diff is very large: later files are listed without their lines.</p> : null}
           {v.files.map(({ key, file }) => (
             <FileDiff

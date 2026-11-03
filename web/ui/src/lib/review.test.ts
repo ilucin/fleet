@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiffFile, DiffHunk, ReviewThread } from '@/api/types'
 
 import { diffPlain } from './plain'
-import { allClauses, clauseAt, placeOnClauses, diffBar, fileKey, rowsToRange, fileSignature, fileTree, orphanThreads, orphanThreadsByKey, repoViews, threadKey, parseReviewLocation, placeThreads, reviewHref, selectLine, selectionCode, splitRows, treeOrder } from './review'
+import { fileKind, kindCounts, allClauses, clauseAt, placeOnClauses, diffBar, fileKey, rowsToRange, fileSignature, fileTree, orphanThreads, orphanThreadsByKey, repoViews, threadKey, parseReviewLocation, placeThreads, reviewHref, selectLine, selectionCode, splitRows, treeOrder } from './review'
 
 const file = (path: string, o: Partial<DiffFile> = {}): DiffFile => ({
   path,
@@ -198,5 +198,23 @@ describe('a .plain spec: threads on clauses', () => {
     const p = placeThreads(file, [thread('a', 3, 3, ['- Alpha one.'])])
     expect(p.unplaced.map((t) => t.id)).toEqual(['a'])
     expect(p.outdated.size).toBe(0)
+  })
+})
+
+describe('fileKind', () => {
+  it('sorts changed files into specs, docs, tests and code', () => {
+    expect(fileKind('specs/review.plain')).toBe('spec')
+    expect(fileKind('README.md')).toBe('docs')
+    expect(fileKind('docs/guide.mdx')).toBe('docs')
+    expect(fileKind('src/lib/review.ts')).toBe('code')
+    expect(fileKind('app/models/user.rb')).toBe('code')
+    expect(fileKind('Cargo.toml')).toBe('code')
+    for (const t of ['src/lib/review.test.ts', 'web/tests/api.test.mjs', 'spec/models/user_spec.rb', 'pkg/diff_test.go', 'tests/test_api.py', 'src/__tests__/x.tsx', 'crates/fleet/tests/cli.rs', 'e2e/login.spec.ts', 'tests/fixtures/README.md'])
+      expect(fileKind(t), t).toBe('tests')
+  })
+
+  it('counts kinds across checkouts', () => {
+    const f = (path: string) => ({ path, oldPath: null, status: 'modified' as const, additions: 1, deletions: 0, hunks: [] })
+    expect(kindCounts([{ root: '/a', label: 'a', files: [f('a.plain'), f('x.ts')] }, { root: '/b', label: 'b', files: [f('x.test.ts'), f('y.md')] }] as never)).toEqual({ spec: 1, docs: 1, code: 1, tests: 1 })
   })
 })

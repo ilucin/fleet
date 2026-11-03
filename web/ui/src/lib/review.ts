@@ -216,12 +216,43 @@ export interface RepoView {
   files: { key: string; file: DiffFile }[]
 }
 
-/** The checkouts with changes (or an error), each with its tree; clean ones are left out. */
-export function repoViews(repos: DiffRepo[]): RepoView[] {
+/** What a changed file is, for the reviewer's filters: a PlainLang spec, docs, a test, or code (everything else). */
+export type FileKind = 'spec' | 'docs' | 'code' | 'tests'
+export const FILE_KINDS: { kind: FileKind; label: string }[] = [
+  { kind: 'spec', label: 'Specs' },
+  { kind: 'docs', label: 'Docs' },
+  { kind: 'code', label: 'Code' },
+  { kind: 'tests', label: 'Tests' },
+]
+/** Shown by default: specs and code; docs and tests are a click away. */
+export const DEFAULT_KINDS: Record<FileKind, boolean> = { spec: true, docs: false, code: true, tests: false }
+
+const TEST_DIR_RE = /(^|\/)(tests?|__tests__|spec|specs|e2e|testdata|fixtures|__mocks__)\//i
+const TEST_FILE_RE = /(\.(test|spec)\.[^/]+$)|(_(test|spec)\.[^/.]+$)|(^|\/)test_[^/]+\.py$|(^|\/)conftest\.py$/i
+
+export function fileKind(path: string): FileKind {
+  if (/\.plain$/i.test(path)) return 'spec'
+  if (TEST_DIR_RE.test(path) || TEST_FILE_RE.test(path)) return 'tests'
+  if (/\.(md|mdx|markdown)$/i.test(path)) return 'docs'
+  return 'code'
+}
+
+/** How many changed files of each kind, across checkouts. */
+export function kindCounts(repos: DiffRepo[]): Record<FileKind, number> {
+  const c: Record<FileKind, number> = { spec: 0, docs: 0, code: 0, tests: 0 }
+  for (const r of repos) for (const f of r.files ?? []) c[fileKind(f.path)]++
+  return c
+}
+
+/**
+ * The checkouts with changes (or an error), each with its tree; clean ones are left out.
+ * `show`: only files of the kinds it turns on (a checkout whose files are all hidden stays, empty).
+ */
+export function repoViews(repos: DiffRepo[], show?: Record<FileKind, boolean>): RepoView[] {
   return repos
     .filter((r) => r.error || r.files?.length)
     .map((repo) => {
-      const tree = fileTree(repo.files ?? [], repo.root)
+      const tree = fileTree(show ? (repo.files ?? []).filter((f) => show[fileKind(f.path)]) : (repo.files ?? []), repo.root)
       const files: { key: string; file: DiffFile }[] = []
       const walk = (nodes: TreeNode[]) => nodes.forEach((n) => (n.kind === 'file' ? files.push({ key: n.key, file: n.file }) : walk(n.children)))
       walk(tree)
