@@ -53,7 +53,8 @@ never a real home directory, real config or live sessions.
 - Deploy every push to **all** hosts in the fleet config, not just the one serving the desktop
   app: each host runs its own web server and CLI, and a spawn or fix on one host may go
   through another's. Run `ssh <host> '~/Code/project/scripts/deploy.sh'` for each (they can run
-  in parallel) and check that each one ends with "web server up".
+  in parallel) and check that each one ends with "web server up". A host provisioned by other
+  tooling may keep its checkout elsewhere (e.g. `~/.local/src/fleet`): run that checkout's script.
 - Commit only your own files, because other sessions may have uncommitted work in the same tree.
 - If you hit a conflict because another session is changing the same thing (a rejected push, a
   rebase conflict, overlapping edits), move your work into a git worktree. Rebase it onto `main`
