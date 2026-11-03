@@ -190,6 +190,11 @@ export function plainText(text, names = {}) {
     .replace(/&amp;/g, '&');
 }
 
+/** The name a session goes by in Fleet: its chosen title (`/rename`), else its derived name. */
+function sessionTitle(s) {
+  return s?.display_title || s?.gen_title || s?.name || null;
+}
+
 function whoLine(m, link, names) {
   const name = names[m.user] ?? m.user ?? 'someone';
   const owner = link.owner && m.user === link.owner ? ', the owner of this session' : '';
@@ -694,7 +699,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
       id: `sl-${randomBytes(3).toString('hex')}`,
       host,
       session: session.session_id,
-      sessionName: session.name ?? null,
+      sessionName: sessionTitle(session),
       channel: conv.channel,
       threadTs: conv.threadTs,
       permalink,
@@ -941,7 +946,13 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     l.postedIn = [...new Set([...(l.postedIn ?? []), threadTs ?? r.ts])].slice(-MAX_POSTED_IN);
     l.seen = [...(l.seen ?? []), r.ts].slice(-MAX_SEEN);
     await save();
-    return { ok: true, link: id, channel: l.channel, ts: r.ts, threadTs: threadTs ?? null };
+    let permalink = null;
+    try {
+      permalink = (await call('chat.getPermalink', { channel: l.channel, message_ts: r.ts })).permalink ?? null;
+    } catch {
+      // Posted all the same: the link is a convenience.
+    }
+    return { ok: true, link: id, channel: l.channel, ts: r.ts, threadTs: threadTs ?? null, permalink };
   }
 
   /** A Slack event (Socket Mode `events_api`). Only people's messages in a linked place count. */
@@ -1046,6 +1057,29 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
   }
 
   /** Expire links; deliver what waits to idle sessions. */
+  /** A renamed session (`/rename`): its link shows the name it has now. True when it changed. */
+  function rename(l, s) {
+    const name = sessionTitle(s);
+    if (!name || name === l.sessionName) return false;
+    l.sessionName = name;
+    return true;
+  }
+
+  /** The active links' session names, from one list per host; an unreachable host keeps the old. */
+  async function refreshNames() {
+    const byHost = new Map();
+    for (const l of links) {
+      const h = l.host || self;
+      if (!byHost.has(h)) byHost.set(h, Promise.resolve(listSessions(h)).then((x) => x ?? null, () => null));
+    }
+    let changed = false;
+    for (const l of links) {
+      const s = findSession((await byHost.get(l.host || self)) ?? [], l.session);
+      if (s && rename(l, s)) changed = true;
+    }
+    if (changed) await save();
+  }
+
   async function tick() {
     await load();
     for (const l of [...links]) if (!isActive(l)) await end(l, 'expired');
@@ -1073,6 +1107,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
       const sessions = await byHost.get(l.host || self);
       if (!sessions) continue;
       const s = findSession(sessions, l.session);
+      if (s) rename(l, s);
       if (!s || s.status !== 'idle') continue;
       busy.add(l.id);
       try {
@@ -1097,6 +1132,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     const msgs = l.pending.slice();
     await Promise.all([...new Set(msgs.map((m) => m.user))].map(nameOf));
     // The intro first, on its own; messages that came meanwhile follow on the next tick.
+    l.owner = settings.owner ?? null; // `slack.owner` as it is now (it changes without a restart)
     const text = l.intro ?? messagesPrompt(l, msgs, { names });
     await send(s, text, l.host || self);
     lastDelivery.set(l.id, now());
@@ -1146,7 +1182,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     const what = blockedWhat(s.waiting_for);
     l.blocked = { at: now(), what };
     await save(); // before posting: a failed post is not retried every tick
-    const name = s.display_title || s.gen_title || s.name || l.sessionName || 'session';
+    const name = sessionTitle(s) || l.sessionName || 'session';
     const owner = settings.owner;
     const ownersDm = Boolean(owner) && l.dm?.user === owner; // the owner's DM: their notice is the only one
     if (!ownersDm) {
@@ -1212,10 +1248,12 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     tick,
     async list() {
       await load();
+      await refreshNames();
       return { links: links.map(view), ended: ended.map(view) };
     },
     async status() {
       await load();
+      await refreshNames();
       let me = bot;
       if (!me) me = await whoami().catch((err) => ({ error: err.message }));
       return {

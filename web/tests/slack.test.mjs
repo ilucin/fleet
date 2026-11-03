@@ -336,6 +336,9 @@ test('reply: posts in the thread, only for the linked session, only while linked
   const link = await fx.bridge.link({ session: SID, url: URL_, minutes: 5, host: 'h' });
   const r = await fx.bridge.reply({ link: link.id, text: 'Bok! Here to help.', pane: '%5' });
   assert.equal(r.threadTs, THREAD);
+  // The new message's own ts and permalink: a bot finds its post again without matching on text.
+  assert.match(r.ts, /^\d{10}\.\d{6}$/);
+  assert.equal(typeof r.permalink, 'string');
   const post = fx.slack.calls.findLast((c) => c.method === 'chat.postMessage');
   assert.deepEqual(post.params, { channel: 'C0123ABCDEF', text: 'Bok! Here to help.', thread_ts: THREAD, unfurl_links: false, unfurl_media: false });
 
@@ -351,6 +354,28 @@ test('reply: posts in the thread, only for the linked session, only while linked
   assert.equal(ended[0].endReason, 'expired');
   // It had replied, so the thread is told it left.
   assert.match(fx.slack.calls.findLast((c) => c.method === 'chat.postMessage').params.text, /left the conversation/);
+});
+
+test('a renamed session (/rename): list shows the name it has now', async (t) => {
+  const fx = fixture(t);
+  await fx.bridge.link({ session: SID, url: URL_, minutes: 30, host: 'h' });
+  assert.equal((await fx.bridge.list()).links[0].sessionName, 'artifacts-demo');
+  fx.sessions[0].display_title = 'release-bot';
+  assert.equal((await fx.bridge.list()).links[0].sessionName, 'release-bot');
+  assert.equal((await fx.bridge.status()).links[0].sessionName, 'release-bot');
+});
+
+test('slack.owner changed while linked: messages mark the owner it is now', async (t) => {
+  const settings = { owner: 'UOWNER' };
+  const fx = fixture(t, { settings, status: 'idle' });
+  const link = await fx.bridge.link({ session: SID, url: URL_, minutes: 30, mode: 'proactive', host: 'h' });
+  await fx.bridge.tick(); // the intro
+  settings.owner = 'U1'; // what the server's reload does after `fleet config set slack.owner U1`
+  fx.advance(10_000);
+  await fx.bridge.handleEvent({ type: 'message', channel: 'C0123ABCDEF', ts: '1792778300.000001', thread_ts: THREAD, user: 'U1', text: 'go' });
+  await fx.bridge.tick();
+  assert.match(fx.sent.at(-1).text, new RegExp(`\\[slack ${link.id}\\]`));
+  assert.match(fx.sent.at(-1).text, /\(U1, the owner of this session\)/);
 });
 
 test('expiry: messages after the end are not delivered; a link never used leaves quietly', async (t) => {

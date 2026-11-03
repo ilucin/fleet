@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configPath, expandHome, ghIdentitiesOf, loadConfig, normalizeConfig, resolveBinary, resolveFleetBin, spawnRoots } from '../lib/config.mjs';
+import { configPath, createSlackSettingsReloader, expandHome, ghIdentitiesOf, loadConfig, normalizeConfig, resolveBinary, resolveFleetBin, spawnRoots } from '../lib/config.mjs';
 
 function tmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-web-cfg-'));
@@ -222,4 +222,29 @@ test('ghIdentitiesOf keeps entries with a usable name and a command', () => {
     ghIdentitiesOf({ ghIdentities: { bot: { command: 'gh-bot', login: 'my-app[bot]' }, plain: { command: 'x' }, nocmd: {}, 'a b': { command: 'x' } } }),
     [{ name: 'bot', login: 'my-app[bot]' }, { name: 'plain', login: 'plain' }],
   );
+});
+
+test('createSlackSettingsReloader: slack.owner / slack.spawn follow the file; a broken file keeps them', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-cfg-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'config.json');
+  const env = { FLEET_CONFIG: file };
+  const write = (obj, at) => {
+    fs.writeFileSync(file, typeof obj === 'string' ? obj : JSON.stringify(obj));
+    fs.utimesSync(file, at, at);
+  };
+  write({ self: 'ws', slack: { host: 'ws', owner: 'UAAAAA' } }, 1000);
+  const config = loadConfig({ env, home: dir, log: { warn() {} } });
+  const reload = createSlackSettingsReloader({ config, env, home: dir });
+  assert.equal(reload(), false); // unchanged
+  write({ self: 'ws', slack: { host: 'other', owner: 'UBBBBB' } }, 2000);
+  assert.equal(reload(), true);
+  assert.equal(config.slack.owner, 'UBBBBB');
+  assert.equal(config.slack.host, 'ws'); // read at start only
+  const logged = [];
+  const reload2 = createSlackSettingsReloader({ config, env, home: dir, log: (l) => logged.push(l) });
+  write('{ not json', 3000);
+  assert.equal(reload2(), false);
+  assert.equal(config.slack.owner, 'UBBBBB');
+  assert.match(logged[0], /did not load/);
 });

@@ -98,6 +98,9 @@ pub fn run(action: &ConfigAction) -> Result<()> {
                 eprintln!("fleet: warning: {p}");
             }
             println!("{key} = {}", value);
+            if let Some(note) = restart_note(key) {
+                eprintln!("fleet: {note}");
+            }
             Ok(())
         }
         ConfigAction::Edit => {
@@ -120,6 +123,23 @@ pub fn run(action: &ConfigAction) -> Result<()> {
     }
 }
 
+/// A key the web server reads only when it starts: what to do for it to take effect. `None`
+/// for keys read on every call (the CLI's) or reloaded live (`slack.owner`, `slack.spawn`).
+pub fn restart_note(key: &str) -> Option<&'static str> {
+    let live = ["slack.owner", "slack.spawn"];
+    if live
+        .iter()
+        .any(|k| key == *k || key.starts_with(&format!("{k}.")))
+    {
+        return None;
+    }
+    let at_start = ["web", "slack", "inbox", "peers", "self"];
+    let top = key.split('.').next().unwrap_or(key);
+    at_start.contains(&top).then_some(
+        "the web server reads this when it starts: restart it where it runs (launchctl kickstart -k gui/$(id -u)/fleet.web)",
+    )
+}
+
 /// `$VISUAL`, else `$EDITOR`, else `vi`.
 pub fn editor() -> String {
     ["VISUAL", "EDITOR"]
@@ -140,4 +160,21 @@ pub fn open_editor(path: &std::path::Path) -> Result<()> {
         return Err(Error::Other(format!("{editor} exited {st}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::restart_note;
+
+    #[test]
+    fn restart_note_only_for_keys_read_at_start() {
+        assert!(restart_note("slack.owner").is_none());
+        assert!(restart_note("slack.spawn").is_none());
+        assert!(restart_note("slack.spawn.host").is_none());
+        assert!(restart_note("slack.host").is_some());
+        assert!(restart_note("slack.ownerX").is_some());
+        assert!(restart_note("web.port").is_some());
+        assert!(restart_note("hosts.ws.ssh").is_none());
+        assert!(restart_note("spawnDirs").is_none());
+    }
 }

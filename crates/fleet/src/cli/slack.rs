@@ -264,7 +264,12 @@ pub fn reply(id: &str, text: &str, thread: Option<&str>, json: bool) -> Result<(
     if json {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("posted in Slack ({id})");
+        // The new message's ts: what a later `--thread` or a reply in its own thread needs.
+        let ts = v["ts"].as_str().unwrap_or("?");
+        println!("posted in Slack ({id}), ts {ts}");
+        if let Some(url) = v["permalink"].as_str() {
+            println!("{url}");
+        }
     }
     Ok(())
 }

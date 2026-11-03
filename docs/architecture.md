@@ -475,7 +475,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | PUT | `/api/slack/spawn` | `{ bridge? (default `slack.host`), spawn: { host?, dir?, model?, harness?, ghIdentity?, minutes?, mode?, task?, from? } \| null }` → that bridge's `/api/slack` status: sets its `slack.spawn` (`fleet config set`, only the fields given) and applies it at once, no restart; `null` turns it off (Settings → Slack). Served by the bridge, proxied there once. 400: a bad duration / mode / `from`, a `host` that is neither the bridge nor a peer; 404: an unknown bridge |
 | POST | `/api/slack/links/:id/unlink` | end the link now → Link |
 | POST | `/api/slack/links/:id/relink` | `{ minutes? }` → Link: link that link's session to the same thread / conversation / DM again, with the same instructions and mode (an ended link, from `ended`; an active one is renewed). No `minutes` = the duration it had. 404: no such link or the session is gone |
-| POST | `/api/slack/reply` | `{ link, text, thread?, pane? \| session? }` → `{ ok, link, channel, ts, threadTs }`: post in the linked thread. 403: `pane`/`session` is not the linked session; 410: the link has ended |
+| POST | `/api/slack/reply` | `{ link, text, thread?, pane? \| session? }` → `{ ok, link, channel, ts, threadTs, permalink }`: post in the linked thread (`ts`: the new message's own; `permalink`: null when Slack would not give one). 403: `pane`/`session` is not the linked session; 410: the link has ended |
 | POST | `/api/slack/history` | `{ link, cursor?, limit? (1–200, 50), oldest?, latest?, pane? \| session? }` → `{ link, channel, threadTs, order: "newest first" \| "oldest first", messages: [Message], nextCursor \| null }`: the linked conversation (`conversations.history`; a thread link: `conversations.replies` of its thread). Message = `{ ts, threadTs, user, name, owner, you, bot, subtype, text (plain), replies, latestReply, files: [{ id, name, mimetype, size }] }`. 403 / 410 as `reply`; 429: Slack's rate limit |
 | POST | `/api/slack/thread` | `{ link, ts, cursor?, limit?, pane? \| session? }` → the same shape, oldest first (Slack: the first message, then the latest replies; `nextCursor` pages back to earlier ones): one thread of the linked conversation (a thread link: its own only, else 403) |
 | POST | `/api/slack/file` | `{ link, file, pane? \| session? }` → `{ link, id, name, mimetype, size, data (base64) }`: a file shared in the linked conversation (its `files.info` shares; a thread link: in its thread, else 403), at most 20 MB (413). Needs `files:read` |
@@ -758,7 +758,11 @@ server's name as `host`, and the reply's pane is checked on that host.
   The session runs as the host's user — with `from: "anyone"`, everyone in those channels can make
   it act on that host. The app needs the `message.channels` (and, for private channels,
   `message.groups`) events. Settings → Slack (`PUT /api/slack/spawn`) turns it on or off per bridge
-  and applies at once; a hand edit of the config file needs a restart; `null` turns it off.
+  and applies at once; so does a change to the file (`fleet config set`, a hand edit), within a few seconds; `null` turns it off.
+- **Live settings**: `slack.owner` and `slack.spawn` are re-read when the config file changes (the
+  server checks every 5 s); a link marks whoever is the owner now. `slack.host` and `slack.bridges`
+  are read at start: changing them needs a web server restart (`fleet config set` says so).
+  A link's `sessionName` follows the session's name (`/rename`) whenever the bridge lists it.
 - **State** (`<fleet state>/slack-links.json`, 0600): the active links with their undelivered
   messages and the last 20 ended ones.
 

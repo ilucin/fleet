@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DEFAULT_VOICE_FAILED_DIR, configPath, expandHome, fleetStateDir, loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
+import { DEFAULT_VOICE_FAILED_DIR, configPath, createSlackSettingsReloader, expandHome, fleetStateDir, loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
 import { run } from './lib/run.mjs';
 import { createFleetCli } from './lib/fleet-cli.mjs';
 import { createFocus } from './lib/focus.mjs';
@@ -348,6 +348,11 @@ server.listen(config.port, config.bind, () => {
   queue.start();
   if (slack) {
     slack.start();
+    // slack.owner / slack.spawn: live from the config file (`fleet config set`), no restart.
+    const reloadSlack = createSlackSettingsReloader({ config, log });
+    setInterval(() => {
+      if (reloadSlack()) log(`[slack] settings reloaded: owner=${config.slack.owner ?? '(none)'}`);
+    }, 5000).unref();
     log(`[fleet-web] slack links on (Socket Mode; ${TOKEN_NAMES.bot} + ${TOKEN_NAMES.app} from env or Keychain)`);
   } else if (config.slack.host) {
     log(`[fleet-web] slack links: served by ${config.slack.host}`);

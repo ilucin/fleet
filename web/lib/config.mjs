@@ -764,3 +764,37 @@ export function loadConfig({ env = process.env, home = os.homedir(), webRoot = n
   }
   return { ...cfg, configFile: found ? file : null };
 }
+
+/**
+ * The config keys the Slack bridge takes live — `slack.owner` and `slack.spawn` — re-read when the
+ * file changes (`fleet config set`), with no restart. The rest of `slack` (host, bridges) is read at
+ * start. Returns a check to call now and then: true when it took new values. A file that does not
+ * parse keeps the old values (the next change is tried again).
+ */
+export function createSlackSettingsReloader({ config, env = process.env, home = os.homedir(), fsImpl = fs, log = () => {} }) {
+  const file = configPath(env, home);
+  const mtime = () => {
+    try {
+      return fsImpl.statSync(file).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
+  let seen = mtime();
+  return function reload() {
+    const m = mtime();
+    if (m === seen) return false;
+    let fresh;
+    try {
+      fresh = loadConfig({ env, home, fsImpl, log: { warn() {} } });
+    } catch (err) {
+      log(`[slack] config changed but did not load, keeping the old settings: ${err?.message ?? err}`);
+      return false;
+    }
+    seen = m;
+    const before = JSON.stringify([config.slack.owner, config.slack.spawn]);
+    config.slack.owner = fresh.slack.owner;
+    config.slack.spawn = fresh.slack.spawn;
+    return JSON.stringify([config.slack.owner, config.slack.spawn]) !== before;
+  };
+}
