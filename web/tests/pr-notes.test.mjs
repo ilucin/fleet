@@ -144,6 +144,7 @@ test('HTTP: …/prs/:owner/:repo/:n — diff from the clone, notes, ask, handoff
   assert.ok(started[0].tools.includes('Bash(git show:*)'));
   assert.match(started[0].prompt, new RegExp(`git show ${HEAD}:<path>`));
   assert.match(started[0].prompt, /About src\/x\.ts:3-5:/);
+  assert.doesNotMatch(started[0].prompt, /do not run commands/);
 
   // Handoff: the unresolved notes as the session's first prompt, on the PR's worktree.
   await call(`${base}/notes`, 'POST', { ...anchor, start: 8, end: 8, body: 'Second note' });

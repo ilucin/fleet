@@ -1847,7 +1847,7 @@ export function createApi({
       ].join(' ');
       try {
         const file = typeof body?.path === 'string' ? body.path : null;
-        const prompt = askPrompt({ ...body, path: file, display: file, context });
+        const prompt = askPrompt({ ...body, path: file, display: file, context, readGit: true });
         const label = file && Number.isInteger(body.start) ? `${file}:${body.start}${body.end !== body.start ? `–${body.end}` : ''}` : null;
         const ask = asks.start({ cwd: repoPath, resume: null, prompt, question: String(body.question).trim(), label, tools: PR_ASK_TOOLS });
         return { status: 200, body: { host: config.self, ask } };

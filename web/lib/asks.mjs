@@ -34,12 +34,14 @@ export const validAskId = (id) => typeof id === 'string' && ASK_ID_RE.test(id);
  * The prompt: the selection (file, lines, the code fenced), the question, and the rule that this
  * is a side question. `context`: optional text before it (a PR's title and description).
  */
-export function askPrompt({ question, display, path: file, side, start, end, code, context = '' }) {
+export function askPrompt({ question, display, path: file, side, start, end, code, context = '', readGit = false }) {
   const q = typeof question === 'string' ? question.trim() : '';
   if (!q) throw new AskError('a question is required', 400);
   if (q.length > MAX_QUESTION) throw new AskError(`the question is longer than ${MAX_QUESTION} characters`, 400);
   const parts = [
-    'A side question from the code reviewer. Answer it briefly and directly. Do not change any files, do not run commands, and do not continue or mention the main task — this answer is not part of the conversation.',
+    readGit
+      ? 'A side question from the code reviewer. Answer it briefly and directly. Do not change anything; read the code with your read-only tools and the read-only git commands below.'
+      : 'A side question from the code reviewer. Answer it briefly and directly. Do not change any files, do not run commands, and do not continue or mention the main task — this answer is not part of the conversation.',
   ];
   if (typeof context === 'string' && context.trim()) parts.push(context.trim().slice(0, MAX_CONTEXT));
   const hasRange = typeof file === 'string' && file && Number.isInteger(start) && Number.isInteger(end);
