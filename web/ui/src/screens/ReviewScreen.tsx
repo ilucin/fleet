@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, Columns2Icon, FoldVerticalIcon, FolderGitIcon, GitBranchIcon, ListTreeIcon, MessageSquarePlusIcon, MessageSquareTextIcon, RowsIcon, UnfoldVerticalIcon } from 'lucide-react'
+import { SparklesIcon, ChevronLeftIcon, Columns2Icon, FoldVerticalIcon, FolderGitIcon, GitBranchIcon, ListTreeIcon, MessageSquarePlusIcon, MessageSquareTextIcon, RowsIcon, UnfoldVerticalIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
 
@@ -6,6 +6,9 @@ import { HostBadge } from '@/components/HostBadge'
 import { DiffStat, FileDiff, type DiffView } from '@/components/review/FileDiff'
 import { FileTree } from '@/components/review/FileTree'
 import { CommentComposer, ReviewThreadCard } from '@/components/review/ReviewThread'
+import { SideAsks } from '@/components/review/SideAsks'
+import { api } from '@/api/client'
+import { useAsks, type AskBody } from '@/hooks/useAsks'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -153,14 +156,23 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
   const orphans = useMemo(() => (data ? orphanThreadsByKey(allKeys, threads, defaultRoot) : []), [data, allKeys, threads, defaultRoot])
   const [selection, setSelection] = useState<LineSelection | null>(null)
   const [composing, setComposing] = useState(false)
+  // Opened from the selection's "Ask": the composer asks on the side by default.
+  const [asking, setAsking] = useState(false)
   const onLine = useCallback((path: string, side: Side, n: number, extend: boolean) => {
     setSelection((prev) => selectLine(prev, path, side, n, extend))
     setComposing(true)
+    setAsking(false)
   }, [])
   const closeComposer = useCallback(() => {
     setComposing(false)
     setSelection(null)
+    setAsking(false)
   }, [])
+
+  // --- side questions: a read-only fork of the session answers; nothing reaches its thread ---
+  const askStart = useCallback((body: AskBody) => api.ask(host, id, body).then((r) => r.ask), [host, id])
+  const side = useAsks(host, host && id ? askStart : null)
+  const askFiles = useRef(new Map<string, string>()) // ask id → file key, to jump back to its lines
   const renderThread = useCallback((t: ReviewThread, outdated: boolean) => <ReviewThreadCard thread={t} outdated={outdated} actions={rv} />, [rv])
   // Select code with the mouse → a "Comment on lines …" button at the selection's end.
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -185,13 +197,14 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
     const rect = s.getRangeAt(0).getBoundingClientRect()
     // Inside the diff column (the session pane sits to its right).
     const box = bodyRef.current?.getBoundingClientRect()
-    const right = (box?.right ?? window.innerWidth) - 230
+    const right = (box?.right ?? window.innerWidth) - 300
     setPick({ sel: { path: key, ...range }, x: Math.max(box?.left ?? 0, Math.min(rect.right, right)), y: Math.min(rect.bottom + 6, window.innerHeight - 48) })
   }, [])
-  const commentOnPick = () => {
+  const commentOnPick = (ask = false) => {
     if (!pick) return
     setSelection(pick.sel)
     setComposing(true)
+    setAsking(ask)
     setPick(null)
     window.getSelection()?.removeAllRanges()
   }
@@ -213,6 +226,12 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
             sel.repo.base?.sha ?? null,
           )
         }
+        asking={asking}
+        onAsk={async (question) => {
+          const a = await side.ask({ root: sel.repo.root, path: sel.file.path, side: selection.side, start: selection.start, end: selection.end, code: selectionCode(sel.file, selection), question })
+          if (a) askFiles.current.set(a.id, selection.path)
+          return !!a
+        }}
       />
     ) : null
   const [submitOpen, setSubmitOpen] = useState(false)
@@ -399,18 +418,41 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane'
       ) : null}
       {rv.error ? <p className="text-xs text-destructive">Comments: {rv.error}</p> : null}
       {pick ? (
-        <Button
-          size="sm"
-          className="fixed z-30 shadow-lg"
-          style={{ left: pick.x, top: pick.y }}
-          // Keep the text selection while clicking.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={commentOnPick}
-        >
-          <MessageSquarePlusIcon />
-          Comment on {rangeText(pick.sel)}
-        </Button>
+        <div className="fixed z-30 flex gap-1" style={{ left: pick.x, top: pick.y }}>
+          <Button
+            size="sm"
+            className="shadow-lg"
+            // Keep the text selection while clicking.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => commentOnPick()}
+          >
+            <MessageSquarePlusIcon />
+            Comment on {rangeText(pick.sel)}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-background shadow-lg"
+            title="Ask Claude about these lines on the side — the answer stays out of the session"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => commentOnPick(true)}
+          >
+            <SparklesIcon />
+            Ask
+          </Button>
+        </div>
       ) : null}
+      <SideAsks
+        asks={side.asks}
+        onClose={(qid) => {
+          askFiles.current.delete(qid)
+          side.close(qid)
+        }}
+        onOpen={(a) => {
+          const key = askFiles.current.get(a.id)
+          if (key) openFile(key)
+        }}
+      />
     </div>
   )
 

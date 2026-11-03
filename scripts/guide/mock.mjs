@@ -544,6 +544,11 @@ const DIFF_FILES = {
   }`), 'import { round } from \'../money\'')]),
   ],
 }
+// A side question (…/ask): answered at once with a canned reply.
+function sideAsk(b, id = 'q-0000000001') {
+  return { id, status: 'done', question: b.question || 'Why sum in BigInt instead of number?', label: b.path ? `${b.path}:${b.start}–${b.end}` : 'src/billing/invoice_total.ts:14–15', text: 'Because `invoiceTotal` also sums **monthly statements**: up to ~40k lines in KWD (3 decimals). In minor units that can pass `2^53`, where `number` stops being exact. BigInt keeps the sum exact; the cost is ~40 ns per line.', activity: null, error: null, costUsd: 0.004, forked: true, startedAt: now() - 9000, endedAt: now() }
+}
+
 function diffs(host, id) {
   if (!(host === 'workstation' && id.endsWith('0001') && id.startsWith('a1'))) return { host, id, cwd: find(host, id)?.cwd ?? null, fingerprint: 'demo', unchanged: false, repos: [] }
   const repo = (root, label, branch, base) => {
@@ -657,12 +662,14 @@ function route(method, p, q, b) {
     if (what === 'brief') return brief(host, id)
     if (what === 'diffs') return diffs(host, id)
     if (what === 'review') return review(host, id)
+    if (what === 'ask') return { host, id, ask: sideAsk(b) }
     if (what === 'complete') { const kind = q.get('kind'); return kind === 'skills' ? { host, id, kind, skills: SKILLS } : kind === 'files' ? { host, id, kind, files: ['README.md', 'docs/billing/rounding.md', 'docs/onboarding/v3.md', 'CHANGELOG.md'] } : { host, id, kind, available: true, notes: [{ ref: 'billing', path: 'projects/billing.md', title: 'Billing' }] } }
     if (what === 'files/plain') return { host, root: sess?.cwd, files: ['customers', 'invoices', 'money', 'statements'].map((n) => `${sess?.cwd}/docs/specs/${n}.plain`), truncated: false }
     if (what === 'files/stat') return { host, id, cwd: sess?.cwd, home: H, files: (b.paths || []).map((input) => { const rel = input.replace(/:\d+(:\d+)?$/, ''); const ok = /^(src|test|docs)\//.test(rel); return ok ? { input, path: `${sess?.cwd}/${rel}`, rel, exists: true, isFile: true, size: 2048, mtime: now() - 20 * M, kind: kindOf(rel) } : { input, path: input, exists: false } }) }
     if (what === 'stack/spawn') return { host, stack: stack(), created: true, generated: true, spawn: { name: 'x', dir: '~', tmuxSession: 'x', command: 'claude', trusted: true } }
     return { ok: true, host, id, result: 'renamed', title: b.title }
   }
+  if ((s = rest.match(/^asks\/([^/]+)$/))) return { host, ask: sideAsk({}, decodeURIComponent(s[1])) }
   if (rest === 'harnesses') return HARN(host)
   if (rest === 'spawn-dirs') return spawnDirs(host)
   if (rest === 'jobs') return jobs(host)

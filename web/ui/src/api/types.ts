@@ -1621,6 +1621,25 @@ export interface ReviewAnchor {
   code: string[]
 }
 
+/** A side question about the diff (POST …/ask, GET /asks/:id): a read-only fork of the session, kept in memory on its host only. */
+export interface SideAsk {
+  id: string
+  status: 'running' | 'done' | 'error' | 'cancelled'
+  question: string
+  /** `path:start–end` of the selection, or null */
+  label: string | null
+  /** the answer so far (markdown); the final answer once done */
+  text: string
+  /** the tool it is using right now (`Read`, `Grep`), or null */
+  activity: string | null
+  error: string | null
+  costUsd: number | null
+  /** asked in a fork of the session (it knew the conversation) */
+  forked: boolean
+  startedAt: number
+  endedAt: number | null
+}
+
 /** One checkout in GET …/diffs: the session's cwd checkout first, then those of the files it worked on. */
 export interface DiffRepo {
   root: string

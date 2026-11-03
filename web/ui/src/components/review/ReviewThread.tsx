@@ -1,4 +1,4 @@
-import { CheckIcon, CircleDotIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
+import { CheckIcon, CircleDotIcon, LoaderIcon, SparklesIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ReviewEntry, ReviewThread as Thread } from '@/api/types'
@@ -20,14 +20,29 @@ export function CommentComposer({
   drafts,
   onCancel,
   onSubmit,
+  onAsk,
+  asking = false,
+  submitLabel = 'Add single comment',
 }: {
   label: string
   drafts: number
   onCancel: () => void
   onSubmit: (body: string, draft: boolean) => Promise<boolean>
+  /** A side question about the lines instead: answered apart from the session's thread. */
+  onAsk?: (question: string) => Promise<boolean>
+  /** Opened to ask (the selection's "Ask" button): ⌘↵ asks. */
+  asking?: boolean
+  submitLabel?: string
 }) {
   const [body, setBody] = useState('')
-  const [busy, setBusy] = useState<false | 'single' | 'draft'>(false)
+  const [busy, setBusy] = useState<false | 'single' | 'draft' | 'ask'>(false)
+  const ask = async () => {
+    if (!onAsk || !body.trim() || busy) return
+    setBusy('ask')
+    const ok = await onAsk(body.trim())
+    setBusy(false)
+    if (ok) onCancel()
+  }
   const ref = useRef<HTMLTextAreaElement>(null)
   useEffect(() => ref.current?.focus(), [])
   const go = async (draft: boolean) => {
@@ -39,7 +54,7 @@ export function CommentComposer({
   }
   return (
     <div className="border-y bg-card px-3 py-2.5 font-sans">
-      <p className="mb-1.5 text-xs text-muted-foreground">Comment on {label}</p>
+      <p className="mb-1.5 text-xs text-muted-foreground">{asking && onAsk ? 'Ask about' : 'Comment on'} {label}</p>
       <Textarea
         ref={ref}
         value={body}
@@ -47,26 +62,40 @@ export function CommentComposer({
         onKeyDown={(e) => {
           if (isSubmit(e)) {
             e.preventDefault()
-            void go(drafts > 0)
+            if (asking && onAsk) void ask()
+            else void go(drafts > 0)
           } else if (e.key === 'Escape') {
             e.stopPropagation()
             onCancel()
           }
         }}
-        placeholder="Ask, suggest a change… (the selected lines go with it)"
+        placeholder={asking && onAsk ? 'Ask Claude about these lines — answered on the side, not in the session…' : 'Ask, suggest a change… (the selected lines go with it)'}
         className="min-h-20 bg-background text-sm"
       />
       <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
+        {onAsk ? (
+          <Button
+            variant={asking ? 'default' : 'outline'}
+            size="sm"
+            disabled={!body.trim() || !!busy}
+            onClick={() => void ask()}
+            title="Answered by a read-only copy of the session: nothing goes into its conversation"
+            className="mr-auto"
+          >
+            {busy === 'ask' ? <LoaderIcon className="animate-spin" /> : <SparklesIcon />}
+            Ask on the side
+          </Button>
+        ) : null}
         <Button variant={drafts > 0 ? 'default' : 'outline'} size="sm" disabled={!body.trim() || !!busy} onClick={() => void go(true)}>
           {busy === 'draft' ? <LoaderIcon className="animate-spin" /> : null}
           {drafts > 0 ? 'Add review comment' : 'Start a review'}
         </Button>
         <Button variant={drafts > 0 ? 'outline' : 'default'} size="sm" disabled={!body.trim() || !!busy} onClick={() => void go(false)}>
           {busy === 'single' ? <LoaderIcon className="animate-spin" /> : null}
-          Add single comment
+          {submitLabel}
         </Button>
       </div>
     </div>

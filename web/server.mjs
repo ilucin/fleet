@@ -24,6 +24,7 @@ import { createOperator } from './lib/operator.mjs';
 import { createCompleter } from './lib/complete.mjs';
 import { createDiffer } from './lib/diff.mjs';
 import { createReviews } from './lib/reviews.mjs';
+import { createAsks } from './lib/asks.mjs';
 import { createFiles } from './lib/files.mjs';
 import { createNotes } from './lib/notes.mjs';
 import { createSpawnDirsEditor } from './lib/spawn-dirs.mjs';
@@ -265,6 +266,8 @@ const handleApi = createApi({
   touched,
   completer: createCompleter({ home: os.homedir(), run }),
   differ: createDiffer({ run }),
+  // Diff reviewer side questions: a read-only `claude -p` fork of the session, kept in memory only.
+  asks: createAsks({ bin: claudeBin }),
   // Diff reviewer threads: typed into the session like a send, answers read from its transcript.
   reviews: createReviews({
     dir: path.join(fleetStateDir(process.env), 'reviews'),
