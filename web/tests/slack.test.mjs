@@ -325,6 +325,52 @@ test('blocked: nothing is said for a session that never got to the thread', asyn
   assert.equal(fx.slack.calls.filter((c) => c.method === 'chat.postMessage').length, 0);
 });
 
+test('several owners (slack.owners): each is marked; the blocked DM goes to the one who started it, else to nobody', async (t) => {
+  const settings = { owner: 'UOWNER', owners: ['U1'] };
+  const fx = fixture(t, { settings });
+  fx.slack.handlers['conversations.open'] = ({ users }) => ({ channel: { id: `D-${users}` } });
+  const dms = () => fx.slack.calls.filter((c) => c.method === 'chat.postMessage' && String(c.params.channel).startsWith('D-'));
+  const block = async (l) => {
+    fx.advance(16_000);
+    await fx.bridge.tick(); // the intro: the session has been in the thread
+    assert.ok(fx.sent.at(-1).text.includes(l.id));
+    fx.sessions[0].status = 'waiting';
+    fx.sessions[0].waiting_for = 'permission';
+    fx.advance(16_000);
+    await fx.bridge.tick();
+    fx.advance(BLOCKED_AFTER_MS);
+    await fx.bridge.tick();
+    fx.sessions[0].status = 'idle';
+    fx.slack.handlers['chat.update'] = () => ({});
+    fx.slack.handlers['reactions.remove'] = () => ({});
+    fx.advance(16_000);
+    await fx.bridge.tick();
+    await fx.bridge.unlink(l.id);
+  };
+
+  // Linked by hand (no starter): two owners, so nobody is DMed; the thread still is told.
+  const a = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  await fx.bridge.tick();
+  assert.match(fx.sent.at(-1).text, /Owner \(UOWNER, the owner of this session\)/);
+  assert.match(fx.sent.at(-1).text, /Alex \(U1, the owner of this session\)/);
+  await block(a);
+  assert.equal(dms().length, 0);
+  assert.ok(fx.slack.calls.some((c) => c.method === 'chat.postMessage' && /waiting on its owner/.test(c.params.text)));
+
+  // Started from Slack by an owner: the DM goes to them.
+  const b = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h', firstFrom: 'U1', first: 'go' });
+  assert.equal(b.startedBy.owner, true);
+  await block(b);
+  assert.deepEqual(dms().map((c) => c.params.channel), ['D-U1']);
+
+  // One owner left (a config change, live): theirs, whoever linked it.
+  settings.owners = [];
+  const c = await fx.bridge.link({ session: SID, url: URL_, minutes: 60, host: 'h' });
+  await block(c);
+  assert.deepEqual(dms().map((x) => x.params.channel), ['D-U1', 'D-UOWNER']);
+  assert.deepEqual((await fx.bridge.status()).owners, ['UOWNER']);
+});
+
 test('blockedWhat: a short label without Slack markup', () => {
   assert.equal(blockedWhat(null), 'input needed');
   assert.equal(blockedWhat('exec `approval`  <now>'), 'exec approval now');

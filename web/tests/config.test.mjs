@@ -248,3 +248,13 @@ test('createSlackSettingsReloader: slack.owner / slack.spawn follow the file; a 
   assert.equal(config.slack.owner, 'UBBBBB');
   assert.match(logged[0], /did not load/);
 });
+
+test('slack.owners: a list, merged with slack.owner (first); bad ids refused', () => {
+  const n = (slack) => normalizeConfig({ self: 'ws', slack: { host: 'ws', ...slack } }, { env: {}, home: '/home/t' }).slack;
+  assert.deepEqual([n({ owner: 'UAAAAA' }).owner, n({ owner: 'UAAAAA' }).owners], ['UAAAAA', ['UAAAAA']]);
+  const both = n({ owner: 'UAAAAA', owners: ['UBBBBB', 'UAAAAA'] });
+  assert.deepEqual([both.owner, both.owners], ['UAAAAA', ['UAAAAA', 'UBBBBB']]);
+  assert.deepEqual([n({ owners: ['UBBBBB'] }).owner, n({}).owners], ['UBBBBB', []]);
+  assert.throws(() => n({ owners: 'UAAAAA' }), /owners must be a list/);
+  assert.throws(() => n({ owners: ['nope'] }), /owners must be a list/);
+});

@@ -170,7 +170,7 @@ and the thread so far. Messages are typed in once the session is idle — severa
 each marked with its author's Slack name and id (and `→ mentions you` / `→ to you`); the ones
 addressed to it get an 👀 reaction. A linked session that waits on you (a permission prompt, a
 question in the terminal) for over 30 s says so in the thread — only the kind of prompt, never its
-details — and DMs you (`slack.owner`) a link to it in Fleet's web UI; messages for it meanwhile get
+details — and DMs you (`slack.owner`; with several `slack.owners`, the owner who started it from Slack, if one did) a link to it in Fleet's web UI; messages for it meanwhile get
 ⏳, and once it moves on both posts are edited to say so. When the link ends, delivery stops and, if the session ever spoke there, the thread is
 told it left. The commands talk to this machine's web server, which proxies to `slack.host` (or, for a host listed in `slack.bridges`, to that host's own bridge).
 Sessions on any host can be linked: the bridge lists and types into them through their host's

@@ -124,9 +124,9 @@ pub fn run(action: &ConfigAction) -> Result<()> {
 }
 
 /// A key the web server reads only when it starts: what to do for it to take effect. `None`
-/// for keys read on every call (the CLI's) or reloaded live (`slack.owner`, `slack.spawn`).
+/// for keys read on every call (the CLI's) or reloaded live (`slack.owner`, `slack.owners`, `slack.spawn`).
 pub fn restart_note(key: &str) -> Option<&'static str> {
-    let live = ["slack.owner", "slack.spawn"];
+    let live = ["slack.owner", "slack.owners", "slack.spawn"];
     if live
         .iter()
         .any(|k| key == *k || key.starts_with(&format!("{k}.")))
@@ -169,6 +169,7 @@ mod tests {
     #[test]
     fn restart_note_only_for_keys_read_at_start() {
         assert!(restart_note("slack.owner").is_none());
+        assert!(restart_note("slack.owners").is_none());
         assert!(restart_note("slack.spawn").is_none());
         assert!(restart_note("slack.spawn.host").is_none());
         assert!(restart_note("slack.host").is_some());

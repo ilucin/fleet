@@ -167,7 +167,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `gh` | `gh` binary for `fleet prs`; `null` → `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin` |
 | `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 | `inbox` | the [inbox](#inbox): `host` (the one host whose web server runs it; peers proxy `/api/inbox` there — unset = no inbox), `scanMinutes` (60), `workHours` (`[8, 18]`), `workDays` (`[0,1,2,3,4,5,6]`, 0 = Sunday; the three are also set from Settings → Inbox), `model` (`haiku`, the Slack + mail scan), `briefModel` (`haiku`), `briefMinutes` (45), `language` (`"English"`, the brief's), `comms` (`true`; `false` = no Slack + mail scan). `FLEET_WEB_INBOX=0` turns it off on a server |
-| `slack` | [Slack links](#slack-links): `host` (the host whose web server runs the bridge; peers proxy `/api/slack` there — unset = off), `owner` (your Slack user id `U…`: your messages in a linked thread are marked as the owner's), `bridges` (`{ "<host>": "<bridge host>" }`: that host's sessions are linked by another bridge, one with its own Slack app; set it on every server you link from), `spawn` (read by the bridge's server: a mention of its app [opens a session](#slack-links) — `{ host (default: this one), dir (a spawn dir there; `~/…` = that host's home; none = its first), model, harness, ghIdentity, minutes (`1d`), mode, task, from }`, `from`: `"anyone"` in a channel the app is in, or a list of user ids; default the owner only). `FLEET_WEB_SLACK=0` turns it off on a server |
+| `slack` | [Slack links](#slack-links): `host` (the host whose web server runs the bridge; peers proxy `/api/slack` there — unset = off), `owner` (your Slack user id `U…`: your messages in a linked thread are marked as the owner's), `owners` (a list of such ids, for a machine several people own, e.g. a shared shed: each is marked as an owner, may start sessions with a mention when `spawn.from` is unset, and `owner` is added first), `bridges` (`{ "<host>": "<bridge host>" }`: that host's sessions are linked by another bridge, one with its own Slack app; set it on every server you link from), `spawn` (read by the bridge's server: a mention of its app [opens a session](#slack-links) — `{ host (default: this one), dir (a spawn dir there; `~/…` = that host's home; none = its first), model, harness, ghIdentity, minutes (`1d`), mode, task, from }`, `from`: `"anyone"` in a channel the app is in, or a list of user ids; default the owners only). `FLEET_WEB_SLACK=0` turns it off on a server |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
 (writes go through the raw JSON, never the typed view); a missing file is fine — this machine is
@@ -738,8 +738,10 @@ server's name as `host`, and the reply's pane is checked on that host.
   apart; the ones addressed to it get an 👀 reaction when typed in.
 - **Blocked**: every 15 s the bridge checks the sessions of links that have been in their thread.
   One `waiting` for 30 s gets a notice in the thread (the registry's `waiting_for` label only — no
-  command, no path) and a DM to `slack.owner` with a link to the session's page in its host's web
-  UI (`hosts.<host>.web` + `#/s/<host>/<id>`; a DM link with the owner gets only that one). Messages
+  command, no path) and a DM with a link to the session's page in its host's web
+  UI (`hosts.<host>.web` + `#/s/<host>/<id>`; a DM link with an owner gets only that one). The DM
+  goes to the owner the link is a DM with, else the owner who started the session from Slack, else
+  the only owner; several owners and none of those: no DM (the thread is still told). Messages
   that would wake it get ⏳ meanwhile. When it is no longer `waiting`, both posts are edited
   (`chat.update`), the ⏳ come off as the messages go in. The Link's `blocked` (`{ at, what }`,
   else null) shows it. `fleet slack guard`, a `PreToolUse` hook on `AskUserQuestion`, keeps a
@@ -759,7 +761,7 @@ server's name as `host`, and the reply's pane is checked on that host.
   it act on that host. The app needs the `message.channels` (and, for private channels,
   `message.groups`) events. Settings → Slack (`PUT /api/slack/spawn`) turns it on or off per bridge
   and applies at once; so does a change to the file (`fleet config set`, a hand edit), within a few seconds; `null` turns it off.
-- **Live settings**: `slack.owner` and `slack.spawn` are re-read when the config file changes (the
+- **Live settings**: `slack.owner`, `slack.owners` and `slack.spawn` are re-read when the config file changes (the
   server checks every 5 s); a link marks whoever is the owner now. `slack.host` and `slack.bridges`
   are read at start: changing them needs a web server restart (`fleet config set` says so).
   A link's `sessionName` follows the session's name (`/rename`) whenever the bridge lists it.

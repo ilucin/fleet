@@ -12,7 +12,7 @@
 //     stacks: { enabled, model },         (read by the CLI; the server only reports them)
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
 //     inbox: { host, scanMinutes, workHours, workDays, model, briefModel, briefMinutes, language, comms },
-//     slack: { host, owner, bridges, spawn },
+//     slack: { host, owner, owners, bridges, spawn },
 //     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir }, hidden? } ] }
 //
 // A missing config file is not an error: the server runs as a single local host
@@ -513,10 +513,11 @@ export function normalizeConfig(
   if (env.FLEET_WEB_INBOX != null && env.FLEET_WEB_INBOX !== '' && /^(0|false|off|no)$/i.test(env.FLEET_WEB_INBOX)) inbox.enabled = false;
 
   // slack: Slack links (lib/slack.mjs). One host runs the bridge (`slack.host`); the others proxy
-  // /api/slack there. `owner` is your Slack user id (your messages there are marked as the owner's).
+  // /api/slack there. `owner` is your Slack user id (your messages there are marked as the owner's);
+  // `owners`, a list of them, for a machine several people own (a shared shed). Both may be set.
   // FLEET_WEB_SLACK=0 turns it off on this server.
   const sl = raw.slack == null ? {} : raw.slack;
-  if (!isObject(sl)) throw new Error('config.slack must be an object { host, owner, bridges }');
+  if (!isObject(sl)) throw new Error('config.slack must be an object { host, owner, owners, bridges }');
   if (sl.host != null && (typeof sl.host !== 'string' || !sl.host.trim())) throw new Error('config.slack.host must be a host name');
   if (sl.owner != null && (typeof sl.owner !== 'string' || !/^[UW][A-Z0-9]{4,}$/.test(sl.owner.trim()))) {
     throw new Error('config.slack.owner must be a Slack user id (U…)');
@@ -531,7 +532,13 @@ export function normalizeConfig(
       bridges[h] = b.trim();
     }
   }
-  const slack = { host: sl.host == null ? null : sl.host.trim(), owner: sl.owner == null ? null : sl.owner.trim(), bridges, spawn: slackSpawn(sl.spawn) };
+  const userId = (v) => typeof v === 'string' && /^[UW][A-Z0-9]{4,}$/.test(v.trim());
+  if (sl.owners != null && (!Array.isArray(sl.owners) || !sl.owners.every(userId))) {
+    throw new Error('config.slack.owners must be a list of Slack user ids (U…)');
+  }
+  // `owners`: everyone who owns this machine's sessions, `owner` first; `owner`: the first of them.
+  const owners = [...new Set([sl.owner, ...(sl.owners ?? [])].filter((v) => v != null).map((v) => v.trim()))];
+  const slack = { host: sl.host == null ? null : sl.host.trim(), owner: owners[0] ?? null, owners, bridges, spawn: slackSpawn(sl.spawn) };
   slack.enabled = slack.host != null && slack.host === self.trim();
   if (env.FLEET_WEB_SLACK != null && env.FLEET_WEB_SLACK !== '' && /^(0|false|off|no)$/i.test(env.FLEET_WEB_SLACK)) slack.enabled = false;
 
@@ -766,7 +773,7 @@ export function loadConfig({ env = process.env, home = os.homedir(), webRoot = n
 }
 
 /**
- * The config keys the Slack bridge takes live — `slack.owner` and `slack.spawn` — re-read when the
+ * The config keys the Slack bridge takes live — `slack.owner(s)` and `slack.spawn` — re-read when the
  * file changes (`fleet config set`), with no restart. The rest of `slack` (host, bridges) is read at
  * start. Returns a check to call now and then: true when it took new values. A file that does not
  * parse keeps the old values (the next change is tried again).
@@ -792,9 +799,11 @@ export function createSlackSettingsReloader({ config, env = process.env, home = 
       return false;
     }
     seen = m;
-    const before = JSON.stringify([config.slack.owner, config.slack.spawn]);
+    const snap = () => JSON.stringify([config.slack.owners, config.slack.spawn]);
+    const before = snap();
     config.slack.owner = fresh.slack.owner;
+    config.slack.owners = fresh.slack.owners;
     config.slack.spawn = fresh.slack.spawn;
-    return JSON.stringify([config.slack.owner, config.slack.spawn]) !== before;
+    return snap() !== before;
   };
 }

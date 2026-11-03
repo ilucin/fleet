@@ -35,7 +35,7 @@
 //
 // Blocked: a linked session that has waited on its owner (a permission prompt, a question in the
 // terminal) for BLOCKED_AFTER_MS says so in the thread — only what kind of prompt, never its
-// details — and DMs the owner (`slack.owner`) a link to the session in Fleet, so they can unblock
+// details — and DMs its owner (`slack.owner(s)`; see `blockedOwner`) a link to the session in Fleet, so they can unblock
 // it. Messages for it meanwhile get ⏳. Once it moves on, both posts are edited to say so. A
 // linked session never asks with AskUserQuestion (Slack cannot show it): `fleet slack guard`, a
 // PreToolUse hook, denies the call and tells it to ask in the thread.
@@ -197,7 +197,8 @@ function sessionTitle(s) {
 
 function whoLine(m, link, names) {
   const name = names[m.user] ?? m.user ?? 'someone';
-  const owner = link.owner && m.user === link.owner ? ', the owner of this session' : '';
+  const owners = link.owners ?? (link.owner ? [link.owner] : []);
+  const owner = m.user && owners.includes(m.user) ? ', the owner of this session' : '';
   return `${name} (${m.user}${owner})`;
 }
 
@@ -472,7 +473,7 @@ export function createSocketClient({ getAppToken, onEvent, fetch = globalThis.fe
 
 /**
  * The bridge.
- *   settings      { owner }  (config `slack`)
+ *   settings      { owner, owners, spawn }  (config `slack`; read live — the server reloads it)
  *   call          createSlackApi(...)
  *   socket        createSocketClient-like { start, stop, status } (null: events come through handleEvent only)
  *   self          this host's name (a link with no host is a session here)
@@ -580,6 +581,21 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     } catch {
       names[user] = user;
     }
+  }
+
+  /** `slack.owners` (with `slack.owner`), as configured now. */
+  const ownerIds = () => [...new Set([...(settings.owner ? [settings.owner] : []), ...(settings.owners ?? [])])];
+  const isOwner = (user) => Boolean(user) && ownerIds().includes(user);
+  /**
+   * Whom to DM when a linked session waits on its owner: the owner whose DM it is linked to, else
+   * the owner who started it from Slack, else the one owner there is. Several owners and none of
+   * those: nobody — the thread is told, five people are not.
+   */
+  function blockedOwner(l) {
+    if (l.dm?.user && isOwner(l.dm.user)) return l.dm.user;
+    if (l.startedBy?.user && isOwner(l.startedBy.user)) return l.startedBy.user;
+    const all = ownerIds();
+    return all.length === 1 ? all[0] : null;
   }
 
   const isActive = (l) => l.until == null || l.until > now();
@@ -707,6 +723,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
       task: taskText,
       mode: mode ?? 'mention',
       owner: settings.owner ?? null,
+      owners: ownerIds(),
       createdAt: now(),
       until,
       minutes: mins,
@@ -715,7 +732,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
       seen: history.map((m) => m.ts).slice(-MAX_SEEN),
       delivered: 0,
       replies: 0,
-      ...(firstFrom ? { startedBy: { user: firstFrom, name: names[firstFrom] ?? firstFrom, owner: firstFrom === settings.owner } } : {}),
+      ...(firstFrom ? { startedBy: { user: firstFrom, name: names[firstFrom] ?? firstFrom, owner: isOwner(firstFrom) } } : {}),
     };
     l.intro = linkPrompt(l, { history: people.map((m) => fromSlack(m)), names, first: firstText });
     links.push(l);
@@ -841,7 +858,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
       threadTs: m.thread_ts ?? null,
       user: m.user ?? null,
       name: m.user ? (names[m.user] ?? m.user) : (m.bot_profile?.name ?? m.username ?? null),
-      owner: Boolean(settings.owner && m.user === settings.owner),
+      owner: isOwner(m.user),
       you: Boolean(bot && ((m.user && m.user === bot.userId) || (m.bot_id && m.bot_id === bot.botId))),
       bot: Boolean(m.bot_id),
       subtype: m.subtype ?? null,
@@ -989,12 +1006,12 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     if (!covered) startFromMention(ev, threadTs).catch((err) => log(`[slack] mention: ${err?.message ?? err}`));
   }
 
-  /** Who may open a session with a mention (`slack.spawn.from`): anyone, a list, else the owner. */
+  /** Who may open a session with a mention (`slack.spawn.from`): anyone, a list, else an owner. */
   function mayStart(user) {
     const from = settings.spawn?.from ?? null;
     if (from === 'anyone') return true;
     if (Array.isArray(from)) return from.includes(user);
-    return Boolean(settings.owner) && user === settings.owner;
+    return isOwner(user);
   }
 
   /**
@@ -1132,7 +1149,9 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     const msgs = l.pending.slice();
     await Promise.all([...new Set(msgs.map((m) => m.user))].map(nameOf));
     // The intro first, on its own; messages that came meanwhile follow on the next tick.
-    l.owner = settings.owner ?? null; // `slack.owner` as it is now (it changes without a restart)
+    // `slack.owner(s)` as they are now (they change without a restart)
+    l.owner = settings.owner ?? null;
+    l.owners = ownerIds();
     const text = l.intro ?? messagesPrompt(l, msgs, { names });
     await send(s, text, l.host || self);
     lastDelivery.set(l.id, now());
@@ -1183,7 +1202,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     l.blocked = { at: now(), what };
     await save(); // before posting: a failed post is not retried every tick
     const name = sessionTitle(s) || l.sessionName || 'session';
-    const owner = settings.owner;
+    const owner = blockedOwner(l);
     const ownersDm = Boolean(owner) && l.dm?.user === owner; // the owner's DM: their notice is the only one
     if (!ownersDm) {
       try {
@@ -1261,6 +1280,7 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
         socket: socket?.status() ?? { connected: false, error: 'no socket' },
         bot: me,
         owner: settings.owner ?? null,
+        owners: ownerIds(),
         // slack.spawn as set (`host` resolved: none = this bridge's); `from: null` = the owner only.
         spawn: settings.spawn ? { ...settings.spawn, host: settings.spawn.host || self } : null,
         links: links.map(view),
