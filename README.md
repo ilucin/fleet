@@ -95,7 +95,7 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | Productive tasks | `tasks` · `task show\|status\|spawn\|schedule` — your open Productive tasks (due soon, in progress, to do), moved between statuses, a session started on one now or on its start date |
 | later | `schedule add --at <when> \| --task <task>` · `schedule` · `schedule cancel` — one-off sessions started later on this host |
 | git repos | `repos` · `repos sync` · `repos install-service` — fetch + fast-forward every repo under `~/Code`, on a timer |
-| bots | `bots` · `bots show\|run\|enable\|disable` · `bots install-service` — agent sessions a host starts from a recipe (prompt + schedule), like Claude Code routines; everything a bot session spawns joins its run. `jobs` is the old name, still an alias |
+| bots | `bots` · `bots show\|run\|enable\|disable` · `bots check\|forget` · `bots install-service` — agent sessions a host starts from a recipe (prompt + schedule, or a GitHub trigger: a new branch matching a pattern), like Claude Code routines; everything a bot session spawns joins its run. `jobs` is the old name, still an alias |
 | web | `web serve` · `web build` · `web install-service` |
 | agents | `mcp` — every command above as an MCP tool, for Claude Code and other agents |
 

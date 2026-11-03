@@ -229,7 +229,19 @@ function JobCard({
               {j.scheduleText ?? <span className="font-mono">{j.schedule}</span>}
             </span>
             <span>·</span>
-            <span>{j.enabled ? (j.nextRun ? `next ${whenLabel(j.nextRun, now)}` : 'no next run') : 'paused'}</span>
+            {j.on?.github ? (
+              <span className={cn(j.enabled && j.github?.error && 'text-destructive')} title={j.github?.error?.message}>
+                {!j.enabled
+                  ? 'paused'
+                  : j.github?.error
+                    ? `poll failed (${j.github.error.kind})`
+                    : j.github?.lastPoll
+                      ? `polled ${relTime(j.github.lastPoll, now)} ago`
+                      : 'not polled yet'}
+              </span>
+            ) : (
+              <span>{j.enabled ? (j.nextRun ? `next ${whenLabel(j.nextRun, now)}` : 'no next run') : 'paused'}</span>
+            )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-xs">
             {lastRun ? (
@@ -244,9 +256,11 @@ function JobCard({
         </button>
         <div className="flex shrink-0 flex-col items-end gap-2.5">
           <Switch checked={j.enabled} onCheckedChange={onEnabled} aria-label={`${j.name} on ${j.host} enabled`} />
-          <Button variant="outline" size="sm" onClick={onRun} title="Start a run now">
-            <PlayIcon /> Run now
-          </Button>
+          {j.on?.github ? null : (
+            <Button variant="outline" size="sm" onClick={onRun} title="Start a run now">
+              <PlayIcon /> Run now
+            </Button>
+          )}
         </div>
       </div>
       {open ? (
@@ -333,6 +347,14 @@ function RunItem({ run: r, host, now, fleet }: { run: JobRun; host: string; now:
         <span className={cn('font-semibold', OUTCOME_TEXT[tone])}>{r.outcome}</span>
         <span className="text-muted-foreground">{whenLabel(r.startedAt, now)}</span>
         <span className="text-dimmer">{r.trigger}</span>
+        {r.subject ? (
+          <span
+            className={cn('font-mono', r.subject.goneAt ? 'text-dimmer line-through' : 'text-muted-foreground')}
+            title={r.subject.goneAt ? 'branch deleted' : r.subject.sha}
+          >
+            {r.subject.branch}
+          </span>
+        ) : null}
         <span className="ml-auto font-mono text-[0.6875rem] text-dimmer">{r.id}</span>
       </div>
       {r.reason ? <p className="mt-0.5 text-xs break-words text-muted-foreground">{r.reason}</p> : null}

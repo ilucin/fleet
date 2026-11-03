@@ -405,6 +405,7 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
     }
     crate::core::context::apply_native_1m(out.iter_mut().filter_map(|s| s.context.as_mut()));
     out.extend(discover_harnesses(&panes));
+    crate::core::jobs::attach_subjects(out.iter_mut().filter_map(|s| s.origin.as_mut()));
     out.sort_by_key(|s| std::cmp::Reverse(s.updated_at.unwrap_or(0)));
     Ok(out)
 }

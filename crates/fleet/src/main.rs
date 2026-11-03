@@ -1182,7 +1182,7 @@ enum ReposCmd {
 
 #[derive(Subcommand, Clone)]
 enum JobsCmd {
-    /// Every bot: schedule, next run, last run, live sessions — the default
+    /// Every bot: schedule or trigger, next run / last poll, last run, live sessions — the default
     List {
         #[arg(long)]
         json: bool,
@@ -1210,6 +1210,15 @@ enum JobsCmd {
         #[arg(long, short = 'q')]
         quiet: bool,
     },
+    /// GitHub bot: poll now and start runs for new branches; with --dry-run, only print what
+    /// it would start
+    Check {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// GitHub bot: forget a branch — if it still exists, the next poll starts a run for it again
+    Forget { name: String, branch: String },
     /// Resume a paused bot
     Enable { name: String },
     /// Pause a bot (its schedule stops firing; live sessions are left alone)
@@ -2004,6 +2013,10 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
                 prompt,
             } => jobs_cmd::run_now(&name, force, prompt)?,
             JobsCmd::Tick { quiet } => jobs_cmd::tick(quiet)?,
+            JobsCmd::Check { name, json: j } => {
+                jobs_cmd::check(&name, hosts::dry_run(), json || j)?
+            }
+            JobsCmd::Forget { name, branch } => jobs_cmd::forget(&name, &branch)?,
             JobsCmd::Enable { name } => jobs_cmd::set_enabled(&name, true)?,
             JobsCmd::Disable { name } => jobs_cmd::set_enabled(&name, false)?,
             JobsCmd::InstallService {

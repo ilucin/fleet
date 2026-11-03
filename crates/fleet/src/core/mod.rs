@@ -9,6 +9,7 @@ pub mod context;
 pub mod discovery;
 pub mod done;
 pub mod gh_identity;
+pub mod gh_watch;
 pub mod git;
 pub mod grouping;
 pub mod harness;

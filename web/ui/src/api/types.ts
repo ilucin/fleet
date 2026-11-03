@@ -1358,6 +1358,21 @@ export interface JobRun {
   reason: string | null
   promptFile: string | null
   sessions: JobRunSession[]
+  /** A GitHub-triggered run (`trigger: 'github'`): the branch it is about; `goneAt` once deleted. */
+  subject?: { kind: string; repo: string; branch: string; sha: string; url: string; goneAt: number | null }
+}
+
+/** A GitHub bot's poll state (`fleet bots --json` → `github`). */
+export interface JobGithubState {
+  lastPoll: number | null
+  lastOk: number | null
+  nextPoll: number | null
+  error: { kind: string; message: string; at: number } | null
+  rateRemaining: number | null
+  branches: Record<
+    string,
+    { sha: string; outcome: string; run: string | null; tmuxSession: string | null; reason: string | null }
+  >
 }
 
 /** A live session of a job (`fleet jobs --json` → `live[]`). */
@@ -1395,6 +1410,9 @@ export interface Job {
   /** Epoch ms; null when paused (or the schedule never fires). */
   nextRun: number | null
   lastSlot: number | null
+  /** A bot started by a trigger instead of a schedule (`schedule` is then empty). */
+  on?: { github?: { repo: string; branch: string; every: number; backfill: boolean } } | null
+  github?: JobGithubState | null
   /** Newest first: the latest one from the list, every kept run from `show`. */
   runs: JobRun[]
   live: JobLive[]

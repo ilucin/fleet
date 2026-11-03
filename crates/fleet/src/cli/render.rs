@@ -211,6 +211,14 @@ pub fn plain_table_titled(rows: &[Session], host: Option<&str>) -> String {
             where_.dimmed(),
         ));
         let mut title = clean_text(r.title.as_deref().unwrap_or("(no prompt captured)"));
+        if let Some(sub) = r
+            .origin
+            .as_ref()
+            .and_then(|o| o.subject.as_ref())
+            .filter(|s| s.gone_at.is_some())
+        {
+            title = format!("[branch gone: {}] {title}", sub.branch);
+        }
         if let Some(bg) = r.background.as_ref().filter(|b| !b.is_empty()) {
             title = format!("[{}] {title}", background_words(bg));
         }

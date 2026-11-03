@@ -37,6 +37,9 @@
 //! tmux pane option `@fleet_job_run` set to the same; `fleet list` reports it as `origin`.
 //! A spawn made with `FLEET_JOB_RUN` set passes both on, so the whole tree is one run.
 //!
+//! A bot with `on.github` instead of `schedule` starts one run per new branch matching a
+//! pattern, polled by the same tick — see [`crate::core::gh_watch`].
+//!
 //! State (`$FLEET_JOBS_DIR`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/jobs`):
 //! `<job>.json` — the last slot seen and the latest [`KEEP_RUNS`] runs with their sessions;
 //! `<job>/<run>.md` — the prompt each run started with.
@@ -47,6 +50,7 @@ use chrono::{DateTime, Datelike, Duration, Local, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::core::gh_watch::{GithubOn, WatchState};
 use crate::core::harness::Harness;
 use crate::core::tools;
 use crate::error::Result;
@@ -388,8 +392,15 @@ pub enum PromptSrc {
 #[derive(Debug, Clone)]
 pub struct Job {
     pub name: String,
+    /// The cron expression; empty for a bot started by a trigger (`on`).
     pub schedule: String,
-    pub cron: Cron,
+    /// `None` for a bot started by a trigger.
+    pub cron: Option<Cron>,
+    /// `on.github`: runs start when a matching branch appears (see [`crate::core::gh_watch`]).
+    pub github: Option<GithubOn>,
+    /// `sessionName`: the name of a triggered run's session, a template (`{branch}`, `{repo}`,
+    /// `{sha}`, `{bot}`); default `<bot> {branch}`.
+    pub session_name: Option<String>,
     pub dir: String,
     pub prompt: PromptSrc,
     pub harness: Harness,
@@ -403,6 +414,22 @@ pub struct Job {
     pub keep: Option<i64>,
     /// The config section it came from: `bots`, or the legacy `jobs`.
     pub section: &'static str,
+}
+
+impl Job {
+    /// What starts it, in plain English: the schedule, or the trigger.
+    pub fn trigger_text(&self) -> String {
+        match (&self.cron, &self.github) {
+            (Some(c), _) => c.describe(),
+            (None, Some(g)) => g.describe(),
+            (None, None) => String::new(),
+        }
+    }
+
+    /// Its next scheduled run (none for a triggered bot).
+    pub fn next_run(&self, now: DateTime<Local>) -> Option<DateTime<Local>> {
+        self.cron.as_ref().and_then(|c| c.next(now))
+    }
 }
 
 /// The `bots` config section (plus the legacy `jobs` one), parsed.
@@ -485,8 +512,26 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
             Some(other) => Err(format!("{key} must be a string, not {other}")),
         }
     };
-    let schedule = text("schedule")?.ok_or("schedule is required")?;
-    let cron = Cron::parse(&schedule)?;
+    let schedule = text("schedule")?;
+    let github = match o.get("on") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(on)) => {
+            if let Some(k) = on.keys().find(|k| *k != "github") {
+                return Err(format!("on.{k}: unknown trigger (github)"));
+            }
+            on.get("github")
+                .filter(|v| !v.is_null())
+                .map(GithubOn::parse)
+                .transpose()?
+        }
+        Some(other) => return Err(format!("on must be an object, not {other}")),
+    };
+    let cron = match (&schedule, &github) {
+        (Some(_), Some(_)) => return Err("set schedule or on.github, not both".into()),
+        (None, None) => return Err("schedule (or on.github) is required".into()),
+        (Some(s), None) => Some(Cron::parse(s)?),
+        (None, Some(_)) => None,
+    };
     let dir = text("dir")?.ok_or("dir is required")?;
     let prompt = match (o.get("prompt"), text("promptFile")?) {
         (Some(Value::String(p)), None) if !p.trim().is_empty() => PromptSrc::Inline(p.clone()),
@@ -519,8 +564,10 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
     };
     Ok(Job {
         name: name.to_string(),
-        schedule,
+        schedule: schedule.unwrap_or_default(),
         cron,
+        github,
+        session_name: text("sessionName")?,
         dir,
         prompt,
         harness,
@@ -579,6 +626,9 @@ pub fn split_run(tag: &str) -> Option<(&str, &str)> {
 pub struct Origin {
     pub job: String,
     pub run: String,
+    /// The branch a GitHub-triggered run is about (`gone_at` set once it was deleted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Subject>,
 }
 
 impl Origin {
@@ -586,7 +636,24 @@ impl Origin {
         split_run(tag.trim()).map(|(job, run)| Origin {
             job: job.into(),
             run: run.into(),
+            subject: None,
         })
+    }
+}
+
+/// Fill `subject` of the rows' origins from their bots' state (one read per bot).
+pub fn attach_subjects<'a>(origins: impl Iterator<Item = &'a mut Origin>) {
+    let mut cache: std::collections::HashMap<String, JobState> = Default::default();
+    for o in origins {
+        let st = cache
+            .entry(o.job.clone())
+            .or_insert_with(|| load_state(&o.job));
+        o.subject = st
+            .runs
+            .iter()
+            .rev()
+            .find(|r| r.id == o.run)
+            .and_then(|r| r.subject.clone());
     }
 }
 
@@ -600,6 +667,9 @@ pub struct JobState {
     pub last_slot: Option<i64>,
     /// Newest last.
     pub runs: Vec<Run>,
+    /// A GitHub bot's poll state and the branches it remembers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github: Option<WatchState>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -617,6 +687,23 @@ pub struct Run {
     /// The run's first prompt, as it was sent.
     pub prompt_file: Option<String>,
     pub sessions: Vec<RunSession>,
+    /// What started a triggered run (`trigger: github`): the branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Subject>,
+}
+
+/// The branch a GitHub-triggered run is about.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Subject {
+    /// `branch`.
+    pub kind: String,
+    pub repo: String,
+    pub branch: String,
+    pub sha: String,
+    pub url: String,
+    /// When a poll found the branch deleted (its session is left open).
+    pub gone_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -782,6 +869,16 @@ pub fn run_id(t: DateTime<Local>, manual: bool) -> String {
     } else {
         t.format("%Y%m%d-%H%M").to_string()
     }
+}
+
+/// The id of a run a trigger started for `branch`: `YYYYMMDD-HHMMSS-<branch slug>` — unique
+/// even when one poll starts several.
+pub fn trigger_run_id(t: DateTime<Local>, branch: &str) -> String {
+    format!(
+        "{}-{}",
+        t.format("%Y%m%d-%H%M%S"),
+        crate::core::gh_watch::slug(branch)
+    )
 }
 
 /// The name a run's first session gets: `<job>-<run id without the year>`
@@ -1001,6 +1098,35 @@ mod tests {
     }
 
     #[test]
+    fn settings_read_github_triggers() {
+        let s = Settings::from_value(
+            &json!({
+                "release": {
+                    "on": { "github": { "repo": "o/r", "branch": "release/*" } },
+                    "sessionName": "release-bot {branch}",
+                    "dir": "/tmp"
+                },
+                "both": { "schedule": "@daily", "on": { "github": { "repo": "o/r", "branch": "x" } }, "dir": "/tmp" },
+                "neither": { "dir": "/tmp" },
+                "unknown": { "on": { "gitlab": {} }, "dir": "/tmp" },
+                "badrepo": { "on": { "github": { "repo": "nope", "branch": "x" } }, "dir": "/tmp" }
+            }),
+            "bots",
+        );
+        assert_eq!(s.jobs.len(), 1, "{:?}", s.problems);
+        assert_eq!(s.problems.len(), 4, "{:?}", s.problems);
+        let r = s.get("release").unwrap();
+        assert!(r.cron.is_none());
+        assert_eq!(r.schedule, "");
+        assert_eq!(r.github.as_ref().unwrap().branch, "release/*");
+        assert_eq!(r.session_name.as_deref(), Some("release-bot {branch}"));
+        assert_eq!(
+            trigger_run_id(at(2026, 11, 3, 9, 5), "release/42"),
+            "20261103-090500-release-42"
+        );
+    }
+
+    #[test]
     fn tags_round_trip() {
         let t = Tag {
             run: "triage/20261013-0700".into(),
@@ -1017,7 +1143,8 @@ mod tests {
             Origin::parse("triage/20261013-0700"),
             Some(Origin {
                 job: "triage".into(),
-                run: "20261013-0700".into()
+                run: "20261013-0700".into(),
+                subject: None,
             })
         );
         assert_eq!(Origin::parse(""), None);

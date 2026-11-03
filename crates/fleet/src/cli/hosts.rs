@@ -141,6 +141,17 @@ pub struct Probe {
     pub config_self: Option<String>,
     pub config_problems: Vec<String>,
     pub web_dir: Option<String>,
+    /// GitHub-triggered bots: their last poll, and whether the tick service runs them.
+    pub bots: Vec<BotHealth>,
+}
+
+/// One line of `doctor` about a bot that needs the tick service or polls GitHub.
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BotHealth {
+    pub name: String,
+    pub ok: bool,
+    pub line: String,
 }
 
 fn first_line(cmd: &str, args: &[&str]) -> Option<String> {
@@ -188,6 +199,7 @@ pub fn gather_probe() -> Probe {
         config_self: loaded.config.self_name.clone(),
         config_problems: problems,
         web_dir: config::web_dir(&loaded.config).map(|p| tools::tildify(&p.display().to_string())),
+        bots: crate::cli::jobs::health(),
     }
 }
 
@@ -243,6 +255,14 @@ fn report_probe(p: &Probe, compare: Option<&str>) -> usize {
             "{} web app: not found (only needed for `fleet web serve`)",
             "·".dimmed()
         )),
+    }
+    for b in &p.bots {
+        if b.ok {
+            ok(&b.line);
+        } else {
+            bad(&b.line);
+            failures += 1;
+        }
     }
     if p.config_exists {
         let who = p.config_self.as_deref().unwrap_or("(self unset)");

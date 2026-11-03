@@ -592,7 +592,8 @@ of `repos` the rows `{ name, path, every, excluded, due, branch, upstream, ahead
 ## Bots
 
 Agent sessions started from a recipe, like Claude Code routines but on your own machines: a prompt
-and a cron schedule that spawn a session on the host whose config lists the bot. Everything that
+and a cron schedule — or a [GitHub trigger](#github-triggers): a new branch matching a pattern —
+that spawn a session on the host whose config lists the bot. Everything that
 session spawns in turn (`fleet spawn`, `fleet stack spawn`, a handoff — on this host or, through
 `-H`, another) belongs to the same **run**. Config: `bots` in [the config](architecture.md#config).
 
@@ -654,6 +655,91 @@ tmuxSession, status, title }`; times in ms epoch, `keep` in seconds). State:
 In the web UI, the **Bots** screen (`#/bots`; `#/jobs` still opens it) lists every host's bots with
 Run now and the enabled switch, and each run's sessions as a tree; bot sessions wear a bot chip and
 stay out of the session list unless they need you — the **Bots** status filter (bot icon) lists only them ([Web API](architecture.md#web-api)).
+
+## GitHub triggers
+
+A bot can start on GitHub instead of on a clock: with `on.github` in place of `schedule`, it
+starts one run for every new branch whose name matches a pattern — a release pipeline that
+creates `release/<n>` gets a session per release. The machines are not reachable from GitHub, so
+there is no webhook: the tick polls.
+
+```json
+"bots": {
+  "release-bot": {
+    "on": { "github": { "repo": "owner/repo", "branch": "release/*" } },
+    "sessionName": "release-bot {branch}",
+    "dir": "~/Code/project",
+    "promptFile": "~/notes/release-bot.md",
+    "ghIdentity": "bot",
+    "keep": "never"
+  }
+}
+```
+
+| key | meaning |
+| --- | --- |
+| `on.github.repo` | `owner/repo` |
+| `on.github.branch` | branch pattern: `*` matches within one `/` segment, `**` across them, `?` one character (`release/*`, `hotfix/**`) |
+| `on.github.every` | seconds between polls (`90`, `"90s"`, `"5m"`); default and minimum 60 |
+| `on.github.backfill` | `true`: the first poll starts runs for the branches already there too (default: it only remembers them) |
+| `sessionName` | the run's session name, a template; default `{bot} {branch}` (tmux: `release-bot-release-42`) |
+| `prompt` / `promptFile` | as for a scheduled bot, plus the variables `{branch}`, `{sha}` (its head when found), `{repo}`, `{url}` (the branch on github.com), `{bot}`; none set = `New branch {branch} in {repo} (head {sha}): {url}` |
+
+Everything else (`dir`, `command`, `harness`, `model`, `ghIdentity`, `enabled`, `keep`) is as
+for any bot. A bot has `schedule` or `on`, not both.
+
+**How it polls.** `fleet bots tick` (the `fleet.jobs` launchd agent, every minute — install it
+with `fleet bots install-service` on the host that lists the bot) polls each GitHub bot every
+`every` with one `gh api -i repos/<repo>/git/matching-refs/heads/<prefix>` (the pattern's literal
+leading directories, e.g. `release/`), matching the pattern on what comes back. It sends the
+previous answer's ETag (`If-None-Match`), so an unchanged answer is a `304` that GitHub does not
+count against the rate limit. It runs as the bot's `ghIdentity` (that identity's `command`, e.g. a
+GitHub App's `gh` wrapper) when it has one, else as the machine's `gh` (`$FLEET_GH`, config `gh`,
+PATH). A failed poll — auth (401/403), not found (404), rate limited (403/429 with
+`x-ratelimit-remaining: 0` or `retry-after`), gh missing — is logged and recorded, and the next one
+waits 5 minutes (a rate limit: until `retry-after` / `x-ratelimit-reset`); when fewer than 50
+requests remain, polling waits for the reset.
+
+**Exactly one run per branch.** Polling compares states, not events: each poll is the set of
+matching branches now, compared with the set the bot remembers (its state file, below).
+
+- A branch it does not know starts one run (`trigger: github`). The branch is written to the state
+  *before* the session is spawned, so a tick that dies halfway does not start it twice.
+- A branch it knows never starts another — through restarts of fleet, reboots, missed polls, a
+  new head (`sha` is updated, nothing runs).
+- When a session with the run's name is already open (state lost, or `forget` while it runs), no
+  second one starts: the branch is recorded as `adopted`.
+- The first poll (and the first after `enabled` goes back to `true`, or after `repo` / `branch`
+  change) only remembers what is there — like a scheduled bot, which never fires on the tick that
+  first sees it — unless `backfill`.
+- A branch that disappears is dropped from the state; its run gets `subject.goneAt`, its session is
+  **not** closed (only `keep` closes bot sessions; use `"keep": "never"` for sessions that must stay
+  until you close them). `fleet list` shows `[branch gone: release/42]` before its title,
+  `fleet list --json` has it as `origin.subject.goneAt`.
+- A run that fails to start (a missing `dir`, an unknown `ghIdentity`) is `failed` and is not
+  retried by itself: fix the cause, then `fleet bots forget <bot> <branch>`.
+
+| command | does |
+| --- | --- |
+| `fleet bots check <name> [--json]` | poll now, whatever `every` says, and act on it like a tick; then the branches it remembers. Exits 1 when the poll or a start failed |
+| `fleet bots check <name> --dry-run [--json]` | poll and show what a poll would do per matching branch — `start`, `adopt`, `remember` (first poll), `known` — and which remembered ones are gone; starts nothing, changes nothing |
+| `fleet bots forget <name> <branch>` | drop the branch from what the bot remembers: if it still exists, the next poll starts a run for it again (not while its session is open) |
+| `fleet bots run <name>` | refused for a GitHub bot — it runs per branch |
+
+`fleet bots` shows a GitHub bot's trigger, its last poll (or the error) and the branches it started
+runs for; `fleet bots show` all remembered branches with their sessions' state and the runs whose
+branch is gone. `fleet doctor` reports each enabled GitHub bot's last poll — failing on a poll
+error or on three missed polls in a row (the tick is not running) — and, on macOS, a missing tick
+service when any bot is enabled. The tick's log: `~/Library/Logs/fleet.jobs.log`.
+
+`--json` of `bots` / `bots show` adds `on` (`{ github: { repo, branch, every, backfill } }` or
+null), `sessionName` and `github` (the poll state: `{ watch, armed, lastPoll, lastOk, nextPoll,
+etag, error: { kind, message, at } | null, rateRemaining, branches: { "<branch>": { sha, firstSeen,
+outcome: spawned | existing | adopted | failed | starting, run, tmuxSession, reason } } }`); a GitHub
+bot's `schedule` is `""`, `scheduleText` the trigger in words, `nextRun` null. A triggered run has
+`subject: { kind: "branch", repo, branch, sha, url, goneAt }` and an id `YYYYMMDD-HHMMSS-<branch>`.
+The state is `github` in the bot's state file (`<bot>.json`, below). Tests poll a fixture instead
+of GitHub: `FLEET_GH_WATCH_FIXTURE` = a JSON file `{ "<owner/repo>": [{ "name", "sha" }] }`.
 
 ## Ask done
 
