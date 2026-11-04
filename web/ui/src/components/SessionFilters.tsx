@@ -28,6 +28,8 @@ const trigger = cn(
   'h-8 shrink-0 gap-1 rounded-lg border border-border bg-card px-2 text-xs font-normal text-muted-foreground',
   'data-[active=true]:border-primary/50 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground',
 )
+/** A kind chip's count: a fixed two-digit slot, so the bar keeps its width as the number changes. */
+const kindCount = 'inline-block min-w-[2ch] text-center text-[0.6875rem] text-dimmer tabular-nums'
 const count = 'ml-auto pl-3 text-[0.6875rem] text-dimmer tabular-nums'
 /** `touch` (the mobile list): finger-sized segments, triggers and menu rows. */
 const TOUCH = {
@@ -77,12 +79,12 @@ export function SessionFilters({ list, spread = false, touch = false, hostPicker
         </ToggleGroupItem>
         <ToggleGroupItem value="scheduled" className={seg} title="Sessions started by bots">
           Bots
-          {counts?.scheduled ? <span className="text-[0.6875rem] text-dimmer tabular-nums">{counts.scheduled}</span> : null}
+          <span className={kindCount}>{counts?.scheduled || ''}</span>
         </ToggleGroupItem>
         {kinds.map((f) => (
           <ToggleGroupItem key={f.id} value={f.id} className={seg} title={f.title}>
             {f.label}
-            <span className="text-[0.6875rem] text-dimmer tabular-nums">{counts?.[f.id] ?? ''}</span>
+            <span className={kindCount}>{counts?.[f.id] ?? ''}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>

@@ -97,7 +97,7 @@ function HostChip({
           )}
         >
           <HostDot host={h.name} shared={isShared(h)} className={cn(!on && !down && 'opacity-60')} />
-          {down ? '!' : count}
+          <span className="inline-block min-w-[2ch] text-center">{down ? '!' : count}</span>
           {waiting > 0 ? (
             <span aria-hidden className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-status-waiting ring-1 ring-card" />
           ) : null}
