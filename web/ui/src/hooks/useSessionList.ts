@@ -39,6 +39,9 @@ export function useSessionList(now: number) {
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null)
   const setFrozen = (on: boolean) => setFrozenOrder(on ? live.sessions.map((s) => `${s.host}/${s.session_id}`) : null)
   const view = useMemo(() => (frozenOrder ? { ...live, sessions: keepOrder(live.sessions, frozenOrder) } : live), [live, frozenOrder])
+  // Counts over every host, unfiltered: which kind chips (Slack / Apps) exist, so picking a host
+  // without such sessions does not drop a chip and shift the bar.
+  const fleetCounts = useMemo(() => listView(fleet, { query: '', hosts: null, status, slack }).counts, [fleet, status, slack])
   const hostCounts = useMemo(() => {
     const counts = new Map<string, number>()
     for (const s of allSessions(fleet)) counts.set(s.host, (counts.get(s.host) ?? 0) + 1)
@@ -78,6 +81,7 @@ export function useSessionList(now: number) {
     hostSet,
     sharedWaiting,
     view,
+    fleetCounts,
     setFrozen,
     hostCounts,
     summary,

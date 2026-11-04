@@ -216,7 +216,7 @@ src/
   (bot icon + bot name; the run id in a tooltip) on list rows and board cards. **Apps** does the
   same for sessions an app's embedded panel started (`embed`: app icon + app name, the Apps
   filter beside Bots). **Slack** sets aside the sessions with an active Slack link (from
-  `/api/slack`; the Slack filter, between Bots and Apps, shown when there are some). **Bots** is a status
+  `/api/slack`; the Slack filter, between Bots and Apps, shown when any host has some, whatever the host filter). **Bots** is a status
   filter (the bot-icon chip after Idle, shown when there are job sessions): it lists only job
   sessions. Every other filter leaves them out, except ones waiting on you (they always show, and
   every "needs you" counter counts them); the header counters count every session.

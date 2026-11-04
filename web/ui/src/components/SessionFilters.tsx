@@ -45,7 +45,7 @@ export function SessionFilters({ list, spread = false, touch = false, hostPicker
   const seg = cn(segment, touch && TOUCH.segment)
   const trig = cn(trigger, touch && TOUCH.trigger)
   const item = touch ? TOUCH.item : undefined
-  const { fleet, status, setStatus, hostNames, view } = list
+  const { fleet, status, setStatus, hostNames, view, fleetCounts } = list
   const counts = fleet ? view.counts : null
   const kind = KINDS.includes(status) ? status : SESSIONS
   // The status picked under Sessions, restored when coming back from Bots / Slack / Apps.
@@ -57,7 +57,8 @@ export function SessionFilters({ list, spread = false, touch = false, hostPicker
   }
 
   const statusFilters = STATUS_FILTERS.filter((f) => !KINDS.includes(f.id))
-  const kinds = visibleStatusFilters(counts, status).filter((f) => f.id === 'slack' || f.id === 'embedded')
+  // Which kinds get a chip follows every host, not the host filter: the bar keeps its shape.
+  const kinds = visibleStatusFilters(fleet ? fleetCounts : null, status).filter((f) => f.id === 'slack' || f.id === 'embedded')
   const current = statusFilters.find((f) => f.id === status)
   const statusActive = kind === SESSIONS && status !== 'all'
 
