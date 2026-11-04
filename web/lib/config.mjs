@@ -271,6 +271,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *   { self, port, bind, peers: { name: url }, sshHosts: { name: ssh }, hostAddrs: { name: hostname }, editor, editorSsh, hosts: [names], fleetBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
+ *     beads: { enabled, dir },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
  *     restore: { onBoot, markerFile }, configFile, configFound }
@@ -625,6 +626,19 @@ export function normalizeConfig(
   if (wm.model != null && (typeof wm.model !== 'string' || !MODEL_ID_RE.test(wm.model))) throw new Error('config.web.memos.model must be a model id (letters, digits and ._[]-)');
   const memos = { dir: memoDir('dir', DEFAULT_MEMOS_DIR), audioDir: memoDir('audioDir', DEFAULT_MEMO_AUDIO_DIR), model: wm.model ?? 'haiku', vocabulary: (wm.vocabulary ?? []).map((v) => v.trim()).filter(Boolean) };
 
+  // web.beads: the beads (bd) issues sessions work on (lib/beads.mjs) — on when `bd` is installed.
+  // `dir`: the database bd uses (its BEADS_DIR), else $BEADS_DIR, else bd's own lookup from the session's cwd.
+  const wbd = web.beads == null ? {} : web.beads;
+  if (!isObject(wbd)) throw new Error('config.web.beads must be an object { enabled, dir }');
+  if (wbd.enabled != null && typeof wbd.enabled !== 'boolean') throw new Error('config.web.beads.enabled must be true or false');
+  let beadsDir = null;
+  if (wbd.dir != null) {
+    if (typeof wbd.dir !== 'string' || !wbd.dir.trim()) throw new Error('config.web.beads.dir must be a non-empty string');
+    beadsDir = expandHome(wbd.dir.trim(), home);
+    if (!path.isAbsolute(beadsDir)) throw new Error(`config.web.beads.dir must be absolute or start with ~: ${wbd.dir}`);
+  } else if (typeof env.BEADS_DIR === 'string' && env.BEADS_DIR.trim()) beadsDir = env.BEADS_DIR.trim();
+  const beads = { enabled: wbd.enabled !== false, dir: beadsDir };
+
   // web.briefs: per-session briefs (lib/briefs.mjs) — the budget knobs for its model calls.
   const wb = web.briefs == null ? {} : web.briefs;
   if (!isObject(wb)) throw new Error('config.web.briefs must be an object { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour }');
@@ -735,6 +749,7 @@ export function normalizeConfig(
     notes,
     memos,
     briefs,
+    beads,
     stacks,
     restore,
     operator,

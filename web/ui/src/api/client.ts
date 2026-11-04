@@ -2,6 +2,8 @@
 // in dev, Vite proxies /api to a running server (see vite.config.ts).
 import type {
   AutoNameRun,
+  BeadDetail,
+  BeadsResponse,
   Brief,
   BriefRegenerateResponse,
   CompleteKind,
@@ -328,6 +330,10 @@ export const api = {
     return res.text()
   },
 
+  /** The session's top-level beads (bd issues it worked on); `enabled: false` = no bd on that host. */
+  beads: (host: string, id: string, o: Opts = {}) => request<BeadsResponse>(sessionPath(host, id, 'beads'), o),
+  /** One bead with its children and comments (the Beads viewer). */
+  bead: (host: string, id: string, beadId: string, o: Opts = {}) => request<BeadDetail>(sessionPath(host, id, `beads/${enc(beadId)}`), o),
   /** The session's brief (never calls the model); `exists: false` = none yet. */
   brief: (host: string, id: string, o: Opts = {}) => request<Brief>(sessionPath(host, id, 'brief'), o),
   /** A human edit: the body markdown (the server keeps its frontmatter keys). */

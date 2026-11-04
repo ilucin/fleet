@@ -20,6 +20,7 @@ import { checkInboxSettings } from './inbox.mjs';
 import { DEFAULT_MODELS, slackSpawn, spawnRoots } from './config.mjs';
 import { parseNameOutput } from './autoname.mjs';
 import { SESSION_ID_RE } from './briefs.mjs';
+import { BEAD_ID_PARAM_RE } from './beads.mjs';
 import { displayPath, validThreadId } from './reviews.mjs';
 import { askPrompt, validAskId, ASK_TOOLS } from './asks.mjs';
 import { notesPrompt, validNoteId } from './pr-notes.mjs';
@@ -92,6 +93,7 @@ const ASK_ID_ROUTE = /^\/api\/hosts\/([^/]+)\/asks\/([^/]+)$/;
 const QUEUE_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/queue(?:\/(pause)|\/([^/]+)(?:\/(send|move))?)?$/;
 /** A review comment quotes the selected code: room for a big selection. */
 const REVIEW_BODY_LIMIT = 1024 * 1024;
+const BEADS_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/beads(?:\/([^/]+))?$/;
 const BRIEF_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/brief(\/regenerate)?$/;
 const MEMO_SEGMENT_ROUTE = /^\/api\/memos\/recordings\/([^/]+)\/segments\/(\d{1,3})$/;
 const MEMO_FINISH_ROUTE = /^\/api\/memos\/recordings\/([^/]+)\/finish$/;
@@ -185,6 +187,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   asks        lib/asks.mjs#createAsks (…/ask, /asks/:id: side questions in a fork of the session; absent → 501)
  *   prNotes     lib/pr-notes.mjs#createPrNotes (…/prs/:owner/:repo/:n/notes: review notes on a PR without a session; absent → 501)
  *   queue       lib/queue.mjs#createPromptQueue (…/queue: prompts that wait for the run to end; absent → 501)
+ *   beads       lib/beads.mjs#createBeads (…/beads, …/beads/:id: the session's bd issues; absent → disabled)
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
@@ -221,6 +224,7 @@ export function createApi({
   files = null,
   completer = null,
   briefs = null,
+  beads = null,
   differ = null,
   touched = null,
   reviews = null,
@@ -1570,6 +1574,17 @@ export function createApi({
       });
     }
 
+    const bm = BEADS_ROUTE.exec(url.pathname);
+    if (bm) {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      const [, rawHost, rawId, rawBead] = bm;
+      const host = decodeURIComponent(rawHost);
+      const id = decodeURIComponent(rawId);
+      const beadId = rawBead == null ? null : decodeURIComponent(rawBead);
+      if (beadId != null && !BEAD_ID_PARAM_RE.test(beadId)) throw new HttpError(`not a bead id: ${beadId}`, 400);
+      return forHost({ req, url, host, local: () => localBeads(id, beadId) });
+    }
+
     const b = BRIEF_ROUTE.exec(url.pathname);
     if (b) {
       const [, rawHost, rawId, regen] = b;
@@ -2155,6 +2170,16 @@ export function createApi({
       if (text == null) throw err;
       return { session: null, id };
     }
+  }
+
+  /** GET …/beads (the session's top-level beads) and …/beads/:beadId (the viewer). */
+  async function localBeads(id, beadId) {
+    if (!beads?.enabled) return { status: 200, body: { host: config.self, enabled: false, beads: [] } };
+    const session = await resolveLocalSession(id);
+    if (beadId == null) return { status: 200, body: { host: config.self, ...(await beads.list(session)) } };
+    const r = await beads.bead(session, beadId);
+    if (!r) throw new HttpError(`unknown bead: ${beadId}`, 404);
+    return { status: 200, body: { host: config.self, ...r } };
   }
 
   async function localBrief({ action, id, req }) {

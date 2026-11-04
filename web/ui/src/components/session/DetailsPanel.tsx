@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 
 import { api, sessionErrorMessage } from '@/api/client'
 import type { Session } from '@/api/types'
+import { BeadsSection } from '@/components/session/BeadsSection'
 import { BriefSection, type BriefSectionProps } from '@/components/session/BriefSection'
 import { SlackLinkSection } from '@/components/SlackLink'
 import { Button } from '@/components/ui/button'
@@ -269,6 +270,8 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
               ) : null}
             </div>
           ) : null}
+
+          <BeadsSection host={p.host} session={s} />
 
           <BriefSection {...p.brief} desktop={panel} cancelEditRef={p.cancelEditRef} />
 

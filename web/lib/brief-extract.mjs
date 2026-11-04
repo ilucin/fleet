@@ -12,6 +12,7 @@
 //     — but not those of a brief handed over by a continue prompt (another session's work),
 //     except its Origin and PR links, which carry on down a chain of continued sessions
 //   the first user prompt: its other links (a task, a Slack thread, an issue)      → Origin
+// Beads: issue ids in `bd` commands, and the ids `bd create` / `bd q` print (lib/beads.mjs reads them).
 // Todos: the latest TodoWrite list, or the task list built from TaskCreate / TaskUpdate calls.
 // Dirs: the working directories the session's entries record (`cwd`; a `cd` in Bash moves it).
 import { promises as fsp } from 'node:fs';
@@ -32,6 +33,14 @@ export const MAX_DIRS = 30;
 const MAX_SESSIONS = 200;
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const GH_CREATE_RE = /\bgh\s+(?:pr|issue)\s+create\b/;
+/** A `bd` (beads) invocation in a shell command. */
+const BD_RE = /(?:^|[\s;&|(`])bd\s+[a-z]/m;
+/** A `bd` command that makes an issue: its output names the new id. */
+const BD_CREATE_RE = /(?:^|[\s;&|(`])bd\s+(?:create|q|epic\s+create)\b/m;
+/** What a beads issue id looks like (`bd-5kc`, `bd-5kc.3`, `work-a1b2`); lib/beads.mjs checks they exist. */
+const BEAD_ID_RE = /(?<![\w./$-])([a-z][a-z0-9_]{0,15}-[a-z0-9]{2,12}(?:\.\d{1,4}){0,4})(?![\w/-])/g;
+/** Bead ids kept per session (the oldest are dropped past this). */
+export const MAX_BEADS = 60;
 const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
 // Links that are never a resource: servers on this machine or the private network (IP literals,
 // dotless names, `.local`, tailnet `.ts.net`), schema/boilerplate hosts.
@@ -86,6 +95,29 @@ function publishedArtifact(input, text) {
     .slice(0, 1);
 }
 
+/** Bead-id-shaped tokens in a `bd` command, quoted strings and heredocs left out (titles, bodies). */
+export function beadIdsInCommand(command) {
+  if (typeof command !== 'string' || !BD_RE.test(command)) return [];
+  const bare = command
+    .replace(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n[\s\S]*?\n\s*\1\s*(?:\n|$)/g, '\n')
+    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, ' ');
+  return beadIdsInText(bare);
+}
+
+/** Bead-id-shaped tokens in free text. */
+export function beadIdsInText(text) {
+  if (typeof text !== 'string') return [];
+  return [...new Set([...text.matchAll(BEAD_ID_RE)].map((m) => m[1]))];
+}
+
+function addBeads(state, ids) {
+  for (const id of ids) {
+    state.beads.delete(id); // re-insert: Map order = recency
+    state.beads.set(id, ++state.seq);
+    if (state.beads.size > MAX_BEADS) state.beads.delete(state.beads.keys().next().value);
+  }
+}
+
 function textOf(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -115,7 +147,7 @@ export function extractUrls(text, kinds = null) {
 }
 
 function newState(file, skipPath) {
-  return { file, skipPath, offset: 0, size: 0, mtimeMs: 0, seq: 0, items: new Map(), dirs: new Set(), pending: new Map(), todos: null, tasks: new Map(), taskSeq: 0, sawFirstPrompt: false };
+  return { file, skipPath, offset: 0, size: 0, mtimeMs: 0, seq: 0, items: new Map(), dirs: new Set(), pending: new Map(), beads: new Map(), todos: null, tasks: new Map(), taskSeq: 0, sawFirstPrompt: false };
 }
 
 function addItem(state, item) {
@@ -169,6 +201,7 @@ export function ingestLine(state, line, home = os.homedir()) {
         const tmp = { paths: new Map(), seq: 0 };
         ingestCommand(tmp, input.command, home);
         for (const [p, v] of tmp.paths) if (v.tier === 2) addFile(state, p);
+        addBeads(state, beadIdsInCommand(input.command));
       } else if (name === 'TodoWrite' && Array.isArray(input.todos)) {
         state.todos = input.todos
           .filter((t) => t && typeof t.content === 'string' && t.content.trim())
@@ -213,6 +246,7 @@ export function ingestLine(state, line, home = os.homedir()) {
     if (!tool) continue;
     state.pending.delete(block.tool_use_id);
     const text = textOf(block.content);
+    if (tool.name === 'Bash' && BD_CREATE_RE.test(String(tool.input?.command ?? '')) && !block.is_error) addBeads(state, beadIdsInText(text));
     if (tool.name === 'Bash' && GH_CREATE_RE.test(String(tool.input?.command ?? ''))) {
       for (const u of extractUrls(text, ['PR', 'Issue'])) addItem(state, u);
     } else if (tool.name === 'Artifact' && !block.is_error) {
@@ -237,6 +271,11 @@ export function todosFromState(state) {
     done: t.status === 'completed',
     text: t.status === 'in_progress' ? `${t.text} (in progress)` : t.text,
   }));
+}
+
+/** Bead ids the session touched, newest first. */
+export function beadsFromState(state) {
+  return [...state.beads.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
 /** Resources, newest first, capped per kind (files that no longer exist are dropped by the caller). */
@@ -271,7 +310,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
     }
   }
 
-  /** → { file, size, offset, resources, todos, dirs } or null without a transcript. */
+  /** → { file, size, offset, resources, todos, dirs, beads } or null without a transcript. */
   async function refresh(session) {
     const id = session?.session_id;
     if (!id) return null;
@@ -313,7 +352,7 @@ export function createBriefExtractor({ locate, maxBytes = MAX_SCAN_BYTES, userHo
       st.size = stat.size;
       st.mtimeMs = stat.mtimeMs;
     }
-    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), todos: todosFromState(st), dirs: [...st.dirs] };
+    return { file, size: st.size, offset: st.offset, resources: resourcesFromState(st), todos: todosFromState(st), dirs: [...st.dirs], beads: beadsFromState(st) };
   }
 
   return {

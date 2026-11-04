@@ -1772,3 +1772,54 @@ export interface InboxResponse {
   /** sorted: section order, then `at` newest first */
   items: InboxItem[]
 }
+
+/** A session's top-level bead (web/lib/beads.mjs): GET …/sessions/:id/beads. */
+export interface BeadSummary {
+  id: string
+  title: string
+  status: string
+  type: string
+  priority: number | null
+  labels: string[]
+  updatedAt: string | null
+  children: { total: number; closed: number; inProgress: number }
+}
+
+export interface BeadsResponse {
+  host: string
+  enabled: boolean
+  beads: BeadSummary[]
+}
+
+/** One bead issue, as the viewer shows it. */
+export interface BeadIssue {
+  id: string
+  title: string
+  status: string
+  type: string
+  priority: number | null
+  labels: string[]
+  assignee: string | null
+  owner: string | null
+  description: string
+  design: string
+  acceptance: string
+  notes: string
+  parent: string | null
+  blockedBy: string[]
+  related: string[]
+  createdAt: string | null
+  updatedAt: string | null
+  closedAt: string | null
+  closeReason: string | null
+  commentCount: number
+}
+
+/** GET …/sessions/:id/beads/:beadId: the viewer. */
+export interface BeadDetail {
+  host: string
+  issue: BeadIssue
+  parent: { id: string; title: string; status: string } | null
+  children: BeadIssue[]
+  comments: { author: string | null; text: string; createdAt: string | null }[]
+}

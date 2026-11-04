@@ -33,6 +33,7 @@ import { createRepos } from './lib/repos.mjs';
 import { createJobs } from './lib/jobs.mjs';
 import { createTouchedIndex } from './lib/touched.mjs';
 import { createBriefExtractor } from './lib/brief-extract.mjs';
+import { createBeads } from './lib/beads.mjs';
 import { createBriefStore, createBriefs, createClaudeAsk, gitInfo } from './lib/briefs.mjs';
 import { createStacks } from './lib/stacks.mjs';
 import { createAgentAsk, createInbox } from './lib/inbox.mjs';
@@ -106,11 +107,13 @@ const grouper = config.grouping.enabled
 const ghBin = resolveBinary('gh');
 const claudeBin = resolveBinary('claude', { extraDirs: [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.claude', 'local')] });
 // Session briefs: GET/PUT always work; background generation only with web.briefs.enabled.
+// What a session made, read from its transcript: the briefs' resources and the session's beads.
+const briefExtractor = createBriefExtractor({ locate: (cwd, id) => locateTranscript(cwd, id) });
 const briefs = createBriefs({
   settings: config.briefs,
   self: config.self,
   store: createBriefStore({ dir: config.briefs.dir }),
-  extractor: createBriefExtractor({ locate: (cwd, id) => locateTranscript(cwd, id) }),
+  extractor: briefExtractor,
   listSessions: async () => {
     const host = await fleet.localHost();
     return host.ok ? host.sessions : null;
@@ -279,6 +282,11 @@ const handleApi = createApi({
     messages: async (session) => (await transcripts.messages(session, 500))?.messages ?? null,
   }),
   notes: createNotes({ config: config.notes, home: os.homedir(), run }),
+  // Beads (bd) issues a session works on: on when this host has `bd`.
+  beads: (() => {
+    const bdBin = resolveBinary('bd');
+    return path.isAbsolute(bdBin) ? createBeads({ bd: (args, opts) => run(bdBin, args, opts), extractor: briefExtractor, settings: config.beads }) : null;
+  })(),
   // Settings → Start directories: writes through `fleet config set`, hot-reloads config.spawnDirs.
   spawnDirs: createSpawnDirsEditor({ config, configFile: config.configFile ?? configPath(process.env), cli }),
   // Settings → Git repos: `fleet --local repos …` + `fleet config set repos`.
