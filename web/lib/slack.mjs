@@ -60,6 +60,12 @@ export const MAX_FIRST = 4000;
 export const MODES = Object.freeze(['mention', 'proactive']);
 /** After the session replied, this long counts as an ongoing exchange (mention mode). */
 export const MAX_REPLY = 3900; // Slack truncates a message's text past 40k; keep replies readable
+export const MAX_HEADLINE = 300; // a top-level post where several people read: one short line, details in its thread
+
+/** A one-on-one DM: the only place a session may post outside a thread at length. */
+export function oneOnOne(link) {
+  return Boolean(link.dm) || String(link.channel ?? '').startsWith('D');
+}
 const MAX_MESSAGE = 3000; // one Slack message as typed into the session
 const MAX_PROMPT = 7500; // the send cap is 8000
 const HISTORY_LIMIT = 30; // thread messages shown to the session when it is linked
@@ -249,7 +255,8 @@ export function linkPrompt(link, { history = [], names = {}, first = '' } = {}) 
       : `You now follow it in the background: messages arrive here as "[slack ${link.id}] …" when one mentions you or is a DM to you, and also when one comes in a thread you have posted in — together with what was said in between, for context. A message in your thread is not necessarily for you: judge from the conversation whether it is (an answer to you, a follow-up question) or people talking among themselves, and post only in the first case. The rest is context, not something to react to.`,
     `Each message carries who wrote it (their Slack name and id, checked by fleet; "→ mentions you" / "→ to you" when it mentions you or is a DM to you). Until the link ends:`,
     ...(link.dm ? [`This is a direct conversation between ${link.dm.name} and you (the app): what they write there is for you. They may not know they can write to you yet — if the instructions say to start, post a short opener now.`] : []),
-    `- Post in Slack only with \`${reply}\`${link.threadTs || link.dm ? '' : ' (add `--thread <ts>` to answer in a message\'s thread)'} — Slack mrkdwn, short, in the language they write in. Never post to Slack any other way; your answer here in the terminal is not seen there.`,
+    `- Post in Slack only with \`${reply}\`${link.threadTs || link.dm || !oneOnOne(link) ? '' : ' (add `--thread <ts>` to answer in a message\'s thread)'} — Slack mrkdwn, short, in the language they write in. Never post to Slack any other way; your answer here in the terminal is not seen there.`,
+    ...(oneOnOne(link) || link.threadTs ? [] : [`- Threads first (the company's rule: several people read this conversation, and posts in it bury each other). Answer a message in its thread: \`${reply} --thread <its ts>\` (that opens the thread if it has none). To bring up something new, post one short headline line first, then the details in its thread (\`--thread <the ts the headline printed>\`). Fleet refuses a longer post outside a thread.`]),
     `- To catch up on or look something up in ${link.threadTs ? 'the thread' : 'the conversation'} (read-only): \`fleet slack history ${link.id}\` (a page at a time, \`--cursor\` for the next)${link.threadTs ? '' : `, \`fleet slack thread ${link.id} <ts>\` for a thread`}, \`fleet slack file ${link.id} <file-id>\` for a file it lists. Read only when it helps you answer, not every message.`,
     '- When nothing calls for a post, post nothing: end your turn here with one short line (e.g. "observed — nothing for me"), no summary of the conversation.',
     '- Help only within the instructions above: questions, investigating, debugging, small changes within them. Decline anything else in the thread, and say here what was asked.',
@@ -287,7 +294,7 @@ export function messagesPrompt(link, messages, { names = {} } = {}) {
       : messages.some((m) => m.joined)
         ? 'in a thread you posted in — answer only if it is for you'
         : 'context';
-  const head = `[slack ${link.id}] New in ${link.threadTs ? 'the thread' : link.dm ? `the DM with ${link.dm.name}` : 'the conversation'} — ${why} (until ${ends(link)}; post with \`fleet slack reply ${link.id} "…"\`, or post nothing):`;
+  const head = `[slack ${link.id}] New in ${link.threadTs ? 'the thread' : link.dm ? `the DM with ${link.dm.name}` : 'the conversation'} — ${why} (until ${ends(link)}; post with \`fleet slack reply ${link.id} "…"${link.threadTs || oneOnOne(link) ? '' : ' --thread <ts>'}\`${link.threadTs || oneOnOne(link) ? '' : " in the message's thread"}, or post nothing):`;
   const { shown, left } = fitNewest(messages.map((m) => messageLine(m, link, names)), MAX_PROMPT - head.length - 60);
   return [head, ...(left ? [`(${left} earlier messages left out)`] : []), ...shown].join('\n');
 }
@@ -988,6 +995,9 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     if (!threadTs && thread != null) {
       if (!/^\d{10}\.\d{6}$/.test(String(thread))) throw new SlackError('thread must be a Slack timestamp like 1792777175.569809');
       threadTs = String(thread);
+    }
+    if (!threadTs && !oneOnOne(l) && (body.length > MAX_HEADLINE || body.includes('\n'))) {
+      throw new SlackError(`outside a thread, post only a one-line headline (max ${MAX_HEADLINE} chars), then the details in its thread with --thread <its ts>; to answer a message, use --thread <its ts>`);
     }
     if (!bot) await whoami().catch(() => {});
     const r = await call('chat.postMessage', {

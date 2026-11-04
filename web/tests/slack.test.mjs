@@ -536,6 +536,31 @@ test('a channel link: every thread in it, replies take --thread', async (t) => {
   assert.equal(fx.slack.calls.findLast((c) => c.method === 'chat.postMessage').params.thread_ts, undefined);
 });
 
+test('a channel link: threads first — answers in threads, top-level only a one-line headline', async (t) => {
+  const fx = fixture(t);
+  fx.slack.handlers['conversations.history'] = () => ({ messages: [] });
+  const link = await fx.bridge.link({ session: SID, url: 'https://team.slack.com/archives/C0123ABCDEF', minutes: 5, host: 'h' });
+  await fx.bridge.tick();
+  assert.match(fx.sent[0].text, /Threads first/);
+  const msg = { ts: '1792778000.000001', threadTs: '1792778000.000001', user: 'U1', text: 'top', mention: true };
+  assert.match(messagesPrompt(link, [msg]), /--thread <ts>` in the message's thread/);
+  assert.doesNotMatch(messagesPrompt({ ...link, threadTs: '1792778000.000001' }, [msg]), /--thread/);
+  await assert.rejects(fx.bridge.reply({ link: link.id, text: 'Headline\nand the details' }), (err) => err.status === 400 && /headline/.test(err.message));
+  await assert.rejects(fx.bridge.reply({ link: link.id, text: 'x'.repeat(301) }), { status: 400 });
+  const head = (await fx.bridge.reply({ link: link.id, text: 'Release 1.2 is out' })).ts;
+  await fx.bridge.reply({ link: link.id, text: 'Details:\n- one\n- two', thread: head });
+  assert.equal(fx.slack.calls.findLast((c) => c.method === 'chat.postMessage').params.thread_ts, head);
+});
+
+test('a one-on-one DM link: no threads-first rule, long top-level posts go through', async (t) => {
+  const fx = fixture(t);
+  fx.slack.handlers['conversations.history'] = () => ({ messages: [] });
+  const link = await fx.bridge.link({ session: SID, url: 'https://team.slack.com/archives/D0123ABCDEF', minutes: 5, host: 'h' });
+  await fx.bridge.tick();
+  assert.doesNotMatch(fx.sent[0].text, /Threads first/);
+  assert.equal((await fx.bridge.reply({ link: link.id, text: 'Line one\nline two' })).ok, true);
+});
+
 test('a channel link in mention mode: the threads it posted in wake it, others stay context', async (t) => {
   const fx = fixture(t);
   fx.slack.handlers['conversations.history'] = () => ({ messages: [] });

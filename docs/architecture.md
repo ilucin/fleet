@@ -722,7 +722,11 @@ server's name as `host`, and the reply's pane is checked on that host.
 - **What fleet enforces**, not the model: which conversation (a message elsewhere is never
   delivered), until when (an ended link delivers nothing and refuses replies), who wrote a message
   (Slack's user id), and which session may reply (`fleet slack reply` sends `$TMUX_PANE`; another
-  session's pane is a 403). Bots, the bridge's own notices and edits are not delivered.
+  session's pane is a 403). Bots, the bridge's own notices and edits are not delivered. Threads
+  first (the company's rule): where several people read (a channel or group DM link), a post
+  outside a thread is refused unless it is a one-line headline (≤ 300 chars, `MAX_HEADLINE`); the
+  note tells the session to answer in the message's thread and put details under the headline. A
+  one-on-one DM (`D…`) is exempt.
 - **Sessions on one app**: a session's post (`reply`, whose `ts` its link keeps) reaches the other
   links in that place as a message from `session "<name>"`. It is never a mention or a DM. In mention
   mode it wakes a link only in a thread that link posted in, and at most 5 times per 10 min per link;
