@@ -5,17 +5,17 @@ import { HostCard } from '@/components/desktop/HostCard'
 import { HostDot } from '@/components/HostBadge'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import type { SessionListState } from '@/hooks/useSessionList'
-import { clickHost, isShared } from '@/lib/hosts'
+import { clickHost, isShared, type HostClick } from '@/lib/hosts'
 import { cn } from '@/lib/utils'
 
 const group = 'flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5'
-const addKey = (e: MouseEvent) => e.metaKey || e.ctrlKey || e.shiftKey
+const clickKind = (e: MouseEvent): HostClick => (e.shiftKey ? 'toggle' : e.metaKey || e.ctrlKey ? 'only' : 'group')
 
 /**
  * The top bar's hosts, which are also the host filter: a compact chip per host (colour mark +
  * session count), own hosts in one group, shared sheds (`hosts.<name>.shared`: a hollow diamond)
- * in a dashed one. Click: only that host (again: back to its group, so Mine / Shared are a double
- * click away); ⌘ / Ctrl / Shift-click adds or removes it (multi-select). Right-click or ⌥-click
+ * in a dashed one. Click: the host's whole group (Mine or Shared); ⌘ / Ctrl-click: only that host
+ * (again: back to its group); Shift-click adds or removes it (multi-select). Right-click or ⌥-click
  * opens the host card (state, error, terminal). A shared chip carries how many of its sessions
  * wait, since they stay out of the Inbox and the waiting count.
  */
@@ -36,7 +36,7 @@ export function HostRail({ list, now }: { list: SessionListState; now: number })
         waiting={sharedWaiting.get(h.name) ?? 0}
         self={h.name === fleet?.self}
         now={now}
-        onPick={(add) => setSelection(clickHost(shown, h.name, hosts, add))}
+        onPick={(how) => setSelection(clickHost(shown, h.name, hosts, how))}
       />
     ))
 
@@ -71,12 +71,12 @@ function HostChip({
   waiting: number
   self: boolean
   now: number
-  onPick: (add: boolean) => void
+  onPick: (how: HostClick) => void
 }) {
   const [open, setOpen] = useState(false)
   const down = h.ok === false
   const state = down ? 'unreachable' : `${count} session${count === 1 ? '' : 's'}${waiting ? `, ${waiting} waiting` : ''}`
-  const title = `${h.name}${isShared(h) ? ' (shared)' : ''}: ${state}\nClick: only this host · ⌘-click: add · right-click: details & terminal`
+  const title = `${h.name}${isShared(h) ? ' (shared)' : ''}: ${state}\nClick: ${isShared(h) ? 'shared sheds' : 'my hosts'} · ⌘-click: only this host · ⇧-click: add · right-click: details & terminal`
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
@@ -85,7 +85,7 @@ function HostChip({
           aria-pressed={on}
           aria-label={`${h.name}: ${state}`}
           title={title}
-          onClick={(e) => (e.altKey ? setOpen(true) : onPick(addKey(e)))}
+          onClick={(e) => (e.altKey ? setOpen(true) : onPick(clickKind(e)))}
           onContextMenu={(e) => {
             e.preventDefault()
             setOpen(true)

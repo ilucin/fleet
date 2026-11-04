@@ -24,14 +24,17 @@ describe('host selection', () => {
     expect(resolveSelection({ scope: 'mine' }, [h('shed-a', true)]).size).toBe(1)
   })
 
-  it('a chip click picks one host, a second goes back to its group; ⌘ toggles', () => {
+  it('a chip click picks its group, ⌘ only that host (again: the group), Shift toggles', () => {
     const mine = resolveSelection({ scope: 'mine' }, HOSTS)
-    expect(clickHost(mine, 'shed-a', HOSTS, false)).toEqual({ hosts: ['shed-a'] })
-    expect(clickHost(new Set(['shed-a']), 'shed-a', HOSTS, false)).toEqual({ scope: 'shared' })
-    expect(clickHost(mine, 'shed-a', HOSTS, true)).toEqual({ hosts: ['laptop', 'workstation', 'shed-a'] })
-    expect(clickHost(new Set(['laptop']), 'workstation', HOSTS, true)).toEqual({ scope: 'mine' })
+    expect(clickHost(mine, 'shed-a', HOSTS, 'group')).toEqual({ scope: 'shared' })
+    expect(clickHost(new Set(['shed-a']), 'laptop', HOSTS, 'group')).toEqual({ scope: 'mine' })
+    expect(clickHost(mine, 'laptop', HOSTS, 'group')).toEqual({ scope: 'mine' })
+    expect(clickHost(mine, 'shed-a', HOSTS, 'only')).toEqual({ hosts: ['shed-a'] })
+    expect(clickHost(new Set(['shed-a']), 'shed-a', HOSTS, 'only')).toEqual({ scope: 'shared' })
+    expect(clickHost(mine, 'shed-a', HOSTS, 'toggle')).toEqual({ hosts: ['laptop', 'workstation', 'shed-a'] })
+    expect(clickHost(new Set(['laptop']), 'workstation', HOSTS, 'toggle')).toEqual({ scope: 'mine' })
     // The last host stays.
-    expect(clickHost(new Set(['laptop']), 'laptop', HOSTS, true)).toEqual({ hosts: ['laptop'] })
+    expect(clickHost(new Set(['laptop']), 'laptop', HOSTS, 'toggle')).toEqual({ hosts: ['laptop'] })
   })
 
   it('labels: none for the default, otherwise short', () => {

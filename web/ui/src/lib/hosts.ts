@@ -58,21 +58,24 @@ export function normalizeSelection(names: Iterable<string>, hosts: Host[]): Host
   return { hosts: hosts.map((h) => h.name).filter((n) => set.has(n)) }
 }
 
+/** How a host chip was clicked: plain, ⌘ / Ctrl, or Shift. */
+export type HostClick = 'group' | 'only' | 'toggle'
+
 /**
- * A click on a host chip. Plain: only that host, or back to its group when it already was the
- * only one. `add` (⌘ / Ctrl / Shift): toggle it in the current set (the last one stays).
+ * A click on a host chip. `group` (plain): the host's whole group, own hosts (*Mine*) or shared
+ * sheds (*Shared*). `only` (⌘ / Ctrl): just that host, or back to its group when it already was the
+ * only one. `toggle` (Shift): add or remove it in the current set (the last one stays).
  */
-export function clickHost(current: Set<string>, name: string, hosts: Host[], add: boolean): HostSelection {
-  if (add) {
+export function clickHost(current: Set<string>, name: string, hosts: Host[], how: HostClick): HostSelection {
+  const group = (): HostSelection => ({ scope: isShared(hosts.find((h) => h.name === name)) ? 'shared' : 'mine' })
+  if (how === 'toggle') {
     const next = new Set(current)
     if (next.has(name)) {
       if (next.size > 1) next.delete(name)
     } else next.add(name)
     return normalizeSelection(next, hosts)
   }
-  if (current.size === 1 && current.has(name)) {
-    return { scope: isShared(hosts.find((h) => h.name === name)) ? 'shared' : 'mine' }
-  }
+  if (how === 'group' || (current.size === 1 && current.has(name))) return group()
   return { hosts: [name] }
 }
 
