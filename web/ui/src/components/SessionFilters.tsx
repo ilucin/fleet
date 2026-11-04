@@ -76,10 +76,11 @@ export function SessionFilters({ list, spread = false, touch = false, hostPicker
       >
         <ToggleGroupItem value={SESSIONS} className={seg}>
           Sessions
+          <span className={kindCount}>{counts?.all ?? ''}</span>
         </ToggleGroupItem>
         <ToggleGroupItem value="scheduled" className={seg} title="Sessions started by bots">
           Bots
-          <span className={kindCount}>{counts?.scheduled || ''}</span>
+          <span className={kindCount}>{counts?.scheduled ?? ''}</span>
         </ToggleGroupItem>
         {kinds.map((f) => (
           <ToggleGroupItem key={f.id} value={f.id} className={seg} title={f.title}>
