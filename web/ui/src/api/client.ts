@@ -25,6 +25,7 @@ import type {
   InboxSettings,
   Job,
   JobEnabledResponse,
+  JobRetentionResponse,
   JobRunResponse,
   JobsResponse,
   KillResponse,
@@ -246,6 +247,9 @@ export const api = {
   /** Pause / resume a job (`jobs.<name>.enabled`). */
   setJobEnabled: (host: string, name: string, enabled: boolean, o: Opts = {}) =>
     request<JobEnabledResponse>(`${hostPath(host)}/jobs/${enc(name)}/enabled`, { ...o, method: 'POST', body: { enabled } }),
+  /** When a bot's sessions close: `keep` / `closeDone`, each a span (`6h`, `2d`) or `never`. */
+  setJobRetention: (host: string, name: string, body: { keep?: string; closeDone?: string }, o: Opts = {}) =>
+    request<JobRetentionResponse>(`${hostPath(host)}/jobs/${enc(name)}/retention`, { ...o, method: 'POST', body }),
   /** The host's scheduled sessions, pending and recent (`fleet schedule --json`). 404 / 501: an older server / CLI. */
   schedule: (host: string, o: Opts = {}) => request<ScheduleResponse>(`${hostPath(host)}/schedule`, o),
   /** Start a session later on `host` (an agent starts then, not now). */

@@ -13,24 +13,30 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { InlineEdit } from '@/components/InlineEdit'
 import { useFleet } from '@/hooks/useFleet'
 import { useJobShow, useJobs } from '@/hooks/useJobs'
 import { useNow } from '@/hooks/useNow'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSchedule } from '@/hooks/useSchedule'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { relTime } from '@/lib/format'
-import { OUTCOME_TEXT, jobKey, keepLabel, liveSession, liveSummary, outcomeTone, promptLabel, runTree, whenLabel } from '@/lib/jobs'
+import { isShared } from '@/lib/hosts'
+import { OUTCOME_TEXT, isSpan, jobKey, liveSession, liveSummary, outcomeTone, promptLabel, runTree, spanText, splitByShed, whenLabel } from '@/lib/jobs'
 import { sessionHref, statusLabel, statusMeta } from '@/lib/sessions'
 import { STATUS_TEXT } from '@/lib/styles'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
 
 type HostedJob = Job & { host: string }
+type BotsTab = 'mine' | 'shared'
 
 /**
  * `#/bots`: the bots of every host (`fleet bots`), each with its schedule, next run, an
  * enabled switch, Run now and its last run; expanding one lists its runs and the sessions each run
- * started, as a tree. `screen` = the mobile page (back, swipe back); `pane` = the desktop main pane.
+ * started, as a tree. With a shared shed configured (`hosts.<name>.shared`), two tabs: My bots
+ * (the user's own hosts) and Shared (one group per shed). `screen` = the mobile page (back, swipe back); `pane` = the desktop main pane.
  */
 export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
   const pane = layout === 'pane'
@@ -43,6 +49,14 @@ export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }
   const [confirm, setConfirm] = useState<HostedJob | null>(null)
   // A run that started: bumps the expanded job's runs.
   const [runEpoch, setRunEpoch] = useState(0)
+  const [tab, setTab] = usePersistentState<BotsTab>('fleet.botsTab', 'mine', (raw) => (raw === 'mine' || raw === 'shared' ? raw : undefined))
+  const sharedHosts = (fleet?.hosts ?? []).filter(isShared).map((h) => h.name)
+  const tabbed = sharedHosts.length > 0
+  const shown: BotsTab = tabbed ? tab : 'mine'
+  const jobsSplit = splitByShed(jobs, sharedHosts)
+  const schedSplit = splitByShed(scheduled, sharedHosts)
+  const errSplit = splitByShed(errors, sharedHosts)
+  const sharedCount = jobsSplit.sheds.reduce((n, g) => n + g.items.length, 0)
 
   const back = () => {
     if (!pane && window.history.length > 1) window.history.back()
@@ -58,6 +72,16 @@ export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }
       else next.add(key)
       return next
     })
+
+  const setRetention = async (j: HostedJob, body: { keep?: string; closeDone?: string }) => {
+    try {
+      const r = await api.setJobRetention(j.host, j.name, body)
+      if (r.job) patch(j.host, j.name, { keep: r.job.keep, closeDone: r.job.closeDone })
+      toast.success(r.output || `Updated ${j.name}`)
+    } catch (err) {
+      toast.error(`Could not change ${j.name}`, { description: (err as Error)?.message })
+    }
+  }
 
   const setEnabled = async (j: HostedJob, enabled: boolean) => {
     patch(j.host, j.name, { enabled })
@@ -86,6 +110,18 @@ export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }
     </Button>
   )
 
+  const listProps = {
+    now,
+    fleet,
+    open,
+    runEpoch,
+    onToggle: toggle,
+    onEnabled: (j: HostedJob, v: boolean) => void setEnabled(j, v),
+    onRetention: (j: HostedJob, body: { keep?: string; closeDone?: string }) => void setRetention(j, body),
+    onRun: (j: HostedJob) => setConfirm(j),
+    onScheduleChanged: reloadSchedule,
+  }
+
   const content = (
     <div className="mx-auto w-full max-w-lg space-y-3 px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:max-w-2xl">
       {loading && !jobs.length ? (
@@ -94,38 +130,57 @@ export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }
           <Skeleton className="h-3 w-full" />
         </div>
       ) : null}
-      {scheduled.length ? (
-        <div className="space-y-1.5">
-          <h2 className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Scheduled sessions</h2>
-          <ScheduledList entries={scheduled} now={now} onChanged={reloadSchedule} />
-        </div>
-      ) : null}
-      {jobs.map((j) => (
-        <JobCard
-          key={jobKey(j)}
-          job={j}
-          now={now}
-          fleet={fleet}
-          open={open.has(jobKey(j))}
-          runEpoch={runEpoch}
-          onToggle={() => toggle(jobKey(j))}
-          onEnabled={(v) => void setEnabled(j, v)}
-          onRun={() => setConfirm(j)}
-        />
-      ))}
-      {errors.length ? (
-        <ul className="space-y-1.5">
-          {errors.map((e) => (
-            <li key={e.host} className="flex items-start gap-2 text-sm text-muted-foreground">
-              <HostDot host={e.host} className="mt-1.5" />
-              <span className="min-w-0 break-words">
-                <span className="font-medium text-foreground">{e.host}</span> — {e.error}
-              </span>
-            </li>
+      {tabbed ? (
+        <ToggleGroup
+          type="single"
+          value={shown}
+          onValueChange={(v) => v && setTab(v as BotsTab)}
+          aria-label="Whose bots"
+          spacing={0}
+          className="w-full rounded-lg border border-border bg-card p-0.5"
+        >
+          {(
+            [
+              ['mine', 'My bots', jobsSplit.mine.length],
+              ['shared', 'Shared', sharedCount],
+            ] as const
+          ).map(([v, label, n]) => (
+            <ToggleGroupItem
+              key={v}
+              value={v}
+              className="h-9 flex-1 gap-1.5 rounded-md text-sm text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-accent-foreground"
+            >
+              {label} <span className="text-xs text-dimmer tabular-nums">{n}</span>
+            </ToggleGroupItem>
           ))}
-        </ul>
+        </ToggleGroup>
       ) : null}
-      {!loading && !jobs.length && !errors.length ? (
+      {shown === 'mine' ? (
+        <BotList
+          jobs={jobsSplit.mine}
+          scheduled={schedSplit.mine}
+          errors={errSplit.mine}
+          {...listProps}
+        />
+      ) : (
+        jobsSplit.sheds.map((g, i) => (
+          <section key={g.host} aria-label={`Shared shed ${g.host}`} className="space-y-2">
+            <h2 className="flex items-center gap-2 px-1 pt-1 text-sm font-semibold">
+              <HostDot host={g.host} shared /> {g.host}
+              <span className="text-xs font-normal text-muted-foreground">shared shed</span>
+            </h2>
+            <BotList
+              jobs={g.items}
+              scheduled={schedSplit.sheds[i].items}
+              errors={errSplit.sheds[i].items}
+              hideHost
+              {...listProps}
+            />
+            {!g.items.length && !errSplit.sheds[i].items.length ? <p className="px-1 text-sm text-muted-foreground">No bots on {g.host}.</p> : null}
+          </section>
+        ))
+      )}
+      {!loading && !jobs.length && !errors.length && !tabbed ? (
         <p className="py-8 text-center text-sm text-muted-foreground">No bots. Add one under <span className="font-mono">bots</span> in a host’s fleet config.</p>
       ) : null}
       <p className="text-xs text-dimmer">
@@ -187,23 +242,123 @@ export function JobsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }
   )
 }
 
-function JobCard({
-  job: j,
+type ScheduledEntries = Parameters<typeof ScheduledList>[0]['entries']
+
+/** One group's bots: its scheduled sessions, its bot cards, the hosts that could not list theirs. */
+function BotList({
+  jobs,
+  scheduled,
+  errors,
+  hideHost = false,
   now,
   fleet,
   open,
   runEpoch,
   onToggle,
   onEnabled,
+  onRetention,
+  onRun,
+  onScheduleChanged,
+}: {
+  jobs: HostedJob[]
+  scheduled: ScheduledEntries
+  errors: { host: string; error: string | null }[]
+  hideHost?: boolean
+  now: number
+  fleet: FleetResponse | null
+  open: Set<string>
+  runEpoch: number
+  onToggle: (key: string) => void
+  onEnabled: (j: HostedJob, v: boolean) => void
+  onRetention: (j: HostedJob, body: { keep?: string; closeDone?: string }) => void
+  onRun: (j: HostedJob) => void
+  onScheduleChanged: () => void
+}) {
+  return (
+    <>
+      {scheduled.length ? (
+        <div className="space-y-1.5">
+          <h3 className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Scheduled sessions</h3>
+          <ScheduledList entries={scheduled} now={now} onChanged={onScheduleChanged} />
+        </div>
+      ) : null}
+      {jobs.map((j) => (
+        <JobCard
+          key={jobKey(j)}
+          job={j}
+          now={now}
+          fleet={fleet}
+          hideHost={hideHost}
+          open={open.has(jobKey(j))}
+          runEpoch={runEpoch}
+          onToggle={() => onToggle(jobKey(j))}
+          onEnabled={(v) => onEnabled(j, v)}
+          onRetention={(body) => onRetention(j, body)}
+          onRun={() => onRun(j)}
+        />
+      ))}
+      {errors.length ? (
+        <ul className="space-y-1.5">
+          {errors.map((e) => (
+            <li key={e.host} className="flex items-start gap-2 text-sm text-muted-foreground">
+              <HostDot host={e.host} className="mt-1.5" />
+              <span className="min-w-0 break-words">
+                <span className="font-medium text-foreground">{e.host}</span> — {e.error}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  )
+}
+
+/** keep / closeDone in a bot card: the span, click to edit (`6h`, `2d`, `never`). */
+function SpanEdit({ value, label, onSave }: { value: number | null; label: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  return (
+    <InlineEdit
+      value={spanText(value)}
+      editing={editing}
+      onEdit={() => setEditing(true)}
+      onCancel={() => setEditing(false)}
+      onCommit={(text) => {
+        setEditing(false)
+        if (text === spanText(value)) return
+        if (!isSpan(text)) {
+          toast.error(`${label}: a span like 6h, 2d, 30m, or never`)
+          return
+        }
+        onSave(text)
+      }}
+      label={label}
+      hint={`${label} — click to change (6h, 2d, 30m, never)`}
+      className="font-mono"
+    />
+  )
+}
+
+function JobCard({
+  job: j,
+  now,
+  fleet,
+  hideHost = false,
+  open,
+  runEpoch,
+  onToggle,
+  onEnabled,
+  onRetention,
   onRun,
 }: {
   job: HostedJob
   now: number
   fleet: FleetResponse | null
+  hideHost?: boolean
   open: boolean
   runEpoch: number
   onToggle: () => void
   onEnabled: (v: boolean) => void
+  onRetention: (body: { keep?: string; closeDone?: string }) => void
   onRun: () => void
 }) {
   const lastRun = j.runs?.[0] ?? null
@@ -222,7 +377,7 @@ function JobCard({
           <div className="flex min-w-0 items-center gap-2">
             <ChevronDownIcon className={cn('size-4 shrink-0 text-dimmer transition-transform', !open && '-rotate-90')} />
             <h2 className="min-w-0 truncate font-semibold">{j.name}</h2>
-            <HostBadge host={j.host} />
+            {hideHost ? null : <HostBadge host={j.host} />}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-xs text-muted-foreground">
             <span title={j.schedule}>
@@ -293,8 +448,20 @@ function JobCard({
                 <dd className="truncate font-mono">{j.model}</dd>
               </>
             ) : null}
-            <dt className="text-dimmer">sessions</dt>
-            <dd>{keepLabel(j.keep)} (when idle)</dd>
+            {j.closeDone !== undefined ? (
+              <>
+                <dt className="text-dimmer">close done</dt>
+                <dd className="flex min-w-0 items-baseline gap-1.5">
+                  <SpanEdit value={j.closeDone} label="Close done sessions after" onSave={(v) => onRetention({ closeDone: v })} />
+                  <span className="text-dimmer">after the session reports done, while idle</span>
+                </dd>
+              </>
+            ) : null}
+            <dt className="text-dimmer">keep</dt>
+            <dd className="flex min-w-0 items-baseline gap-1.5">
+              <SpanEdit value={j.keep} label="Close idle sessions after" onSave={(v) => onRetention({ keep: v })} />
+              <span className="text-dimmer">after the run started, while idle</span>
+            </dd>
           </dl>
           <JobRuns host={j.host} name={j.name} now={now} fleet={fleet} runEpoch={runEpoch} />
         </div>

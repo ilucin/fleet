@@ -106,7 +106,7 @@ const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/st
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
 const REPOS_ROUTE = /^\/api\/hosts\/([^/]+)\/repos(?:\/(sync|service))?$/;
-const JOBS_ROUTE = /^\/api\/hosts\/([^/]+)\/jobs(?:\/([^/]+)(?:\/(run|enabled))?)?$/;
+const JOBS_ROUTE = /^\/api\/hosts\/([^/]+)\/jobs(?:\/([^/]+)(?:\/(run|enabled|retention))?)?$/;
 /** `fleet jobs run` starts a session (tmux + the agent): give a peer longer than the CLI's 60 s. */
 const JOB_RUN_PROXY_MS = 90 * 1000;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
@@ -192,7 +192,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
  *   repos       lib/repos.mjs#createRepos (GET/PUT repos, POST repos/sync|service; absent → 501)
- *   jobs        lib/jobs.mjs#createJobs (GET jobs[/:name], POST jobs/:name/run|enabled; absent → 501)
+ *   jobs        lib/jobs.mjs#createJobs (GET jobs[/:name], POST jobs/:name/run|enabled|retention; absent → 501)
  *   stacks      lib/stacks.mjs#createStacks (…/stacks routes, sibling spawn, sync after kill; absent → 501)
  *   focus       lib/focus.mjs instance (/api/hosts/:host/focus; absent → 501)
  *   dormant     lib/dormant.mjs#createDormant (…/dormant routes: list / restore / forget; absent → 501)
@@ -2157,6 +2157,7 @@ export function createApi({
     if (!jobs) throw new HttpError('jobs are not available on this server', 501);
     if (action === 'run') return jobs.runNow(name, await readJsonBody(req));
     if (action === 'enabled') return jobs.setEnabled(name, await readJsonBody(req));
+    if (action === 'retention') return jobs.setRetention(name, await readJsonBody(req));
     return name == null ? jobs.list() : jobs.show(name);
   }
 

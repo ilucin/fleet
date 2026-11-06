@@ -1226,6 +1226,15 @@ enum JobsCmd {
     Enable { name: String },
     /// Pause a bot (its schedule stops firing; live sessions are left alone)
     Disable { name: String },
+    /// Change when a bot's sessions are closed: `--keep` (after the run started) and
+    /// `--close-done` (after the session reported itself done), each a span (`6h`, `2d`) or `never`
+    Set {
+        name: String,
+        #[arg(long)]
+        keep: Option<String>,
+        #[arg(long = "close-done")]
+        close_done: Option<String>,
+    },
     /// Run `bots tick` every minute and at login (launchd)
     InstallService {
         /// Remove the service instead
@@ -2023,6 +2032,11 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
             JobsCmd::Forget { name, branch } => jobs_cmd::forget(&name, &branch)?,
             JobsCmd::Enable { name } => jobs_cmd::set_enabled(&name, true)?,
             JobsCmd::Disable { name } => jobs_cmd::set_enabled(&name, false)?,
+            JobsCmd::Set {
+                name,
+                keep,
+                close_done,
+            } => jobs_cmd::set_retention(&name, keep, close_done)?,
             JobsCmd::InstallService {
                 uninstall,
                 no_load,

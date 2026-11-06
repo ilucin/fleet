@@ -463,6 +463,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | GET | `/api/hosts/:host/jobs/:name` | one job with every kept run, newest first, each run's sessions with `parent`: `fleet --local jobs show <name> --json` + `host`; 404 no such job. Names: `[A-Za-z0-9_-]{1,40}` (else 400) |
 | POST | `/api/hosts/:host/jobs/:name/run` | `{ force? }` → `{ host, name, output }`: `fleet --local jobs run [--force] <name>`. Starts an agent (spawn's trust level); 409 `{ error, busy: true }` while a session of the job is working, unless `force` |
 | POST | `/api/hosts/:host/jobs/:name/enabled` | `{ enabled: boolean }` → `{ host, name, enabled, output, job }`: `fleet --local jobs enable\|disable <name>`, then the job as `show` reports it |
+| POST | `/api/hosts/:host/jobs/:name/retention` | `{ keep?, closeDone? }` (each a span like `6h` / `2d`, or `never`) → `{ host, name, output, job }`: `fleet --local jobs set <name> --keep … --close-done …`, then the job as `show` reports it |
 | GET | `/api/hosts/:host/schedule` | `{ host, entries }`: `fleet --local schedule --json` — pending and recent scheduled sessions ([CLI](cli.md#scheduled-sessions)) |
 | POST | `/api/hosts/:host/schedule` | `{ at \| task (+ time), dir, prompt?, name?, model?, harness?, ghIdentity? }` → `{ host, entry }`: `fleet --local schedule add`. `dir` must be in the host's spawn dirs, like a spawn; starts an agent later |
 | POST | `/api/hosts/:host/schedule/:id/cancel` | → `{ host, id, output }`: `fleet --local schedule cancel <id>` |

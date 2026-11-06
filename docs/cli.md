@@ -631,6 +631,7 @@ section is still read (a name in both: the `bots` one wins), and the names below
 | `ghIdentity` | the [GitHub identity](#github-identities) the bot's sessions (and what they spawn) act as on GitHub; default none — yours |
 | `enabled` | `false` pauses the bot (`fleet bots disable`). `fleet config set bots.<name> null` removes it |
 | `keep` | default `72h`, or `"never"`: once a run is older than this, its sessions that are idle and quiet for an hour are closed (their tmux session is killed). A session waiting for input is never closed. A finished bot session shows as done before that: its prompt carries the [ask-done](#ask-done) instruction |
+| `closeDone` | default `24h`, or `"never"`: a session that reported itself done (`fleet done`) is closed this long after the mark, while it is idle and nobody prompted it since (a prompt after `done` drops the mark). Whichever of `keep` and `closeDone` comes first closes it |
 
 A bot never fires on the tick that first sees it (a bot added at 08:00 with a 07:00 schedule first
 runs tomorrow). A slot more than 6 hours old when a tick sees it (the machine was off) is recorded
@@ -641,7 +642,8 @@ as `missed`; a slot that comes while a session of the bot is still working is `s
 | `fleet bots [list] [--json]` | each bot: schedule, next run, last run, live sessions (working / needs you) |
 | `fleet bots show <name> [--json]` | settings and the latest runs, each with its sessions as a tree (`└` = spawned by a bot session) and their state (`busy` / `idle` / `waiting` / `closed` / `gone`) |
 | `fleet bots run <name> [--force] [--prompt <text>]` | start a run now (`trigger: manual`); refuses while a session of the bot is working unless `--force`. `--prompt` is added after the recipe's prompt — a task for this run, with the recipe's context; dir, launcher, model, `ghIdentity` and `keep` stay the recipe's: a bot's other task (acting on its own report, say) runs as the bot, with whatever GitHub identity this host gives it |
-| `fleet bots tick [-q]` | fire due bots, record missed / skipped slots, close sessions past `keep` — what the service runs. Exits 1 when a bot failed to start |
+| `fleet bots tick [-q]` | fire due bots, record missed / skipped slots, close sessions past `keep` or done for `closeDone` — what the service runs. Exits 1 when a bot failed to start |
+| `fleet bots set <name> [--keep <span>] [--close-done <span>]` | change `keep` / `closeDone` (`6h`, `2d`, `30m`, or `never`); the Bots screen edits them in place |
 | `fleet bots enable\|disable <name>` | set `<section>.<name>.enabled` (`bots`, or `jobs` for a bot still there) |
 | `fleet bots install-service` | macOS: a launchd agent `fleet.jobs` that runs `fleet --local jobs tick -q` every minute and at login (`--uninstall`, `--no-load`, `--print`); logs to `~/Library/Logs/fleet.jobs.log` |
 
@@ -650,16 +652,18 @@ session has `FLEET_JOB_RUN=<bot>/<run>` in its tmux environment and the pane opt
 `@fleet_job_run`; `fleet list` reports it as `origin: { job, run }`. A closed bot session that
 `fleet restore` brings back keeps both and its bot's launcher, and is open in its run's record again.
 
-`--json` of `bots` / `bots show` is `{ name, schedule, scheduleText (the schedule in plain English), enabled, dir, harness, model, command, keep,
+`--json` of `bots` / `bots show` is `{ name, schedule, scheduleText (the schedule in plain English), enabled, dir, harness, model, command, keep, closeDone,
 prompt: { inline } | { file } | null, nextRun, lastSlot, runs, live }` per bot (`runs`: the latest one
 for `bots`, all kept for `show`, newest first: `{ id, trigger, startedAt, slot, outcome, reason,
 promptFile, sessions: [{ tmuxSession, name, parent, at, closedAt }] }`; `live`: `{ run, sessionId,
-tmuxSession, status, title }`; times in ms epoch, `keep` in seconds). State:
+tmuxSession, status, title }`; times in ms epoch, `keep` and `closeDone` in seconds, `null` = never). State:
 `${XDG_STATE_HOME:-~/.local/state}/fleet/jobs/<bot>.json` plus each run's prompt in `<bot>/<run>.md`
 (`FLEET_JOBS_DIR`); the last 50 runs are kept.
 
 In the web UI, the **Bots** screen (`#/bots`; `#/jobs` still opens it) lists every host's bots with
-Run now and the enabled switch, and each run's sessions as a tree; bot sessions wear a bot chip and
+Run now and the enabled switch, `keep` / `closeDone` editable in place, and each run's sessions as a
+tree. With a shared shed configured (`hosts.<name>.shared`) it has two tabs, **My bots** and
+**Shared** (one group per shed); bot sessions wear a bot chip and
 stay out of the session list unless they need you — the **Bots** status filter (bot icon) lists only them ([Web API](architecture.md#web-api)).
 
 ## GitHub triggers
@@ -719,8 +723,8 @@ matching branches now, compared with the set the bot remembers (its state file, 
   change) only remembers what is there — like a scheduled bot, which never fires on the tick that
   first sees it — unless `backfill`.
 - A branch that disappears is dropped from the state; its run gets `subject.goneAt`, its session is
-  **not** closed (only `keep` closes bot sessions; use `"keep": "never"` for sessions that must stay
-  until you close them). `fleet list` shows `[branch gone: release/42]` before its title,
+  **not** closed (only `keep` and `closeDone` close bot sessions; set both to `"never"` for sessions
+  that must stay until you close them). `fleet list` shows `[branch gone: release/42]` before its title,
   `fleet list --json` has it as `origin.subject.goneAt`.
 - A run that fails to start (a missing `dir`, an unknown `ghIdentity`) is `failed` and is not
   retried by itself: fix the cause, then `fleet bots forget <bot> <branch>`.

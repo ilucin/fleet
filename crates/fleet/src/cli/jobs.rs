@@ -105,6 +105,7 @@ fn job_json(j: &Job, st: &jobs::JobState, rows: &[Session], runs: usize) -> Valu
         "model": j.model,
         "command": j.command,
         "keep": j.keep,
+        "closeDone": j.close_done,
         "pull": j.pull,
         "prompt": prompt,
         "nextRun": j.enabled.then(|| j.next_run(Local::now()).map(|t| t.timestamp_millis())).flatten(),
@@ -256,6 +257,12 @@ pub fn show(name: &str, json_out: bool) -> Result<()> {
         j.keep
             .map(crate::cli::repos::span)
             .unwrap_or_else(|| "never".into())
+    );
+    println!(
+        "  close     {}",
+        j.close_done
+            .map(|d| format!("{} after done", crate::cli::repos::span(d)))
+            .unwrap_or_else(|| "never when done".into())
     );
     if let Some(w) = &st.github {
         println!("\n  branches");
@@ -1236,26 +1243,63 @@ pub fn health() -> Vec<crate::cli::hosts::BotHealth> {
     out
 }
 
-/// Close the sessions of `j`'s runs that are past `keep`, idle and quiet; mark the ones that
-/// are already gone.
+/// Why one of a run's sessions may be closed now (`None`: keep it). `agents`: the live agents
+/// in its tmux session, done marks stamped; none = the agent exited and left a shell behind.
+/// Past `keep` (seconds since the run started): every agent idle and quiet for an hour. Past
+/// `close_done` (seconds since `fleet done`): every agent idle with a mark that still stands.
+fn close_reason(
+    agents: &[&Session],
+    started_at: i64,
+    keep: Option<i64>,
+    close_done: Option<i64>,
+    now_ms: i64,
+) -> Option<&'static str> {
+    let idle = agents.iter().all(|x| x.status == "idle");
+    if !idle {
+        return None;
+    }
+    if keep.is_some_and(|k| started_at + k * 1000 < now_ms)
+        && agents.iter().all(|x| {
+            x.updated_at
+                .is_none_or(|u| now_ms - u > QUIET_BEFORE_CLOSE_MS)
+        })
+    {
+        return Some("past keep");
+    }
+    if let Some(cd) = close_done
+        && !agents.is_empty()
+        && agents
+            .iter()
+            .all(|x| x.done.as_ref().is_some_and(|d| d.at + cd * 1000 < now_ms))
+    {
+        return Some("done");
+    }
+    None
+}
+
+/// Close the sessions of `j`'s runs that are past `keep`, or done for `closeDone`, and idle;
+/// mark the ones that are already gone.
 fn cleanup(
     j: &Job,
     now: DateTime<Local>,
     quiet: bool,
     rows: &mut Option<Vec<Session>>,
 ) -> Result<()> {
-    let Some(keep) = j.keep else {
+    if j.keep.is_none() && j.close_done.is_none() {
         return Ok(());
-    };
+    }
     let now_ms = now.timestamp_millis();
     let mut st = jobs::load_state(&j.name);
+    // A done mark is never older than its run, so a run younger than both spans has nothing due.
     let due = |r: &Run| {
-        r.started_at + keep * 1000 < now_ms && r.sessions.iter().any(|s| s.closed_at.is_none())
+        let past = |span: Option<i64>| span.is_some_and(|k| r.started_at + k * 1000 < now_ms);
+        (past(j.keep) || past(j.close_done)) && r.sessions.iter().any(|s| s.closed_at.is_none())
     };
     if !st.runs.iter().any(due) {
         return Ok(());
     }
-    let live = rows.get_or_insert_with(discovery::discover).clone();
+    let mut live = rows.get_or_insert_with(discovery::discover).clone();
+    crate::core::done::stamp_done(&mut live);
     let tmux = backend::tmux_session_names();
     let mut changed = false;
     for r in st.runs.iter_mut() {
@@ -1272,22 +1316,20 @@ fn cleanup(
                 .iter()
                 .filter(|x| x.tmux_session.as_deref() == Some(s.tmux_session.as_str()))
                 .collect();
-            // Idle and quiet, or the agent already exited and left a shell behind.
-            let closable = agents.iter().all(|x| {
-                x.status == "idle"
-                    && x.updated_at
-                        .is_none_or(|u| now_ms - u > QUIET_BEFORE_CLOSE_MS)
-            });
-            if !closable {
+            let Some(why) = close_reason(&agents, r.started_at, j.keep, j.close_done, now_ms)
+            else {
                 continue;
-            }
+            };
             match crate::core::tmux::kill_session(&s.tmux_session) {
                 Ok(()) => {
                     s.closed_at = Some(now_ms);
                     changed = true;
                     log(
                         quiet,
-                        &format!("{}: closed {} (run {})", j.name, s.tmux_session, r.id),
+                        &format!(
+                            "{}: closed {} (run {}, {why})",
+                            j.name, s.tmux_session, r.id
+                        ),
                     );
                 }
                 Err(e) => log(
@@ -1301,6 +1343,52 @@ fn cleanup(
         jobs::save_state(&j.name, &st)?;
         *rows = None;
     }
+    Ok(())
+}
+
+/// `fleet bots set <name> [--keep <span|never>] [--close-done <span|never>]`.
+pub fn set_retention(name: &str, keep: Option<String>, close_done: Option<String>) -> Result<()> {
+    if keep.is_none() && close_done.is_none() {
+        return Err(Error::Other(
+            "nothing to set: pass --keep and/or --close-done".into(),
+        ));
+    }
+    let s = Settings::load();
+    let section = job(&s, name)?.section;
+    let check = |key: &str, v: &str| -> Result<String> {
+        let v = v.trim();
+        if v != "never" {
+            crate::core::tmux::parse_span(v).map_err(|e| Error::Other(format!("{key}: {e}")))?;
+        }
+        Ok(v.to_string())
+    };
+    let keep = keep.map(|v| check("keep", &v)).transpose()?;
+    let close_done = close_done.map(|v| check("closeDone", &v)).transpose()?;
+    if let Some(v) = &keep {
+        config::patch(&format!("{section}.{name}.keep"), Value::String(v.clone()))?;
+    }
+    if let Some(v) = &close_done {
+        config::patch(
+            &format!("{section}.{name}.closeDone"),
+            Value::String(v.clone()),
+        )?;
+    }
+    // The config is read once per process: report from the old job plus what changed.
+    let old = job(&s, name)?;
+    let span = |v: Option<i64>| {
+        v.map(crate::cli::repos::span)
+            .unwrap_or_else(|| "never".into())
+    };
+    let shown = |v: &Option<String>, before: Option<i64>| match v.as_deref() {
+        Some("never") => "never".to_string(),
+        Some(v) => span(crate::core::tmux::parse_span(v).ok()),
+        None => span(before),
+    };
+    println!(
+        "{name}: keep {}, close {} after done",
+        shown(&keep, old.keep),
+        shown(&close_done, old.close_done)
+    );
     Ok(())
 }
 
@@ -1416,6 +1504,47 @@ mod tests {
         );
         assert_eq!(strip_frontmatter("Do it.\n---\nmore"), "Do it.\n---\nmore");
         assert_eq!(strip_frontmatter("---\nunterminated"), "---\nunterminated");
+    }
+
+    #[test]
+    fn close_reason_keep_and_done() {
+        use crate::core::done::DoneRef;
+        const H: i64 = 3600 * 1000;
+        let now = 100 * H;
+        let agent = |status: &str, updated: i64, done: Option<i64>| Session {
+            status: status.into(),
+            updated_at: Some(updated),
+            done: done.map(|at| DoneRef { at, note: None }),
+            ..Session::default()
+        };
+        let day = Some(86_400);
+        // A fresh run, done 25h ago: closed for being done.
+        let a = agent("idle", now - 25 * H, Some(now - 25 * H));
+        assert_eq!(
+            close_reason(&[&a], now - 26 * H, None, day, now),
+            Some("done")
+        );
+        // Done 2h ago: not yet.
+        let a = agent("idle", now - 2 * H, Some(now - 2 * H));
+        assert_eq!(close_reason(&[&a], now - 3 * H, None, day, now), None);
+        // Not done, run past keep, quiet: past keep.
+        let a = agent("idle", now - 2 * H, None);
+        assert_eq!(
+            close_reason(&[&a], now - 30 * H, day, day, now),
+            Some("past keep")
+        );
+        // Working, or waiting: never.
+        let a = agent("working", now - 30 * H, Some(now - 30 * H));
+        assert_eq!(close_reason(&[&a], now - 30 * H, day, day, now), None);
+        // closeDone never: a done session stays until keep.
+        let a = agent("idle", now - 25 * H, Some(now - 25 * H));
+        assert_eq!(close_reason(&[&a], now - 26 * H, None, None, now), None);
+        // The agent exited (no live agent): only keep closes it.
+        assert_eq!(close_reason(&[], now - 26 * H, None, day, now), None);
+        assert_eq!(
+            close_reason(&[], now - 26 * H, day, day, now),
+            Some("past keep")
+        );
     }
 
     #[test]

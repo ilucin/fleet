@@ -64,6 +64,11 @@ function fakeRun(h) {
         if (h.busy && !args.includes('--force')) throw fail('Error: triage: a session of the job is working — pass --force to start another run anyway\n');
         return { stdout: '→ triage — run 20260101-0900 in tmux session triage-0101-0900\n', stderr: '' };
       }
+      if (args[2] === 'set') {
+        const cd = args.indexOf('--close-done');
+        if (cd > 0) h.closeDone = args[cd + 1];
+        return { stdout: `triage: keep 3d, close ${h.closeDone} after done\n`, stderr: '' };
+      }
       if (args[2] === 'enable' || args[2] === 'disable') {
         h.enabled = args[2] === 'enable';
         return { stdout: h.enabled ? 'triage: enabled — next run tomorrow 07:00\n' : 'triage: paused\n', stderr: '' };
@@ -200,6 +205,17 @@ test('POST jobs/:name/enabled', async (t) => {
   const on = await call(`${urls.laptop}/api/hosts/workstation/jobs/triage/enabled`, 'POST', { enabled: true });
   assert.equal(on.body.job.enabled, true);
   assert.equal((await call(`${urls.laptop}/api/hosts/laptop/jobs/triage/enabled`, 'POST', {})).status, 400);
+});
+
+test('POST jobs/:name/retention', async (t) => {
+  const { hosts, urls } = await startPair(t);
+  const r = await call(`${urls.laptop}/api/hosts/workstation/jobs/triage/retention`, 'POST', { closeDone: '6h' });
+  assert.equal(r.status, 200);
+  assert.match(r.body.output, /close 6h after done/);
+  assert.ok(hosts.workstation.calls.some((a) => a.join(' ') === '--local jobs set --close-done 6h -- triage'));
+  for (const bad of [{}, { closeDone: '6 hours' }, { keep: 3 }, { closeDone: '6h; rm -rf' }]) {
+    assert.equal((await call(`${urls.laptop}/api/hosts/laptop/jobs/triage/retention`, 'POST', bad)).status, 400, JSON.stringify(bad));
+  }
 });
 
 test('an older CLI without `jobs` → 501', async (t) => {

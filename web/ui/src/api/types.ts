@@ -1436,6 +1436,8 @@ export interface Job {
   command: string | null
   /** Seconds; null = never. */
   keep: number | null
+  /** Seconds after the session reported itself done (`fleet done`) that it is closed; null = never. Absent from an older CLI. */
+  closeDone?: number | null
   /**
    * A file prompt's `abs`: the path on the job's host (`~` expanded); `root`: its git checkout,
    * else its directory. `editorUrl` opens the file in the editor, `rootEditorUrl` the root (null
@@ -1470,6 +1472,13 @@ export interface JobRunResponse {
 }
 
 /** POST /api/hosts/:host/jobs/:name/enabled */
+export interface JobRetentionResponse {
+  host: string
+  name: string
+  output: string
+  job: Job | null
+}
+
 export interface JobEnabledResponse {
   host: string
   name: string

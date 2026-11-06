@@ -7,10 +7,12 @@ import { HostDot } from '@/components/HostBadge'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useFleet } from '@/hooks/useFleet'
 import { useNow } from '@/hooks/useNow'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useUsage } from '@/hooks/useUsage'
 import { relTime } from '@/lib/format'
+import { isShared } from '@/lib/hosts'
 import { CTX_FILL } from '@/lib/styles'
 import { PROVIDER_NAME, money, resetsLabel, usageLevel, type AccountUsage } from '@/lib/usage'
 import { cn } from '@/lib/utils'
@@ -20,13 +22,19 @@ const LEVEL_TEXT = { low: 'text-foreground', warn: 'text-status-waiting', hot: '
 /**
  * `#/usage`: the subscription limits of every account logged in across the fleet — Claude
  * (current session, weekly, per-model weekly, extra usage) and the ChatGPT plan Codex and pi
- * use (session, weekly, credits). Hosts on one account share one card. `screen` = the mobile page (back, swipe back); `pane` = the desktop main pane.
+ * use (session, weekly, credits). Hosts on one account share one card. Accounts only shared sheds
+ * use (`hosts.<name>.shared`) come last, under their own heading: their limits are not the user's. `screen` = the mobile page (back, swipe back); `pane` = the desktop main pane.
  */
 export function UsageScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) {
   const pane = layout === 'pane'
   const [, navigate] = useLocation()
   const { accounts, errors, loading, refresh, refreshing } = useUsage()
   const now = useNow(30_000)
+  const { fleet } = useFleet()
+  const shared = new Set((fleet?.hosts ?? []).filter(isShared).map((h) => h.name))
+  const onlyShared = (a: AccountUsage) => a.hosts.length > 0 && a.hosts.every((h) => shared.has(h))
+  const mine = accounts.filter((a) => !onlyShared(a))
+  const sheds = accounts.filter(onlyShared)
 
   const back = () => {
     if (!pane && window.history.length > 1) window.history.back()
@@ -59,9 +67,17 @@ export function UsageScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' 
           <Skeleton className="h-2 w-full" />
         </div>
       ) : null}
-      {accounts.map((a) => (
+      {mine.map((a) => (
         <AccountCard key={a.key} account={a} now={now} />
       ))}
+      {sheds.length ? (
+        <section aria-label="Shared sheds" className="space-y-3">
+          <h2 className="px-1 pt-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Shared sheds</h2>
+          {sheds.map((a) => (
+            <AccountCard key={a.key} account={a} now={now} />
+          ))}
+        </section>
+      ) : null}
       {errors.length ? (
         <ul className="space-y-1.5">
           {errors.map((e) => (

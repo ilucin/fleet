@@ -114,18 +114,20 @@ test('findSession / sessionHref', () => {
   expect(sessionHref({ host: 'a b', session_id: 'x/y' })).toBe('/s/a%20b/x%2Fy')
 })
 
-test('spawnTargets: reachable hosts with their dirs', () => {
+test('spawnTargets: reachable hosts with their dirs, shared sheds last', () => {
   const fleet = {
     self: 'a',
     hosts: [
+      { name: 's', ok: true, sessions: [], shared: true },
       { name: 'a', ok: true, sessions: [], spawnDirs: [{ label: 'Work', path: '/w' }] },
       { name: 'b', ok: false, sessions: [] },
       { name: 'c', ok: true, sessions: [] },
     ],
   }
   expect(spawnTargets(fleet)).toEqual([
-    { name: 'a', dirs: [{ label: 'Work', path: '/w' }] },
-    { name: 'c', dirs: [] },
+    { name: 'a', dirs: [{ label: 'Work', path: '/w' }], shared: false },
+    { name: 'c', dirs: [], shared: false },
+    { name: 's', dirs: [], shared: true },
   ])
 })
 

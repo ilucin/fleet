@@ -223,7 +223,9 @@ src/
 - **Bots** (`#/bots`, `#/jobs` still works; the ⋯ More menu in the mobile list header, the bot icon on desktop, ⌘K → Bots…): every
   host's bots — name, host, schedule, next run, an enabled switch (`POST …/jobs/:name/enabled`,
   optimistic), Run now (a confirm dialog; a 409 because a job session still works offers Run
-  anyway = `force`) and the last run's outcome + live sessions. Expanding a job shows its settings
+  anyway = `force`) and the last run's outcome + live sessions. With a shared shed, two tabs (`fleet.botsTab`):
+  My bots and Shared, one group per shed (lib/jobs.ts splitByShed). Expanding a job shows its settings
+  (`keep` / `closeDone` edit in place: `POST …/jobs/:name/retention`)
   and its runs (newest first: outcome, when, trigger, reason) with each run's sessions as a tree
   under their `parent`; a session still in /api/fleet (same host + tmux session) shows its live
   status and opens like a list row, else closed / gone. Hosts whose server or CLI predates jobs

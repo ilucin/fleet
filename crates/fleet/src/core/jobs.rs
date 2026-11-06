@@ -30,6 +30,8 @@
 //! the run starts all the same, with the reason in the run's `pull` and a line in its prompt.
 //! `keep` (default `72h`, `"never"` to keep forever): a run's sessions are closed once
 //! they are idle and the run is older than this; a session waiting for input is never closed.
+//! `closeDone` (default `24h`, `"never"` to leave them): a session that reported itself done
+//! (`fleet done`) is closed this long after, while it stays idle and nobody prompted it since.
 //!
 //! The launchd agent runs `fleet jobs tick` every minute. A tick fires a job when its latest
 //! scheduled slot is newer than the last slot it saw; a slot more than [`CATCH_UP_SECS`] old
@@ -68,6 +70,7 @@ pub const CATCH_UP_SECS: i64 = 6 * 3600;
 /// Runs kept per job in its state file.
 pub const KEEP_RUNS: usize = 50;
 pub const DEFAULT_KEEP: &str = "72h";
+pub const DEFAULT_CLOSE_DONE: &str = "24h";
 /// How far back [`Cron::prev`] looks for a slot.
 const LOOKBACK_MINUTES: i64 = 8 * 24 * 60;
 /// How far ahead [`Cron::next`] looks.
@@ -415,6 +418,8 @@ pub struct Job {
     pub enabled: bool,
     /// Seconds after a run starts that its idle sessions are closed; `None` = never.
     pub keep: Option<i64>,
+    /// `closeDone`: seconds after a session reports itself done that it is closed; `None` = never.
+    pub close_done: Option<i64>,
     /// `pull`: fast-forward `dir`'s checkout before each run.
     pub pull: bool,
     /// The config section it came from: `bots`, or the legacy `jobs`.
@@ -572,6 +577,10 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         "never" => None,
         k => Some(crate::core::tmux::parse_span(k).map_err(|e| format!("keep: {e}"))?),
     };
+    let close_done = match text("closeDone")?.as_deref().unwrap_or(DEFAULT_CLOSE_DONE) {
+        "never" => None,
+        k => Some(crate::core::tmux::parse_span(k).map_err(|e| format!("closeDone: {e}"))?),
+    };
     Ok(Job {
         name: name.to_string(),
         schedule: schedule.unwrap_or_default(),
@@ -586,6 +595,7 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         gh_identity,
         enabled,
         keep,
+        close_done,
         pull,
         section: "bots",
     })
@@ -1135,7 +1145,7 @@ mod tests {
                 "command": "claude --dangerously-skip-permissions",
                 "model": "opus"
             },
-            "paused": { "schedule": "@hourly", "dir": "/tmp", "prompt": "hi", "enabled": false, "keep": "never" },
+            "paused": { "schedule": "@hourly", "dir": "/tmp", "prompt": "hi", "enabled": false, "keep": "never", "closeDone": "2h" },
             "bad cron": { "schedule": "0 7 * *", "dir": "/tmp" },
             "nodir": { "schedule": "@daily" },
             "both": { "schedule": "@daily", "dir": "/tmp", "prompt": "a", "promptFile": "b" },
@@ -1148,11 +1158,13 @@ mod tests {
         let t = s.get("triage").unwrap();
         assert_eq!(t.prompt, PromptSrc::File("~/notes/triage.md".into()));
         assert_eq!(t.keep, Some(259_200));
+        assert_eq!(t.close_done, Some(86_400));
         assert!(t.enabled);
         assert_eq!(t.model.as_deref(), Some("opus"));
         let p = s.get("paused").unwrap();
         assert!(!p.enabled);
         assert_eq!(p.keep, None);
+        assert_eq!(p.close_done, Some(7_200));
         assert_eq!(p.prompt, PromptSrc::Inline("hi".into()));
         assert!(
             Settings::from_value(&Value::Null, "bots")

@@ -22,6 +22,7 @@ import {
   withOffered,
   type DraftRow,
 } from '@/lib/spawnDirs'
+import { isShared } from '@/lib/hosts'
 import { cn } from '@/lib/utils'
 
 type Load = { state: 'loading' } | { state: 'ok'; data: SpawnDirsResponse } | { state: 'error'; error: string }
@@ -34,12 +35,20 @@ const CHECK_DEBOUNCE_MS = 600
  * One row per label with a directory per host (empty = not offered there). The list is
  * shared: Save writes the same list to every reachable host (each validates its own paths
  * first — a dry run on all of them, then the writes), so the hosts' configs stay in sync.
+ * Shared sheds (`hosts.<name>.shared`) are left out: their config is not the user's alone.
  * A hidden entry (eye toggle) stays allowed for spawns — e.g. an app's embedded panel starting
  * sessions in its own dir — but is left out of the New session menu.
  */
+/** The user's own host names, one per line (shared sheds left out): the editor's columns. */
+const ownHostsKey = (hosts: { name: string; shared?: boolean }[] | undefined) =>
+  (hosts ?? [])
+    .filter((h) => !isShared(h))
+    .map((h) => h.name)
+    .join('\n')
+
 export function SpawnDirsEditor() {
   const { fleet, applyFleet, refresh } = useFleet()
-  const hostsKey = (fleet?.hosts ?? []).map((h) => h.name).join('\n')
+  const hostsKey = ownHostsKey(fleet?.hosts)
   const hosts = useMemo(() => (hostsKey ? hostsKey.split('\n') : []), [hostsKey])
   const self = fleet?.self
 
@@ -208,6 +217,7 @@ export function SpawnDirsEditor() {
 
   if (!fleet) return <p className="py-3 text-sm text-dimmer">Loading hosts…</p>
 
+  const sharedNames = fleet.hosts.filter(isShared).map((h) => h.name)
   const allFailed = hosts.length > 0 && hosts.every((h) => loads[h]?.state === 'error')
   const cols = hosts.length
 
@@ -216,6 +226,7 @@ export function SpawnDirsEditor() {
       <p className="text-xs text-dimmer">
         Where a new session can start, per host (empty = not offered there). One list for the whole fleet: Save writes it to every host.
         A hidden directory is still allowed (e.g. for an app’s assistant panel) but not offered in New session.
+        {sharedNames.length ? ` Shared sheds (${sharedNames.join(', ')}) keep their own list and are not written.` : null}
       </p>
 
       {hosts

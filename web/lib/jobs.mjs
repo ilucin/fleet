@@ -45,7 +45,7 @@ function withPromptAbs(job, home, exists) {
 }
 
 /**
- * @param cli   lib/fleet-cli.mjs instance (`jobs`, `jobShow`, `jobRunNow`, `jobSetEnabled`)
+ * @param cli   lib/fleet-cli.mjs instance (`jobs`, `jobShow`, `jobRunNow`, `jobSetEnabled`, `jobSetRetention`)
  * @param self  this host's name
  * @param home  this host's home directory (expands a `~/…` prompt file)
  * @param exists  path → whether it exists (finds a prompt file's git checkout)
@@ -93,5 +93,23 @@ export function createJobs({ cli, self, home = os.homedir(), exists = fs.existsS
     }
   }
 
-  return { list, show, runNow, setEnabled };
+  /**
+   * POST retention `{ keep?, closeDone? }` (each a span like `6h` / `2d`, or `never`) →
+   * `{ host, name, output, job }`. The CLI validates the spans.
+   */
+  async function setRetention(name, body) {
+    if (!validJobName(name)) return { status: 400, body: { error: 'bad job name' } };
+    const span = (v) => v == null || (typeof v === 'string' && /^(never|\d+(\.\d+)?[mhd]?)$/.test(v.trim()));
+    if (!span(body?.keep) || !span(body?.closeDone)) return { status: 400, body: { error: 'keep / closeDone: a span like 6h, 2d, 30m, or never' } };
+    if (body?.keep == null && body?.closeDone == null) return { status: 400, body: { error: 'nothing to set: keep and/or closeDone' } };
+    try {
+      const output = await cli.jobSetRetention(name, { keep: body.keep?.trim(), closeDone: body.closeDone?.trim() });
+      const job = await cli.jobShow(name).catch(() => null);
+      return { status: 200, body: { host: self, name, output, job } };
+    } catch (err) {
+      return failure(err);
+    }
+  }
+
+  return { list, show, runNow, setEnabled, setRetention };
 }

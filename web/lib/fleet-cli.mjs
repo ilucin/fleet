@@ -537,6 +537,15 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return out.trim();
   }
 
+  /** When a bot's sessions close: `fleet --local jobs set <name> --keep … --close-done …`. */
+  async function jobSetRetention(name, { keep, closeDone } = {}, { timeoutMs: t = 15 * 1000 } = {}) {
+    const args = ['set'];
+    if (keep != null) args.push('--keep', String(keep));
+    if (closeDone != null) args.push('--close-done', String(closeDone));
+    const out = await jobsRun([...args, '--', String(name)], t);
+    return out.trim();
+  }
+
   /**
    * `fleet --local schedule …` (docs/cli.md → Scheduled sessions). Errors carry the CLI's reason,
    * `missing` (no `schedule` command: an older CLI), `timedOut`.
@@ -634,6 +643,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     jobShow,
     jobRunNow,
     jobSetEnabled,
+    jobSetRetention,
     schedule,
     scheduleAdd,
     scheduleCancel,

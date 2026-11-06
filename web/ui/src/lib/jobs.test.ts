@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 
 import type { FleetResponse, Job, JobRunSession } from '@/api/types'
-import { flattenJobs, isJobsLocation, keepLabel, liveSession, liveSummary, outcomeTone, promptLabel, runTree, whenLabel } from './jobs'
+import { flattenJobs, isJobsLocation, isSpan, keepLabel, spanText, splitByShed, liveSession, liveSummary, outcomeTone, promptLabel, runTree, whenLabel } from './jobs'
 
 const job = (over: Partial<Job>): Job => ({
   name: 'triage',
@@ -100,4 +100,23 @@ test('liveSummary / keepLabel / promptLabel', () => {
   expect(promptLabel({ inline: ' triage\n the  inbox ' })).toBe('triage the inbox')
   expect(promptLabel({ file: '~/notes/triage.md' })).toBe('file: ~/notes/triage.md')
   expect(promptLabel(null)).toBe('')
+})
+
+test('spanText / isSpan', () => {
+  expect(spanText(86400)).toBe('1d')
+  expect(spanText(21600)).toBe('6h')
+  expect(spanText(1800)).toBe('30m')
+  expect(spanText(null)).toBe('never')
+  for (const ok of ['6h', '2d', '30m', '12', 'never', ' 1.5h ']) expect(isSpan(ok)).toBe(true)
+  for (const bad of ['', '6 hours', 'forever', '6h;x']) expect(isSpan(bad)).toBe(false)
+})
+
+test('splitByShed: own hosts, then one group per shared shed', () => {
+  const items = [{ host: 'ws', n: 1 }, { host: 'studio', n: 2 }, { host: 'laptop', n: 3 }]
+  const { mine, sheds } = splitByShed(items, ['studio', 'empty'])
+  expect(mine.map((i) => i.n)).toEqual([1, 3])
+  expect(sheds).toEqual([
+    { host: 'studio', items: [{ host: 'studio', n: 2 }] },
+    { host: 'empty', items: [] },
+  ])
 })

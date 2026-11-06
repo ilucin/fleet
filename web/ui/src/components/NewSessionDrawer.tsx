@@ -628,8 +628,9 @@ function NewSessionForm({
               value={h.name}
               className="h-10 gap-2 rounded-full border border-border bg-card px-4 text-sm data-[state=on]:border-primary/50 data-[state=on]:bg-accent"
             >
-              <HostDot host={h.name} />
+              <HostDot host={h.name} shared={h.shared} />
               {h.name}
+              {h.shared ? <span className="text-xs text-dimmer">shared</span> : null}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>

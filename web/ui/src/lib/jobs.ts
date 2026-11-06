@@ -110,6 +110,29 @@ export function liveSummary(job: Pick<Job, 'live'>): string {
   return `${live.length} live${waiting ? ` · ${waiting} need${waiting === 1 ? 's' : ''} you` : ''}`
 }
 
+/** A span in seconds as `fleet bots set` takes it back: `2d`, `6h`, `30m`; null = `never`. */
+export function spanText(sec: number | null | undefined): string {
+  if (sec == null) return 'never'
+  if (sec % 86400 === 0) return `${sec / 86400}d`
+  if (sec % 3600 === 0) return `${sec / 3600}h`
+  return `${Math.round(sec / 60)}m`
+}
+
+/** What `fleet bots set` accepts for keep / closeDone: `6h`, `2d`, `30m`, a number of hours, `never`. */
+export const isSpan = (v: string) => /^(never|\d+(\.\d+)?[mhd]?)$/.test(v.trim())
+
+/**
+ * The Bots screen's split: bots on the user's own hosts, and the shared sheds' (`hosts.<name>.shared`),
+ * one group per shed in host order. `shared`: the shared host names.
+ */
+export function splitByShed<T extends { host: string }>(items: T[], shared: string[]): { mine: T[]; sheds: { host: string; items: T[] }[] } {
+  const set = new Set(shared)
+  return {
+    mine: items.filter((i) => !set.has(i.host)),
+    sheds: shared.map((host) => ({ host, items: items.filter((i) => i.host === host) })),
+  }
+}
+
 /** `keep` (seconds; null = never) as "closed after 24h". */
 export function keepLabel(keep: number | null | undefined): string {
   if (keep == null) return 'kept forever'
