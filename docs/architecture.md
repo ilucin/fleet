@@ -169,6 +169,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `grouping` | smart grouping: `enabled` (default `true` — `false` = repository fallback only), `model` (default `haiku`), `host` (the one host whose web server runs it; peers proxy `/api/groups` there), `consolidateMinutes` (default 60) |
 | `inbox` | the [inbox](#inbox): `host` (the one host whose web server runs it; peers proxy `/api/inbox` there — unset = no inbox), `scanMinutes` (60), `workHours` (`[8, 18]`), `workDays` (`[0,1,2,3,4,5,6]`, 0 = Sunday; the three are also set from Settings → Inbox), `model` (`haiku`, the Slack + mail scan), `briefModel` (`haiku`), `briefMinutes` (45), `language` (`"English"`, the brief's), `comms` (`true`; `false` = no Slack + mail scan). `FLEET_WEB_INBOX=0` turns it off on a server |
 | `slack` | [Slack links](#slack-links): `host` (the host whose web server runs the bridge; peers proxy `/api/slack` there — unset = off), `owner` (your Slack user id `U…`: your messages in a linked thread are marked as the owner's), `owners` (a list of such ids, for a machine several people own, e.g. a shared shed: each is marked as an owner, may start sessions with a mention when `spawn.from` is unset, and `owner` is added first), `bridges` (`{ "<host>": "<bridge host>" }`: that host's sessions are linked by another bridge, one with its own Slack app; set it on every server you link from), `spawn` (read by the bridge's server: a mention of its app [opens a session](#slack-links) — `{ host (default: this one), dir (a spawn dir there; `~/…` = that host's home; none = its first), model, harness, ghIdentity, minutes (`1d`), mode, task, from }`, `from`: `"anyone"` in a channel the app is in, or a list of user ids; default the owners only). `FLEET_WEB_SLACK=0` turns it off on a server |
+| `github` | [GitHub links](#github-links): `host` (the host whose web server runs the bridge, as its `gh` account — unset = off; peers proxy `/api/github` there), `spawn` (`{ dir, model, harness, keep (`1d`; a duration, or `never`), task, from }`: a review requested from the account by a login in `from` — or `"anyone"` — on a PR no session follows opens a linked session; none = off; read live). `FLEET_WEB_GITHUB=0` turns it off on a server |
 
 Rules: `~` is expanded at use time; unknown keys are preserved when the CLI rewrites the file
 (writes go through the raw JSON, never the typed view); a missing file is fine — this machine is
@@ -472,6 +473,9 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/kill` | `{}` → SIGTERM (then SIGKILL) Claude, then kill its tmux session (or just its window when the session has others) / close its iTerm tab |
 | GET | `/api/groups` | the Board view's groups: `{ enabled, host, intervalMinutes, running, updatedAt, lastRun, groups: [{ id, label, description, source, members: [{ host, id, dormant? }] }] }` (`dormant: true` only on a member that is dormant on its host; never set from stored groups, so the UI also cross-references `GET …/dormant`); served by the grouping host, proxied by every other server (`enabled: false` when nobody runs it) |
 | GET | `/api/inbox` | the [inbox](#inbox): `{ enabled, host, error?, updatedAt, brief: { text, at, model } \| null, sources: { github?, productive?, sessions?, comms? : { at, ok, error, count, nextAt?, running? } }, items: [{ id, source, kind, section, title, ask, url, href, from, at, firstSeen, effort, meta }] }` — served by `inbox.host`, proxied by every other server (`enabled: false` when none is set) |
+| GET | `/api/github` | [GitHub links](#github-links): `{ enabled, host, login, since, lastPollAt, error, spawn, links: [GhLink], ended: [GhLink] }` — GhLink = `{ id, host, session, sessionName, repo, number, url, title, login, task, keep \| null (minutes), createdAt, startedBy: { login, at } \| null, pending, waking, delivered, asleep, endedAt, endReason }` (`endReason`: `merged`, `closed`, `unlinked`); served by `github.host`, proxied by the others (`enabled: false` when none is set) |
+| POST | `/api/github/link` | `{ url, host, session \| pane \| tmuxSession, task?, keep? }` → GhLink (`renewed: true` when that session already followed that PR). 400: not a PR URL, a session on another host than `github.host`, a bad `keep`; 404: no such session or PR; 409: the PR is not open, or another session follows it |
+| POST | `/api/github/links/:id/unlink` | end the link now → GhLink |
 | GET | `/api/slack` | [Slack links](#slack-links): `{ enabled, host, error?, socket: { connected, error }, bot: { userId, team, url }, owner, links: [Link], ended: [Link], bridges? }` (with `slack.bridges`: `links` / `ended` of every bridge, `bridges: [{ host, enabled, error?, socket, bot }]`; `host`, `socket`, `bot` stay `slack.host`'s) — Link = `{ id, host, session, sessionName, channel, threadTs \| null, permalink, task, mode, createdAt, until \| null, minutes \| null, pending, delivered, replies, endedAt, endReason, startedBy, blocked }` (`blocked`: `{ at, what }` while its session waits on the owner and the thread was told, else null; `until: null`: no end, it lasts until unlinked; `minutes`: the duration it was linked for, null = no end; `startedBy`: `{ user, name, owner }` when a mention started its session, else null); `spawn`: this bridge's `slack.spawn` (`{ host, dir, model, harness, ghIdentity, mode, task, minutes, from }`, `host` resolved) when it opens sessions on a mention, else null; `bot.name`: the app's bot user name; with `slack.bridges` each of `bridges` carries its own `spawn`; served by `slack.host`, proxied by the others (`enabled: false` when none is set) |
 | POST | `/api/slack/link` | `{ host, session \| pane \| tmuxSession, url \| user, minutes (1–10080, or like `2h`, `2d`, `1w`, or `forever`: no end), task?, mode?: mention \| proactive, first? }` (`user`, or a `url` that is not `http…`: a person — `@name` / name / `U…` — and the link is the app's DM with them; the Link then has `dm: { user, name }`) → Link (`renewed: true` when that session already followed that thread). 400: a bad link or duration, a session on another host, a conversation the app cannot see; 404: no such session |
 | PUT | `/api/slack/spawn` | `{ bridge? (default `slack.host`), spawn: { host?, dir?, model?, harness?, ghIdentity?, minutes?, mode?, task?, from? } \| null }` → that bridge's `/api/slack` status: sets its `slack.spawn` (`fleet config set`, only the fields given) and applies it at once, no restart; `null` turns it off (Settings → Slack). Served by the bridge, proxied there once. 400: a bad duration / mode / `from`, a `host` that is neither the bridge nor a peer; 404: an unknown bridge |
@@ -781,6 +785,43 @@ server's name as `host`, and the reply's pane is checked on that host.
   A link's `sessionName` follows the session's name (`/rename`) whenever the bridge lists it.
 - **State** (`<fleet state>/slack-links.json`, 0600): the active links with their undelivered
   messages and the last 20 ended ones.
+
+## GitHub links
+
+A session follows one pull request as the bridge host's GitHub account (`web/lib/github.mjs`,
+[CLI](cli.md#github-links)) — the Slack links' counterpart, with a PR as the scope. One host's
+server runs the bridge (`github.host`); the session answers with that host's `gh` itself, so the
+bridge holds no token of its own and only links sessions of its own host.
+
+No webhooks (the machines are not reachable from the internet): the bridge polls
+`GET /notifications?participating=true` with `If-Modified-Since` (a 304 is free), at most every
+`X-Poll-Interval`. Notifications are doorbells, never events: a PR notification whose
+`updated_at` it has not handled leads to one GraphQL read of the PR (review requests and their
+timeline events, the last comments, reviews and review threads) — only for a linked PR, or for a
+`review_requested` one. Every request event, comment, review and thread comment has a key
+(`rq:`, `ic:`, `rv:`, `rc:`); a link remembers the keys it has seen, so what is new is a set
+difference, and a restart, a re-sent or missed notification delivers nothing twice. Linked PRs are
+also re-read every 15 minutes, notification or not (a merge ends the link). Events: `request`
+(a review requested from the account), `reply` (someone else's comment in a review thread the
+account is in), `mention` (`@account` in a comment or review body) wake the session; anything else
+someone wrote is `context`, delivered with the next wake; bots and the account's own are dropped.
+Delivery waits for the session to be idle, then types the intro (first) or the events as one
+prompt (≤ 7500 chars, newest first to fit), with the reply command for each thread and, on a
+re-request, the head it last saw → the head now; 👀 goes on the comments that woke it.
+
+Spawn (`github.spawn`): a PR's newest review request for the account, made after the bridge first
+ran (`since` in the state), by a login in `from`, while the account is still requested, opens a
+session through this host's `POST /api/hosts/:host/spawn` (no prompt, named
+`review-<repo>-<n>`), linked as soon as it has a session id; the request goes in as the intro's
+last line. Each request event starts at most one session (`started`). A link with `keep` puts its
+session to sleep (`fleet sleep`) after that long idle with nothing waiting; when an event comes
+and the session is not listed, the bridge resumes it (`fleet restore <id>`, then `--closed`), at
+most every 3 minutes; after two failed tries a new session takes the link over (same link, new
+session id) with an intro that says to read the PR first.
+
+State (`<fleet state>/github-links.json`, 0600): `since`, the links (with their seen keys and
+pending events), the last 20 ended, the started request keys and the handled notification
+threads.
 
 ## Session briefs
 

@@ -4,10 +4,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 
 use fleet::cli::{
-    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, jobs as jobs_cmd,
-    mcp, prs as prs_cmd, repos as repos_cmd, restore, schedule as schedule_cmd, skill,
-    slack as slack_cmd, stack as stack_cmds, tasks as tasks_cmd, tmux as tmux_cmds,
-    usage as usage_cmd, web,
+    brief as brief_cmd, commands, config_cmd, github as github_cmd, group, hosts as host_cmds,
+    init, jobs as jobs_cmd, mcp, prs as prs_cmd, repos as repos_cmd, restore,
+    schedule as schedule_cmd, skill, slack as slack_cmd, stack as stack_cmds, tasks as tasks_cmd,
+    tmux as tmux_cmds, usage as usage_cmd, web,
 };
 use fleet::core::config;
 use fleet::core::discovery::Backend;
@@ -360,6 +360,13 @@ enum Commands {
         cmd: StackCmd,
     },
 
+    /// GitHub links: a session follows one pull request — review requests, replies in its review
+    /// threads and mentions are typed in (`github.host`)
+    Github {
+        #[command(subcommand)]
+        cmd: Option<GithubCmd>,
+    },
+
     /// Slack links: a session talks, for a while, with the people in one Slack thread (`slack.host`)
     Slack {
         #[command(subcommand)]
@@ -661,6 +668,40 @@ enum HarnessCmd {
         /// Skip the model lists (pi's needs a `pi --list-models` run)
         #[arg(long)]
         no_models: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GithubCmd {
+    /// The bridge (polling?) and the active links
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Link a session to a pull request (default: this session); ends when the PR is merged or
+    /// closed
+    Link {
+        /// The pull request: https://github.com/<owner>/<repo>/pull/<n> or <owner>/<repo>#<n>
+        url: String,
+        /// The session to link (default: the one this command runs in, by $TMUX_PANE)
+        #[arg(long, value_name = "TARGET")]
+        session: Option<String>,
+        /// Your instructions for it on this PR
+        #[arg(long)]
+        task: Option<String>,
+        /// Put the session to sleep after it has been idle this long (like 12h, 1d); the next
+        /// event resumes it (default: never)
+        #[arg(long, value_name = "DURATION")]
+        keep: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// End a link now
+    Unlink {
+        /// The link id (gl-xxxxxx)
+        link: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1474,6 +1515,23 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
         }
         Commands::Peek { target, lines } => commands::peek(&target, lines)?,
         Commands::Usage { json, refresh } => usage_cmd::run(json, refresh)?,
+        Commands::Github { cmd } => match cmd.unwrap_or(GithubCmd::List { json: false }) {
+            GithubCmd::List { json } => github_cmd::list(json)?,
+            GithubCmd::Link {
+                url,
+                session,
+                task,
+                keep,
+                json,
+            } => github_cmd::link(
+                &url,
+                session.as_deref(),
+                task.as_deref(),
+                keep.as_deref(),
+                json,
+            )?,
+            GithubCmd::Unlink { link, json } => github_cmd::unlink(&link, json)?,
+        },
         Commands::Slack { cmd } => match cmd.unwrap_or(SlackCmd::List { json: false }) {
             SlackCmd::List { json } => slack_cmd::list(json)?,
             SlackCmd::Link {

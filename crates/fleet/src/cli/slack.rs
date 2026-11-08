@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 
 /// `curl` to this machine's web server: `(status, body)`. No HTTP client in the crate (see
 /// `brief::regenerate_command`).
-fn request(method: &str, path: &str, body: Option<&Value>) -> Result<(String, Value)> {
+pub(crate) fn request(method: &str, path: &str, body: Option<&Value>) -> Result<(String, Value)> {
     request_within(method, path, body, 40)
 }
 
@@ -58,10 +58,14 @@ fn request_within(
         input.as_deref().map(str::as_bytes),
         Duration::from_secs(secs + 5),
     )
-    .map_err(|e| Error::Other(format!("{e} — curl is needed for `fleet slack`")))?;
+    .map_err(|e| {
+        Error::Other(format!(
+            "{e} — curl is needed for `fleet slack` and `fleet github`"
+        ))
+    })?;
     let unreachable = || {
         Error::Other(format!(
-            "cannot reach the web server at {base} — Slack links run in it (start it: fleet web serve)"
+            "cannot reach the web server at {base} — Slack and GitHub links run in it (start it: fleet web serve)"
         ))
     };
     if got.code != Some(0) {
@@ -80,7 +84,7 @@ fn request_within(
     Ok((status, v))
 }
 
-fn ok_or_err(status: &str, v: &Value) -> Result<()> {
+pub(crate) fn ok_or_err(status: &str, v: &Value) -> Result<()> {
     if status.starts_with('2') {
         return Ok(());
     }

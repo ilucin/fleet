@@ -3,6 +3,7 @@
 pub mod brief;
 pub mod commands;
 pub mod config_cmd;
+pub mod github;
 pub mod group;
 pub mod hosts;
 pub mod init;

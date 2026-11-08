@@ -278,6 +278,45 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  */
 const SLACK_USER_RE = /^[UW][A-Z0-9]+$/;
 
+const GH_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+/**
+ * `github.spawn`: a review requested from this host's GitHub account on a PR no session follows
+ * opens a new session for it, linked to the PR (lib/github.mjs). Read only on the bridge's own
+ * server. `{ dir?, model?, harness?, keep?, task?, from }` — `dir` a spawn dir (`~/…` is this
+ * host's home), `keep` how long an idle session stays open (a duration like 12h or 1d, or
+ * "never"; default 1d), `from` the GitHub logins whose request may start one ("anyone" for
+ * everyone; none = nobody).
+ */
+export function githubSpawn(raw) {
+  if (raw == null || raw === false) return null;
+  if (!isObject(raw)) throw new Error('config.github.spawn must be an object { dir, model, harness, keep, task, from }');
+  const str = (k) => {
+    const v = raw[k];
+    if (v == null || v === '') return null;
+    if (typeof v !== 'string' || !v.trim()) throw new Error(`config.github.spawn.${k} must be a string`);
+    return v.trim();
+  };
+  let from = [];
+  if (raw.from != null) {
+    if (raw.from === 'anyone') from = ['anyone'];
+    else if (Array.isArray(raw.from) && raw.from.every((u) => typeof u === 'string' && GH_LOGIN_RE.test(u.trim().replace(/^@/, '')))) from = raw.from.map((u) => u.trim().replace(/^@/, ''));
+    else throw new Error('config.github.spawn.from must be "anyone" or a list of GitHub logins');
+  }
+  let keep = 24 * 60;
+  if (raw.keep != null && raw.keep !== '') {
+    const k = String(raw.keep).trim().toLowerCase();
+    if (k === 'never') keep = null;
+    else {
+      const m = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m?)?$/.exec(k);
+      const mins = m && (m[1] || m[2] || m[3]) ? Number(m[1] ?? 0) * 1440 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) : NaN;
+      if (!Number.isFinite(mins) || mins < 10 || mins > 30 * 1440) throw new Error('config.github.spawn.keep must be a duration from 10m to 30d (like 12h, 1d), or "never"');
+      keep = mins;
+    }
+  }
+  return { dir: str('dir'), model: str('model'), harness: str('harness'), task: str('task'), keep, from };
+}
+
 /**
  * `slack.spawn`: a mention of this bridge's app in a thread no session follows opens a new
  * session there, linked to that thread (lib/slack.mjs). Read only on the bridge's own server.
@@ -543,6 +582,16 @@ export function normalizeConfig(
   slack.enabled = slack.host != null && slack.host === self.trim();
   if (env.FLEET_WEB_SLACK != null && env.FLEET_WEB_SLACK !== '' && /^(0|false|off|no)$/i.test(env.FLEET_WEB_SLACK)) slack.enabled = false;
 
+  // github: GitHub links (lib/github.mjs). One host runs the bridge (`github.host`), polling the
+  // notifications of its own `gh` account; `spawn` starts a session on a review request.
+  // FLEET_WEB_GITHUB=0 turns it off on this server.
+  const gr = raw.github == null ? {} : raw.github;
+  if (!isObject(gr)) throw new Error('config.github must be an object { host, spawn }');
+  if (gr.host != null && (typeof gr.host !== 'string' || !gr.host.trim())) throw new Error('config.github.host must be a host name');
+  const github = { host: gr.host == null ? null : gr.host.trim(), spawn: githubSpawn(gr.spawn) };
+  github.enabled = github.host != null && github.host === self.trim();
+  if (env.FLEET_WEB_GITHUB != null && env.FLEET_WEB_GITHUB !== '' && /^(0|false|off|no)$/i.test(env.FLEET_WEB_GITHUB)) github.enabled = false;
+
   // web.uploads: where dropped/pasted files are stored (lib/uploads.mjs).
   const wu = web.uploads == null ? {} : web.uploads;
   if (!isObject(wu)) throw new Error('config.web.uploads must be an object { dir, maxMB, retentionDays }');
@@ -744,6 +793,7 @@ export function normalizeConfig(
     grouping,
     inbox,
     slack,
+    github,
     uploads,
     files,
     notes,
@@ -814,11 +864,13 @@ export function createSlackSettingsReloader({ config, env = process.env, home = 
       return false;
     }
     seen = m;
-    const snap = () => JSON.stringify([config.slack.owners, config.slack.spawn]);
+    const snap = () => JSON.stringify([config.slack.owners, config.slack.spawn, config.github?.spawn ?? null]);
     const before = snap();
     config.slack.owner = fresh.slack.owner;
     config.slack.owners = fresh.slack.owners;
     config.slack.spawn = fresh.slack.spawn;
+    // github.spawn too: the GitHub bridge reads it on every review request.
+    if (config.github && fresh.github) config.github.spawn = fresh.github.spawn;
     return snap() !== before;
   };
 }

@@ -40,6 +40,7 @@ import { DEFAULT_STACKS_MODEL } from './config.mjs';
 import { validateDormantRequest } from './dormant.mjs';
 import { validJobName } from './jobs.mjs';
 import { MAX_FIRST, MAX_TASK, MODES, SlackError, isPersonTarget, linkMinutes, parseSlackUrl, validLinkId } from './slack.mjs';
+import { GithubError, validLinkId as validGithubLinkId } from './github.mjs';
 
 export const API_VERSION = 1;
 
@@ -145,6 +146,7 @@ const HARNESS_IDS = ['claude', 'codex', 'pi'];
 // Fallback effort levels for a CLI that predates `efforts` in `fleet harness list`.
 const DEFAULT_EFFORTS = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh'], pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] };
 const SLACK_LINK_ACTION_ROUTE = /^\/api\/slack\/links\/([^/]+)\/(unlink|relink)$/;
+const GITHUB_UNLINK_ROUTE = /^\/api\/github\/links\/([^/]+)\/unlink$/;
 /** `fleet slack history | thread | file`: the linked session reads its conversation (read-only). */
 const SLACK_READS = new Set(['history', 'thread', 'file']);
 const SLACK_ACTIONS = new Set(['/api/slack/link', '/api/slack/reply', ...[...SLACK_READS].map((a) => `/api/slack/${a}`)]);
@@ -241,6 +243,7 @@ export function createApi({
   grouper = null,
   inbox = null,
   slack = null,
+  github = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'fleet-web',
   version = '0.0.0',
@@ -879,6 +882,47 @@ export function createApi({
     return { status: 200, body: { host: config.self, ...(await slack.status()) } };
   }
 
+  /**
+   * GitHub links (lib/github.mjs), on the `github.host` server; the others proxy there once.
+   * GET status, POST link `{ url, pane | session | tmuxSession, host, task?, keep? }` (a session
+   * of the bridge's own host only), POST links/:id/unlink.
+   */
+  async function handleGithub(req, url, action, id = null) {
+    const local = url.searchParams.get('local') === '1';
+    const bridge = config.github?.host ?? null;
+    const body = action === 'status' ? null : await readJsonBody(req);
+    if (!bridge) {
+      if (action === 'status') return { status: 200, body: { enabled: false, host: null, links: [], ended: [] } };
+      return { status: 409, body: { error: 'no server runs GitHub links (github.host)' } };
+    }
+    if (bridge !== config.self) {
+      if (local) return { status: 409, body: { error: `this server is not the GitHub bridge ${bridge}` } }; // never chain
+      const peerUrl = config.peers[bridge];
+      if (!peerUrl) return { status: 409, body: { error: `GitHub bridge "${bridge}" is not a peer with a web URL` } };
+      return proxyToPeer(peerUrl, {
+        method: action === 'status' ? 'GET' : 'POST',
+        pathname: url.pathname,
+        ...(body == null ? {} : { body: JSON.stringify(body) }),
+        timeoutMs: peerProxyTimeoutMs,
+      });
+    }
+    if (!github) return { status: 409, body: { error: 'GitHub links are off on this server (FLEET_WEB_GITHUB)' } };
+    try {
+      if (action === 'status') return { status: 200, body: await github.status() };
+      if (action === 'unlink') {
+        if (!validGithubLinkId(id)) throw new HttpError('link must look like gl-xxxxxx', 400);
+        return { status: 200, body: await github.unlink(id) };
+      }
+      const host = typeof body?.host === 'string' && body.host ? body.host : config.self;
+      if (host !== config.self) throw new HttpError(`GitHub links follow sessions on ${config.self} only (this session is on ${host})`, 400);
+      const { url: prUrl, session, pane, tmuxSession, task, keep } = body ?? {};
+      return { status: 200, body: await github.link({ url: prUrl, session, pane, tmuxSession, task, keep }) };
+    } catch (err) {
+      if (err instanceof GithubError) throw new HttpError(err.message, err.status);
+      throw err;
+    }
+  }
+
   async function handleSlack(req, url, action, id = null) {
     const local = url.searchParams.get('local') === '1';
     if (action === 'status') return slackStatus(local);
@@ -1140,6 +1184,22 @@ export function createApi({
     if (url.pathname === '/api/inbox/settings') {
       if (req.method !== 'PUT') throw new HttpError('method not allowed', 405);
       return handleInbox(req, url, 'settings');
+    }
+
+    if (url.pathname === '/api/github') {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return handleGithub(req, url, 'status');
+    }
+
+    if (url.pathname === '/api/github/link') {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return handleGithub(req, url, 'link');
+    }
+
+    const gu = GITHUB_UNLINK_ROUTE.exec(url.pathname);
+    if (gu) {
+      if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return handleGithub(req, url, 'unlink', decodeURIComponent(gu[1]));
     }
 
     if (url.pathname === '/api/slack/spawn') {

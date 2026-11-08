@@ -39,6 +39,7 @@ import { createStacks } from './lib/stacks.mjs';
 import { createAgentAsk, createInbox } from './lib/inbox.mjs';
 import { createPromptQueue } from './lib/queue.mjs';
 import { TOKEN_NAMES, createSlackApi, createSlackBridge, createSlackDownload, createSocketClient } from './lib/slack.mjs';
+import { createGithubBridge } from './lib/github.mjs';
 import { fetchPeerHost, proxyToPeer, setPeerConnects, setPeerProxies } from './lib/peers.mjs';
 import { createDormant } from './lib/dormant.mjs';
 import { createMemos } from './lib/memos.mjs';
@@ -216,6 +217,36 @@ if (config.slack.enabled) {
     log,
   });
 }
+// GitHub links: the bridge runs on the `github.host` server only, as this host's `gh` account.
+// It starts and resumes sessions on this host, through its own POST spawn and the fleet CLI.
+const github = config.github.enabled
+  ? createGithubBridge({
+      settings: config.github,
+      self: config.self,
+      gh: (args, opts) => run(ghBin, args, opts),
+      listSessions: async () => {
+        const local = await fleet.localHost({ force: true });
+        return local.ok ? local.sessions : null;
+      },
+      send: (session, text) => backend.send(session, text),
+      spawn: async (body) => {
+        const loopback = ['0.0.0.0', '::', '', undefined, null].includes(config.bind) ? '127.0.0.1' : config.bind;
+        const base = `http://${loopback.includes(':') ? `[${loopback}]` : loopback}:${config.port}`;
+        const r = await proxyToPeer(base, {
+          method: 'POST',
+          pathname: `/api/hosts/${encodeURIComponent(config.self)}/spawn`,
+          body: JSON.stringify(body),
+          timeoutMs: 120000,
+        });
+        if (r.status !== 200) throw new Error(r.body?.error ?? `HTTP ${r.status} from spawn`);
+        return r.body;
+      },
+      sleep: (sessionId) => cli.sleep({ target: sessionId }),
+      restore: (args) => cli.restore(args),
+      file: path.join(fleetStateDir(process.env), 'github-links.json'),
+      log,
+    })
+  : null;
 // Prompt queue: messages typed while a session works go in one per run, once it is idle again.
 const queue = createPromptQueue({
   file: path.join(fleetStateDir(process.env), 'prompt-queue.json'),
@@ -299,6 +330,7 @@ const handleApi = createApi({
   grouper,
   inbox,
   slack,
+  github,
   queue,
   name: NAME,
   version: VERSION,
@@ -354,13 +386,22 @@ server.listen(config.port, config.bind, () => {
     log(`[fleet-web] inbox: served by ${config.inbox.host}`);
   }
   queue.start();
-  if (slack) {
-    slack.start();
-    // slack.owner / slack.spawn: live from the config file (`fleet config set`), no restart.
+  if (slack || github) {
+    // slack.owner / slack.spawn / github.spawn: live from the config file (`fleet config set`), no restart.
     const reloadSlack = createSlackSettingsReloader({ config, log });
     setInterval(() => {
-      if (reloadSlack()) log(`[slack] settings reloaded: owner=${config.slack.owner ?? '(none)'}`);
+      if (reloadSlack()) log(`[fleet-web] settings reloaded: slack.owner=${config.slack.owner ?? '(none)'}`);
     }, 5000).unref();
+  }
+  if (github) {
+    github.start();
+    const from = config.github.spawn?.from ?? [];
+    log(`[fleet-web] github links on (notifications of this host's gh; review requests start sessions: ${config.github.spawn ? (from.length ? from.join(', ') : 'nobody') : 'off'})`);
+  } else if (config.github.host) {
+    log(`[fleet-web] github links: served by ${config.github.host}`);
+  }
+  if (slack) {
+    slack.start();
     log(`[fleet-web] slack links on (Socket Mode; ${TOKEN_NAMES.bot} + ${TOKEN_NAMES.app} from env or Keychain)`);
   } else if (config.slack.host) {
     log(`[fleet-web] slack links: served by ${config.slack.host}`);
@@ -400,6 +441,7 @@ function shutdown(signal) {
   inbox?.stop();
   queue.stop();
   slack?.stop();
+  github?.stop();
   stacks.stop();
   operator.stop();
   uploader.stop();

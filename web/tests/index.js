@@ -27,5 +27,6 @@ import './reviews.test.mjs';
 import './focus.test.mjs';
 import './inbox.test.mjs';
 import './slack.test.mjs';
+import './github.test.mjs';
 import './peers.test.mjs';
 import './harness-defaults.test.mjs';

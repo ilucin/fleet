@@ -184,6 +184,38 @@ follows opens a new session on that host, linked to the thread, the message as i
 ([architecture](architecture.md#slack-links)). The web UI's Settings → Slack turns it on and off per
 Slack app (bridge) and sets host, directory, model, duration and who may — live, no restart.
 
+### GitHub links
+
+A session follows one pull request, as the GitHub account of the bridge host's `gh`: what happens
+there that is for that account is typed into it, and it answers on GitHub with `gh` itself.
+
+| Command | What |
+|---|---|
+| `fleet github [list] [--json]` | the bridge (its account, polling or failing, who may start sessions) and the active links |
+| `fleet github link <pr-url \| owner/repo#n> [--session <target>] [--task <instructions>] [--keep <12h\|1d\|never>] [--json]` | link a session of `github.host` (default: the one this runs in, by `$TMUX_PANE`) to an open PR. What is on the PR now counts as seen. One session per PR: another session's link must be unlinked first; the same session again renews it (task, keep). `--keep`: put the session to sleep (`fleet sleep`) once it has been idle that long; the next event resumes it. The link ends when the PR is merged or closed |
+| `fleet github unlink <gl-xxxxxx>` | end a link now |
+
+How it works ([architecture](architecture.md#github-links)): the machines are not reachable from the
+internet, so there are no webhooks. One host's web server (`github.host`) polls its `gh` account's
+notifications (`participating=true`, with `If-Modified-Since`, so an unchanged list costs no rate
+limit; at most every `X-Poll-Interval`, 60 s). A notification only names a PR. For a linked PR,
+or a review request on an unlinked one, the bridge reads the PR (one GraphQL query) and compares it
+with what the link has seen. Only these wake the session: a review requested (or re-requested) from
+the account, a reply in a review thread the account commented in, and a comment or review that
+mentions `@account`. Other people's comments go along as context with the next wake. Pushes, CI,
+labels, bots and the account's own comments never do, and notifications about other PRs are left
+alone. What wakes it gets an 👀 reaction once typed in. A re-request says how far the head moved
+since the session last reviewed.
+
+**Starting a session from GitHub**: with `github.spawn` set, a review requested from the account on
+a PR no session follows opens a new session on `github.host`, linked to the PR, the request as its
+first prompt — only when the person who requested it is in `github.spawn.from` (GitHub logins, or
+`"anyone"`; none = nobody), and only for requests made after the bridge first ran.
+`fleet config set github '{"host":"<host>","spawn":{"dir":"~/work","model":"opus","keep":"1d","from":["<login>"]}}'`
+(`keep`, default `1d`: such sessions sleep after that long idle; the next event resumes them, and if
+that fails a new session takes the link over and reads the PR's history first). `github.spawn`
+applies within a few seconds; `github.host` needs a restart of the web server.
+
 ### Briefs
 
 A brief is a small markdown file per session — what it is doing, the resources it produced (PRs,
