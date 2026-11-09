@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_VOICE_FAILED_DIR, configPath, createSlackSettingsReloader, expandHome, fleetStateDir, loadConfig, ensurePath, ensureUtf8Locale, resolveBinary } from './lib/config.mjs';
+import { createPrStates } from './lib/pr-state.mjs';
 import { run } from './lib/run.mjs';
 import { createFleetCli } from './lib/fleet-cli.mjs';
 import { createFocus } from './lib/focus.mjs';
@@ -122,6 +123,7 @@ const briefs = createBriefs({
   },
   ask: createClaudeAsk({ bin: claudeBin, run }),
   git: (cwd) => gitInfo(cwd, { run }),
+  prStates: createPrStates({ gh: (args, opts) => run(ghBin, args, opts) }),
   log,
 });
 // Session stacks: the routes always work (the CLI owns the files); the background membership

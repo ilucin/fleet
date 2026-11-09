@@ -198,6 +198,7 @@ export function createBriefs({
   checkMs = 30 * 1000,
   log = () => {},
   home = os.homedir(),
+  prStates = null, // lib/pr-state.mjs: PR resource url → draft | open | merged | closed
 }) {
   if (!store || !extractor || typeof ask !== 'function') throw new TypeError('store, extractor and ask are required');
   const cfg = settings;
@@ -497,9 +498,25 @@ export function createBriefs({
     return [...roots.values()];
   }
 
+  /** The PR resources' states (empty without `prStates`; a failure is no state, not an error). */
+  async function prsOf(brief) {
+    if (!prStates) return new Map();
+    const urls = brief.resources.filter((r) => r.kind === 'PR' && r.url).map((r) => r.url);
+    return urls.length ? prStates(urls).catch(() => new Map()) : new Map();
+  }
+
   /** What the API serves for one brief. `editorUrl` is the API layer's (lib/editor.mjs). */
-  function view(id, brief, { exists: had, session = null, absCwd = null, gi = null, worktrees = [] } = {}) {
-    const resources = brief.resources.map((r) => ({ kind: r.kind, label: r.label, url: r.url, path: r.path, text: r.text, branch: r.branch ?? null, linked: r.linked ?? null }));
+  function view(id, brief, { exists: had, session = null, absCwd = null, gi = null, worktrees = [], prs = new Map() } = {}) {
+    const resources = brief.resources.map((r) => ({
+      kind: r.kind,
+      label: r.label,
+      url: r.url,
+      path: r.path,
+      text: r.text,
+      branch: r.branch ?? null,
+      linked: r.linked ?? null,
+      ...(r.kind === 'PR' && r.url ? { prState: prs.get(r.url) ?? null } : {}),
+    }));
     return {
       host: self,
       id,
@@ -552,7 +569,7 @@ export function createBriefs({
           ({ brief } = await load(id));
         }
       }
-      return view(id, brief, { exists: had, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi) });
+      return view(id, brief, { exists: had, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi), prs: await prsOf(brief) });
     },
 
     /** PUT: a human edit. Deleted resource lines are remembered as dismissed. */
@@ -572,7 +589,7 @@ export function createBriefs({
       const { brief } = await load(id);
       const absCwd = absCwdOf(brief, session);
       const gi = absCwd && exists(absCwd) ? await gitFor(absCwd) : null;
-      return view(id, brief, { exists: true, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi) });
+      return view(id, brief, { exists: true, session, absCwd, gi, worktrees: await worktreesOf(brief, absCwd, gi), prs: await prsOf(brief) });
     },
 
     /**

@@ -238,12 +238,14 @@ added, closed, live, status, briefPath, briefExists }], markdown, body, parsed: 
 resources: [Resource], notes } }` — the CLI's shape, passed through (docs/architecture.md →
 Session stacks).
 
-**Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text, branch, linked }], todos: [{ done, text }], plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` —
+**Brief** = `{ host, id, exists, markdown, parsed: { summary, resources: [{ kind, label, url, path, text, branch, linked, prState? }], todos: [{ done, text }], plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, editor, editorUrl }` —
 `markdown` is the whole file (frontmatter included, canonical form); `kind` is `Origin` | `PR` | `Issue` |
 `Artifact` | `Spec` | `File` | `Git` | `Link` | `null` (a hand-written line), or the legacy
 `Branch` | `Worktree`; `url` or `path` is set, `text` is the bullet as written; for `Git`, `path`
 is the checkout root, `branch` the branch (null = detached) and `linked` whether it is a linked
-worktree (both null on other kinds); `parsed.plan` is a **deprecated** alias of `parsed.todos`
+worktree (both null on other kinds); a `PR` with a GitHub url also has `prState` — `draft` | `open` |
+`merged` | `closed` as the answering host's `gh` sees it (`lib/pr-state.mjs`, cached a few minutes;
+null = not known yet or `gh` failed); `parsed.plan` is a **deprecated** alias of `parsed.todos`
 (same array, one release); `continuePrompt` is the first prompt for a new session that continues
 this one (summary, origin, PRs, worktree, ending with a `---` line the task goes below); `enabled` = background generation is on for that host; `absCwd` / `gitRoot` are
 absolute paths on the session's host (null when unknown / outside git); `editor` / `editorUrl`

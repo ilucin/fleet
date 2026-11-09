@@ -7,6 +7,9 @@ import {
   FlagIcon,
   FolderGit2Icon,
   GitBranchIcon,
+  GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestDraftIcon,
   GitPullRequestIcon,
   LinkIcon,
   Loader2Icon,
@@ -43,6 +46,13 @@ const KIND_ICON: Record<string, typeof FileIcon> = {
   Branch: GitBranchIcon,
   Worktree: FolderGit2Icon,
   Link: LinkIcon,
+}
+/** A PR resource's state: its icon, colour and label (as GitHub shows them). */
+const PR_STATE: Record<NonNullable<BriefResource['prState']>, { icon: typeof FileIcon; className: string; label: string }> = {
+  draft: { icon: GitPullRequestDraftIcon, className: 'text-muted-foreground border-border', label: 'Draft' },
+  open: { icon: GitPullRequestIcon, className: 'text-status-busy border-status-busy/40', label: 'In review' },
+  merged: { icon: GitMergeIcon, className: 'text-violet-500 border-violet-500/40', label: 'Merged' },
+  closed: { icon: GitPullRequestClosedIcon, className: 'text-status-error border-status-error/40', label: 'Closed' },
 }
 /** Resource groups shown as their own parts between the Summary and the Todos. */
 const TOP_KINDS = new Set(['Origin', 'PR'])
@@ -403,13 +413,17 @@ const linkClass = 'min-w-0 break-words text-primary underline decoration-primary
 function ResourceRow({ r, fileLinks }: { r: BriefResource; fileLinks: FileStats }) {
   const Icon = (r.kind && KIND_ICON[r.kind]) || StickyNoteIcon
   const icon = <Icon className="mt-0.5 size-4 shrink-0 text-dimmer" />
+  const pr = r.kind === 'PR' && r.prState ? PR_STATE[r.prState] : null
   if (r.url) {
     return (
       <li className={rowClass}>
-        {icon}
-        <a href={r.url} target="_blank" rel="noopener noreferrer" className={linkClass} title={r.url}>
+        {pr ? <pr.icon className={cn('mt-0.5 size-4 shrink-0', pr.className)} aria-hidden /> : icon}
+        <a href={r.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, pr && 'mr-auto')} title={r.url}>
           {r.label || r.url}
         </a>
+        {pr ? (
+          <span className={cn('mt-px shrink-0 rounded-full border px-1.5 text-[0.6875rem] leading-[1.125rem] font-medium whitespace-nowrap', pr.className)}>{pr.label}</span>
+        ) : null}
       </li>
     )
   }

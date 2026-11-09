@@ -316,7 +316,7 @@ test('readDelta: only the new conversation, clipped to maxChars, newest kept', a
 
 // ------------------------------------------------------------------ the service
 
-function setup(t, { settings = {}, answer, sessions } = {}) {
+function setup(t, { settings = {}, answer, sessions, prStates = null } = {}) {
   const fx = transcriptFixture(t);
   const dir = path.join(fx.root, 'briefs');
   let clock = Date.parse('2026-01-01T10:00:00Z');
@@ -340,6 +340,7 @@ function setup(t, { settings = {}, answer, sessions } = {}) {
     now: () => clock,
     log: (l) => logs.push(l),
     home: fx.home,
+    prStates,
   });
   const read = () => fs.readFileSync(path.join(dir, `${SID}.md`), 'utf8');
   const grow = (text) => fs.appendFileSync(fx.file, text);
@@ -372,6 +373,25 @@ test('briefs: an idle session gets resources, its todos and one model summary', 
   await s.svc.tick();
   assert.equal(s.asks.length, 1);
   assert.equal(s.read(), before);
+});
+
+test('briefs: GET gives PR resources their state; a failing lookup leaves it null', async (t) => {
+  const asked = [];
+  const s = setup(t, {
+    prStates: async (urls) => {
+      asked.push(urls);
+      return new Map(urls.map((u) => [u, 'merged']));
+    },
+  });
+  const got = await s.svc.get(SID, s.state.sessions[0]);
+  const pr = got.parsed.resources.find((r) => r.kind === 'PR');
+  assert.equal(pr.prState, 'merged');
+  assert.deepEqual(asked, [['https://github.com/o/r/pull/5', 'https://github.com/o/r/pull/12']]);
+  assert.ok(got.parsed.resources.filter((r) => r.kind !== 'PR').every((r) => !('prState' in r)), 'only PRs carry it');
+
+  const f = setup(t, { prStates: async () => Promise.reject(new Error('gh down')) });
+  const got2 = await f.svc.get(SID, f.state.sessions[0]);
+  assert.equal(got2.parsed.resources.find((r) => r.kind === 'PR').prState, null);
 });
 
 test('briefs: gates — busy / not idle long enough, too little new, min interval, hourly cap', async (t) => {

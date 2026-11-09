@@ -1019,6 +1019,11 @@ call is logged with its input size (`[briefs] idle 1a2b3c4d: claude -p --model h
 3 user turn(s), 8123 chars in (4/12 this hour)`); `/api/health` reports `briefs: { enabled, model,
 callsLastHour, maxCallsPerHour, generating, lastRun }`.
 
+**PR state.** GET/PUT brief bodies give each `PR` resource with a GitHub url a `prState`
+(`draft` | `open` | `merged` | `closed`, null = not known), from one `gh pr view` per PR on the
+answering host, cached (open ones ~3 min, merged / closed hours); a GET waits up to 3s for a
+missing one, then the next poll fills it in. The Details panel shows it as a badge on the PR row.
+
 **Open in editor.** GET/PUT brief bodies carry `absCwd` (the session's directory on its host,
 absolute, no `~`), `gitRoot` (the checkout root — repo or linked worktree — containing it, absolute;
 null outside git), `editor` (`web.editor` of the answering server) and `editorUrl`; session rows in

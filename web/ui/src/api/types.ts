@@ -733,6 +733,8 @@ export interface BriefResource {
   branch?: string | null
   /** `Git` only: true = a linked worktree, false = the main checkout (null: unknown / not Git). */
   linked?: boolean | null
+  /** `PR` with a GitHub url only (older servers omit it): its state as the host's `gh` sees it; null = not known (yet). */
+  prState?: 'draft' | 'open' | 'merged' | 'closed' | null
 }
 
 // --- Session stacks (GET/PUT/DELETE /api/hosts/:host/stacks/…) ------------------------------
