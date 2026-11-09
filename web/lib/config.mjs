@@ -428,6 +428,13 @@ export function normalizeConfig(
   if (typeof web.bind === 'string' && web.bind) bind = web.bind;
   if (env.FLEET_WEB_BIND) bind = env.FLEET_WEB_BIND;
 
+  // web.allowedHosts: more names a browser may reach this server by (lib/guard.mjs), "*" for any.
+  const allowedHosts = [];
+  if (web.allowedHosts != null) {
+    if (!Array.isArray(web.allowedHosts) || web.allowedHosts.some((h) => typeof h !== 'string' || !h.trim())) throw new Error('config.web.allowedHosts must be an array of host names');
+    allowedHosts.push(...web.allowedHosts.map((h) => h.trim().toLowerCase()));
+  }
+
   // web.editor: the "Open in editor" link scheme (lib/editor.mjs); null hides it.
   let editor = DEFAULT_EDITOR;
   if (web.editor !== undefined) {
@@ -761,6 +768,7 @@ export function normalizeConfig(
     self: self.trim(),
     port,
     bind,
+    allowedHosts,
     peers,
     selfWeb,
     peerProxies,

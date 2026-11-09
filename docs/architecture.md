@@ -93,7 +93,25 @@ Every machine runs the same `server.mjs`. It:
 Requests for another host are proxied once to that peer with `?local=1`, and requests carrying
 `?local=1` are never proxied again, so there are no loops. Either machine's URL shows everything.
 
-The server has no auth; it relies on the network (tailnet) for access control. The files
+The server has no auth; it relies on the network (tailnet) for access control. That only holds
+when it listens on the tailnet alone: `web.bind` `0.0.0.0` (the default with a config) also
+listens on the LAN and any VM or container bridge. Set `web.bind` to the machine's tailnet IP
+and the server listens there **plus loopback** (`127.0.0.1`, or `::1` for an IPv6 bind), so
+`scripts/deploy.sh`, the desktop app and the server's own calls keep working; if that address is
+not up yet the server exits and launchd starts it again.
+
+Two checks (`web/lib/guard.mjs`) cover what the network does not: a web page open in a browser
+on the tailnet.
+- **Host**: a request must name the server by an IP address, a loopback name, a fleet host name
+  or a `hosts.<name>.web` url's host, this machine's hostname (`name`, `name.local`), a `*.ts.net`
+  name or a `web.allowedHosts` entry (`["*"]` turns this check off). Anything else gets **403**,
+  which stops DNS rebinding.
+- **Origin**: a request with an `Origin` of another host:port gets **403**, unless the origin is a
+  loopback name (a UI dev server) or one of the fleet names above (a server behind a reverse proxy
+  that rewrites `Host`). Requests with no `Origin` (the CLI, curl, peers proxying, the operator's
+  `./api`) pass. This stops cross-site requests (spawn, send, keys) from any page in the browser.
+
+Refusals are logged as `[guard] refused …`. The files
 endpoints (chat file links → preview) therefore only serve paths that, after `realpath`, are
 inside that host's `$HOME` or the session's cwd, and never secret stores like `~/.ssh` or `.env`.
 
@@ -129,7 +147,8 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `hosts.<name>.webConnect` | `host` or `host:port` the web server dials for that host's `web` url instead of the url's own name (directly, or through `webProxy`), while TLS (SNI, the certificate check) and `Host` keep the url's name; for a name the proxy cannot resolve, e.g. a coordination server's extra DNS records behind a userspace `tailscaled`. Default: the url's own address. The CLI goes over `ssh` and ignores it |
 | `hosts.<name>.shared` | `true`: a shared shed (other people's sessions run there too), not one of the user's own hosts. The web UI shows it in its own group of the top bar's host rail and leaves it out of the default view ("Mine"), the Inbox and the waiting count; `/api/fleet` stamps each host with `shared` from the serving host's config; `fleet list --mine` / `--shared` split on it. Default `false` |
 | `hosts.<name>.editorSsh` | ssh destination the browser's machine uses for that host in "Open in editor" links, when it differs from `ssh` or `ssh` is unset (a web-only peer); default `ssh` |
-| `web.port` / `web.bind` | web server listen address; with no config at all it binds `127.0.0.1` only |
+| `web.port` / `web.bind` | web server listen address; with no config at all it binds `127.0.0.1` only. A specific address (a tailnet IP) also listens on loopback; see [Web server](#web-server-web) above |
+| `web.allowedHosts` | more names a browser may reach this server by (a reverse proxy's or DNS name not among the hosts' `web` urls), or `["*"]` for any; the Host check above. Default `[]` |
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
 | `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: the scheme of the "Open in editor" link the API puts on briefs and session rows (`editorUrl`, see [Session briefs](#session-briefs)); `null` = no link (the UI hides the button) |

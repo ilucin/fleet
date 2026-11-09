@@ -546,7 +546,7 @@ fleet init --yes --self laptop \
 | `--add-host NAME[,ssh=DEST][,web=URL]` | a host (repeatable); this machine needs no `ssh` |
 | `--default-host <name>` | target for tmux-session commands |
 | `--spawn-dir LABEL=HOST:PATH[,HOST:PATH…]` or `LABEL=PATH` | a spawn directory, per host or the same everywhere (repeatable) |
-| `--web-port`, `--web-bind`, `--web-dir` | web server settings (`--web-dir` defaults to auto-detected) |
+| `--web-port`, `--web-bind`, `--web-dir` | web server settings (`--web-dir` defaults to auto-detected). `--web-bind <tailnet IP>` keeps the server off the LAN (it also listens on loopback); `0.0.0.0` is every interface ([architecture](architecture.md#web-server-web)) |
 | `--force` | overwrite an existing config without asking |
 | `--print` | print the config instead of writing it |
 

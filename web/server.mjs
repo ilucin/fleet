@@ -45,6 +45,7 @@ import { createDormant } from './lib/dormant.mjs';
 import { createMemos } from './lib/memos.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
+import { createRequestGuard, listenAddresses, loopbackFor, machineNames } from './lib/guard.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const NAME = 'fleet-web';
@@ -195,7 +196,7 @@ if (config.slack.enabled) {
     // linked to Slack answers once the session is linked, ≤ ~1 min).
     spawn: async (host, body) => {
       const local = !host || host === config.self;
-      const loopback = ['0.0.0.0', '::', '', undefined, null].includes(config.bind) ? '127.0.0.1' : config.bind;
+      const loopback = loopbackFor(config.bind);
       const base = local ? `http://${loopback.includes(':') ? `[${loopback}]` : loopback}:${config.port}` : config.peers[host];
       if (!base) throw new Error(`${host} is not a peer with a web url`);
       const r = await proxyToPeer(base, {
@@ -230,7 +231,7 @@ const github = config.github.enabled
       },
       send: (session, text) => backend.send(session, text),
       spawn: async (body) => {
-        const loopback = ['0.0.0.0', '::', '', undefined, null].includes(config.bind) ? '127.0.0.1' : config.bind;
+        const loopback = loopbackFor(config.bind);
         const base = `http://${loopback.includes(':') ? `[${loopback}]` : loopback}:${config.port}`;
         const r = await proxyToPeer(base, {
           method: 'POST',
@@ -339,15 +340,32 @@ const handleApi = createApi({
 
 fleetAccess = handleApi;
 
-const server = createHttpServer({ handleApi, uiDir: config.uiDir, log, logError });
-
-server.on('error', (err) => {
-  logError(err, 'server');
-  process.exit(1);
+// A browser can reach this server by these names (lib/guard.mjs); anything else is refused.
+const guard = createRequestGuard({
+  names: [
+    ...config.hosts,
+    ...Object.values(config.hostAddrs),
+    ...[config.selfWeb, ...Object.values(config.peers)].filter(Boolean).map((u) => new URL(u).hostname.replace(/^\[|\]$/g, '')),
+    ...machineNames(),
+  ],
+  allowedHosts: config.allowedHosts,
 });
 
-server.listen(config.port, config.bind, () => {
-  log(`[fleet-web] self=${config.self} listening on http://${config.bind}:${config.port}`);
+// web.bind: one address, or a specific one (a tailnet IP) plus loopback (lib/guard.mjs).
+const addresses = listenAddresses(config.bind);
+const servers = addresses.map(() => createHttpServer({ handleApi, uiDir: config.uiDir, guard, log, logError }));
+for (const s of servers) {
+  s.on('error', (err) => {
+    // A tailnet address that is not up yet (EADDRNOTAVAIL): exit, launchd starts us again.
+    logError(err, 'server');
+    process.exit(1);
+  });
+}
+for (const [i, s] of servers.entries()) if (i > 0) s.listen(config.port, addresses[i]);
+
+servers[0].listen(config.port, addresses[0], () => {
+  log(`[fleet-web] self=${config.self} listening on ${addresses.map((a) => `http://${a.includes(':') ? `[${a}]` : a}:${config.port}`).join(', ')}`);
+  if (config.allowedHosts.length) log(`[fleet-web] allowedHosts=${config.allowedHosts.join(',')}`);
   log(`[fleet-web] config=${config.configFile ?? '(none, defaults)'} peers=${Object.keys(config.peers).join(',') || '(none)'}`);
   log(`[fleet-web] fleet=${config.fleetBin} tmux=${config.tmux} ui=${config.uiDir ?? '(none)'}`);
   if (config.autoName.enabled) {
@@ -448,11 +466,15 @@ function shutdown(signal) {
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();
-  server.close(() => {
-    log('[fleet-web] closed');
-    process.exit(0);
-  });
-  server.closeIdleConnections?.();
+  let open = servers.length;
+  for (const s of servers) {
+    s.close(() => {
+      if (--open > 0) return;
+      log('[fleet-web] closed');
+      process.exit(0);
+    });
+    s.closeIdleConnections?.();
+  }
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

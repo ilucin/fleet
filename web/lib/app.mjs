@@ -54,7 +54,7 @@ function pipeResult(res, { status, headers = {}, stream }, logError, context) {
   });
 }
 
-export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = () => {} }) {
+export function createHttpServer({ handleApi, uiDir, guard = null, log = () => {}, logError = () => {} }) {
   async function serveStatic(req, res, url) {
     if (!uiDir) {
       sendJson(res, 404, { error: 'not found' });
@@ -138,6 +138,13 @@ export function createHttpServer({ handleApi, uiDir, log = () => {}, logError = 
     (async () => {
       if (!url) {
         sendJson(res, 400, { error: 'bad request url' });
+        return;
+      }
+      // Host / Origin checks (lib/guard.mjs): no DNS-rebound names, no cross-site requests.
+      const denied = guard?.(req);
+      if (denied) {
+        log(`[guard] refused ${req.method} ${req.url}: ${denied.error}`);
+        sendJson(res, denied.status, { error: denied.error });
         return;
       }
       if (url.pathname.startsWith('/api/')) {
