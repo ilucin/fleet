@@ -640,6 +640,34 @@ pub fn link_spawned(tmux: &str, link: &SpawnLink, first: &str) -> Result<()> {
     }
 }
 
+/// The bridge's active links (`GET /api/slack`); `None` when it can't be asked.
+pub fn active_links() -> Option<Vec<Value>> {
+    let (status, v) = request("GET", "/api/slack", None).ok()?;
+    if !status.starts_with('2') {
+        return None;
+    }
+    Some(v["links"].as_array().cloned().unwrap_or_default())
+}
+
+/// Link an already running session (`session_id`) to `link.url` again, `first` going in with the
+/// link's intro — a resident bot's session that lost its link.
+pub fn relink_session(session_id: &str, link: &SpawnLink, first: &str) -> Result<Value> {
+    let mut body = json!({
+        "url": link.url,
+        "minutes": link.duration,
+        "mode": if link.proactive { "proactive" } else { "mention" },
+        "session": session_id,
+        "first": first,
+        "host": crate::core::config::get().self_name(),
+    });
+    if let Some(t) = &link.task {
+        body["task"] = json!(t);
+    }
+    let (status, v) = request("POST", "/api/slack/link", Some(&body))?;
+    ok_or_err(&status, &v)?;
+    Ok(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

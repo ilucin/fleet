@@ -94,9 +94,15 @@ fn job_json(j: &Job, st: &jobs::JobState, rows: &[Session], runs: usize) -> Valu
         "name": j.name,
         "schedule": j.schedule,
         "scheduleText": j.trigger_text(),
-        "on": j.github.as_ref().map(|g| json!({ "github": {
-            "repo": g.repo, "branch": g.branch, "every": g.every, "backfill": g.backfill,
-        } })),
+        "on": match (&j.github, &j.slack) {
+            (Some(g), _) => json!({ "github": {
+                "repo": g.repo, "branch": g.branch, "every": g.every, "backfill": g.backfill,
+            } }),
+            (None, Some(sl)) => json!({ "slack": {
+                "channel": sl.url, "channelId": sl.channel, "mode": sl.mode, "task": sl.task,
+            } }),
+            (None, None) => Value::Null,
+        },
         "sessionName": j.session_name,
         "github": st.github,
         "enabled": j.enabled,
@@ -141,10 +147,17 @@ pub fn list(json_out: bool) -> Result<()> {
         return Ok(());
     }
     let now = Local::now();
+    let mut links: Option<Option<Vec<Value>>> = None;
     for j in &s.jobs {
         let st = jobs::load_state(&j.name);
         let next = if !j.enabled {
             "paused".into()
+        } else if let Some(on) = &j.slack {
+            resident_words(
+                on,
+                &live_of(&rows, &j.name),
+                links.get_or_insert_with(crate::cli::slack::active_links),
+            )
         } else if j.github.is_some() {
             poll_words(st.github.as_ref())
         } else {
@@ -167,7 +180,13 @@ pub fn list(json_out: bool) -> Result<()> {
         } else {
             j.name.dimmed()
         };
-        let next_label = if j.github.is_some() { "poll" } else { "next" };
+        let next_label = if j.slack.is_some() {
+            "now "
+        } else if j.github.is_some() {
+            "poll"
+        } else {
+            "next"
+        };
         println!(
             "{:<24} {:<28} {next_label} {:<18} last {:<20} {}",
             name,
@@ -204,7 +223,24 @@ pub fn show(name: &str, json_out: bool) -> Result<()> {
             "paused".yellow()
         }
     );
+    if let Some(on) = &j.slack {
+        let links = crate::cli::slack::active_links();
+        println!("  trigger   {}", on.describe());
+        println!("  channel   {}", on.url);
+        println!(
+            "  now       {}",
+            resident_words(on, &live_of(&rows, &j.name), &links)
+        );
+        println!(
+            "  session   {}",
+            j.session_name.as_deref().unwrap_or(&j.name)
+        );
+        if let Some(t) = &on.task {
+            println!("  task      {}", crate::cli::render::fit(t, 80));
+        }
+    }
     match &j.github {
+        _ if j.slack.is_some() => {}
         Some(g) => {
             println!(
                 "  trigger   {} (every {})",
@@ -461,7 +497,8 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
         _ => text,
     };
     // A bot session closes itself once its work is done and nothing waits on the user.
-    let text = if text.trim().is_empty() {
+    // …but a resident's session stays: it has no work that ends.
+    let text = if text.trim().is_empty() || j.slack.is_some() {
         text
     } else {
         crate::core::done::with_instruction(&text)
@@ -491,12 +528,15 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
             Ok(l) => l,
             Err(e) => return fail(run, e.to_string()),
         };
-    let name = match branch {
-        Some(b) => session_name_for(j, b),
-        None => jobs::session_name(&j.name, &id),
+    let name = match (branch, &j.slack) {
+        (Some(b), _) => session_name_for(j, b),
+        (None, Some(_)) => j.session_name.clone().unwrap_or_else(|| j.name.clone()),
+        (None, None) => jobs::session_name(&j.name, &id),
     };
     let path_s = prompt_file.display().to_string();
-    let prompt = if run.prompt_file.is_some() {
+    // A resident starts with no prompt: it goes in with the link's intro, so the session never
+    // works on it before it knows it is in Slack (as `fleet spawn --slack`).
+    let prompt = if run.prompt_file.is_some() && j.slack.is_none() {
         Prompt::File(&path_s)
     } else {
         Prompt::None
@@ -510,7 +550,15 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
             );
         }
         println!("dry-run: would start {} ({}): {line}", j.name, tag.run);
+        if let Some(on) = &j.slack {
+            println!("dry-run: then link it to {} for good ({})", on.url, on.mode);
+        }
         return Ok(run);
+    }
+    if j.slack.is_some()
+        && let Err(e) = crate::cli::slack::check_linkable()
+    {
+        return fail(run, e.to_string());
     }
     push_run(&j.name, run.clone())?;
     match backend::spawn_tagged(
@@ -524,13 +572,152 @@ fn start(j: &Job, trigger: &str, slot: Option<i64>, branch: Option<&Branch>) -> 
         j.harness,
         Some(&tag),
     ) {
-        Ok(_) => Ok(jobs::load_state(&j.name)
-            .runs
-            .into_iter()
-            .rev()
-            .find(|r| r.id == id)
-            .unwrap_or(run)),
+        Ok((_, tmux)) => {
+            if let Some(on) = &j.slack {
+                let linked = tmux
+                    .ok_or_else(|| Error::Other("the session has no tmux session to link".into()))
+                    .and_then(|t| {
+                        crate::cli::slack::link_spawned(&t, &resident_link(j, on), &text)
+                    });
+                if let Err(e) = linked {
+                    return fail(run, e.to_string());
+                }
+            }
+            Ok(jobs::load_state(&j.name)
+                .runs
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or(run))
+        }
         Err(e) => fail(run, e.to_string()),
+    }
+}
+
+// --- residents (on.slack) ---------------------------------------------------------
+
+/// After a resident's start or relink, the next one waits this long: the session may still be
+/// registering, and a failing bridge is not hammered every minute.
+const RESIDENT_RETRY_MS: i64 = 5 * 60 * 1000;
+
+/// The link a resident's session gets: its channel, for good.
+fn resident_link(j: &Job, on: &jobs::SlackOn) -> crate::cli::slack::SpawnLink {
+    crate::cli::slack::SpawnLink {
+        url: on.url.clone(),
+        duration: "forever".into(),
+        task: Some(on.task.clone().unwrap_or_else(|| {
+            format!(
+                "You are the resident {} bot of this channel: follow the instructions that come with this message.",
+                j.name
+            )
+        })),
+        proactive: on.mode == "proactive",
+    }
+}
+
+/// The active link of `sessions` (one of them) to the resident's channel, as a whole channel.
+fn resident_linked<'a>(
+    on: &jobs::SlackOn,
+    sessions: &[&Session],
+    links: &'a [Value],
+) -> Option<&'a Value> {
+    links.iter().find(|l| {
+        l["channel"].as_str() == Some(on.channel.as_str())
+            && l["threadTs"].is_null()
+            && sessions
+                .iter()
+                .any(|s| s.session_id.is_some() && l["session"].as_str() == s.session_id.as_deref())
+    })
+}
+
+/// What a resident is doing now, in a few words.
+fn resident_words(on: &jobs::SlackOn, live: &[&Session], links: &Option<Vec<Value>>) -> String {
+    match (live.len(), links) {
+        (0, _) => "no session".into(),
+        (n, _) if n > 1 => format!("{n} sessions (one expected)"),
+        (_, None) => "live, link unknown".into(),
+        (_, Some(ls)) => match resident_linked(on, live, ls) {
+            Some(l) => format!("linked {}", l["id"].as_str().unwrap_or("?")),
+            None => "live, not linked".into(),
+        },
+    }
+}
+
+/// One tick of a resident: start its session when none is live; link the live one again when it
+/// lost its link. Never a second session. → whether it started (or failed to start) one.
+fn resident_tick(j: &Job, quiet: bool, rows: &mut Option<Vec<Session>>) -> Result<(bool, usize)> {
+    let Some(on) = &j.slack else {
+        return Ok((false, 0));
+    };
+    if !j.enabled {
+        return Ok((false, 0));
+    }
+    let now_ms = Local::now().timestamp_millis();
+    let st = jobs::load_state(&j.name);
+    if st
+        .runs
+        .last()
+        .is_some_and(|r| now_ms - r.started_at < RESIDENT_RETRY_MS)
+    {
+        return Ok((false, 0));
+    }
+    let all = rows.get_or_insert_with(discovery::discover).clone();
+    let live = live_of(&all, &j.name);
+    if live.len() > 1 {
+        return Ok((false, 0)); // `fleet hosts` (health) says so; which one to keep is a person's call
+    }
+    let Some(links) = crate::cli::slack::active_links() else {
+        return Ok((false, 0)); // no bridge to ask: nothing to decide on
+    };
+    if let Some(s) = live.first() {
+        if resident_linked(on, &live, &links).is_some() {
+            return Ok((false, 0));
+        }
+        let Some(sid) = s.session_id.as_deref().filter(|x| !x.starts_with("pid-")) else {
+            return Ok((false, 0)); // not registered yet
+        };
+        let text = read_prompt(j).unwrap_or_default();
+        let now = Local::now();
+        let mut run = Run {
+            id: jobs::run_id(now, false),
+            trigger: "relink".into(),
+            started_at: now.timestamp_millis(),
+            outcome: "relinked".into(),
+            ..Default::default()
+        };
+        let tmux = s.tmux_session.clone().unwrap_or_default();
+        match crate::cli::slack::relink_session(sid, &resident_link(j, on), &text) {
+            Ok(v) => {
+                run.reason = Some(format!(
+                    "{tmux} lost its link; now {}",
+                    v["id"].as_str().unwrap_or("?")
+                ));
+                log(
+                    quiet,
+                    &format!("{}: linked {tmux} to {} again", j.name, on.channel),
+                );
+                push_run(&j.name, run)?;
+                Ok((false, 0))
+            }
+            Err(e) => {
+                run.outcome = "failed".into();
+                run.reason = Some(format!("relinking {tmux}: {e}"));
+                log(quiet, &format!("{}: relinking {tmux} failed — {e}", j.name));
+                push_run(&j.name, run)?;
+                Ok((false, 1))
+            }
+        }
+    } else {
+        match start(j, "resident", None, None) {
+            Ok(r) => {
+                log(quiet, &format!("{}: started {}", j.name, describe(&r)));
+                Ok((true, 0))
+            }
+            Err(e) => {
+                log(quiet, &format!("{}: failed — {e}", j.name));
+                Ok((true, 1))
+            }
+        }
     }
 }
 
@@ -566,6 +753,23 @@ pub fn run_now(name: &str, force: bool, prompt: Option<String>) -> Result<()> {
             "{}: {why} — pass --force to start another run anyway",
             j.name
         )));
+    }
+    if j.slack.is_some() {
+        let rows = discovery::discover();
+        let live: Vec<String> = live_of(&rows, &j.name)
+            .iter()
+            .filter_map(|s| s.tmux_session.clone())
+            .collect();
+        if !live.is_empty() {
+            return Err(Error::Other(format!(
+                "{}: a resident bot keeps one session, and {} is live — close it first to start a new one",
+                j.name,
+                live.join(", ")
+            )));
+        }
+        let r = start(j, "manual", None, None)?;
+        println!("{} {} — {}", "→".cyan(), j.name.bold(), describe(&r));
+        return Ok(());
     }
     if j.github.is_some() {
         return Err(Error::Other(format!(
@@ -603,6 +807,21 @@ pub fn tick(quiet: bool) -> Result<()> {
     };
     let mut failed = 0;
     for j in &s.jobs {
+        if j.slack.is_some() {
+            match resident_tick(j, quiet, &mut rows) {
+                Ok((started, f)) => {
+                    failed += f;
+                    if started {
+                        rows = None;
+                    }
+                }
+                Err(e) => {
+                    failed += 1;
+                    log(quiet, &format!("{}: {e}", j.name));
+                }
+            }
+            continue;
+        }
         let Some(cron) = &j.cron else {
             match github_tick(j, now, quiet, false) {
                 Ok(t) => {
@@ -1193,6 +1412,20 @@ pub fn health() -> Vec<crate::cli::hosts::BotHealth> {
         });
     }
     let now_ms = Local::now().timestamp_millis();
+    if s.jobs.iter().any(|j| j.enabled && j.slack.is_some()) {
+        let rows = discovery::discover();
+        let links = crate::cli::slack::active_links();
+        for j in s.jobs.iter().filter(|j| j.enabled) {
+            let Some(on) = &j.slack else { continue };
+            let live = live_of(&rows, &j.name);
+            let words = resident_words(on, &live, &links);
+            out.push(BotHealth {
+                name: j.name.clone(),
+                ok: words.starts_with("linked"),
+                line: format!("bot {} ({}): {words}", j.name, on.describe().to_lowercase()),
+            });
+        }
+    }
     for j in s.jobs.iter().filter(|j| j.enabled) {
         let Some(on) = &j.github else { continue };
         let w = jobs::load_state(&j.name).github.unwrap_or_default();
@@ -1509,6 +1742,42 @@ mod tests {
         );
         assert_eq!(strip_frontmatter("Do it.\n---\nmore"), "Do it.\n---\nmore");
         assert_eq!(strip_frontmatter("---\nunterminated"), "---\nunterminated");
+    }
+
+    #[test]
+    fn a_resident_is_linked_only_by_a_whole_channel_link_of_its_own_session() {
+        let on =
+            jobs::SlackOn::parse(&json!({ "channel": "https://t.slack.com/archives/C0123ABCDEF" }))
+                .unwrap();
+        let me = Session {
+            session_id: Some("s-me".into()),
+            ..Default::default()
+        };
+        let live = [&me];
+        let link = |id: &str, session: &str, channel: &str, thread: Value| json!({ "id": id, "session": session, "channel": channel, "threadTs": thread });
+        let words = |links: Vec<Value>| resident_words(&on, &live, &Some(links));
+        assert_eq!(
+            words(vec![link("sl-1", "s-me", "C0123ABCDEF", Value::Null)]),
+            "linked sl-1"
+        );
+        assert_eq!(
+            words(vec![link("sl-1", "s-other", "C0123ABCDEF", Value::Null)]),
+            "live, not linked"
+        );
+        assert_eq!(
+            words(vec![link("sl-1", "s-me", "C0123ABCDEF", json!("1.2"))]),
+            "live, not linked"
+        );
+        assert_eq!(
+            words(vec![link("sl-1", "s-me", "C9999999999", Value::Null)]),
+            "live, not linked"
+        );
+        assert_eq!(resident_words(&on, &live, &None), "live, link unknown");
+        assert_eq!(resident_words(&on, &[], &Some(vec![])), "no session");
+        assert_eq!(
+            resident_words(&on, &[&me, &me], &Some(vec![])),
+            "2 sessions (one expected)"
+        );
     }
 
     #[test]

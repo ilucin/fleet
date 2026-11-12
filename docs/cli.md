@@ -786,6 +786,54 @@ bot's `schedule` is `""`, `scheduleText` the trigger in words, `nextRun` null. A
 The state is `github` in the bot's state file (`<bot>.json`, below). Tests poll a fixture instead
 of GitHub: `FLEET_GH_WATCH_FIXTURE` = a JSON file `{ "<owner/repo>": [{ "name", "sha" }] }`.
 
+## Resident bots (Slack)
+
+A bot can live in a Slack channel instead of running now and then: with `on.slack` in place of
+`schedule`, Fleet keeps **exactly one** session of it live, linked to that channel for good
+(`fleet slack link --for forever`). A channel that people talk to (a CI channel, a review
+channel) gets one standing session that follows it, while the work itself runs in other bots.
+
+```json
+"bots": {
+  "ci-channel": {
+    "on": { "slack": {
+      "channel": "https://<workspace>.slack.com/archives/C0123ABCDEF",
+      "mode": "proactive",
+      "task": "CI support for this channel: …"
+    } },
+    "dir": "~/Code/project",
+    "pull": true,
+    "prompt": "Run bots/ci-channel/channel.md. Settings: ~/.config/fleet/bots/ci-channel/settings.json"
+  }
+}
+```
+
+| key | meaning |
+| --- | --- |
+| `on.slack.channel` | the channel's link (`…/archives/C…`); a whole channel, not a thread |
+| `on.slack.mode` | `mention` (default: woken when mentioned, or in a thread it posted in) or `proactive` (every message) |
+| `on.slack.task` | the link's instructions (`--task`, at most 1000 characters); default: follow the prompt |
+| `sessionName` | the session's name; default the bot's name |
+| `prompt` / `promptFile` | goes in with the link's intro (as `fleet spawn --slack`), so the session never starts on it before it knows it is in Slack |
+
+Everything else (`dir`, `pull`, `command`, `harness`, `model`, `ghIdentity`, `enabled`) is as for
+any bot. `keep` and `closeDone` are refused: nothing closes a resident's session. The host must
+run the Slack bridge (`slack.host`).
+
+**One session, kept.** Each tick (`fleet bots tick`, every minute) looks at the bot's live
+sessions and the bridge's links:
+
+- none live → it starts one and links it (`trigger: resident`);
+- one live, linked to the channel → nothing;
+- one live that lost its link (unlinked, the link failed) → it links that session again, the prompt
+  with the intro (`trigger: relink`);
+- more than one live → nothing; `fleet hosts` reports it, and a person closes the extra.
+
+After a start or a relink the next one waits 5 minutes (the session may still be registering; a
+failing bridge is not asked every minute). No bridge to ask → nothing is decided. `fleet bots run`
+starts it now when none is live, and refuses when one is. To stop it, pause the bot
+(`fleet bots disable`) and close its session; unlinking alone gets it linked again.
+
 ## Snooze
 
 Set a session aside until a time, like snoozing a mail: `fleet snooze <target> --for 4h` (or

@@ -45,6 +45,13 @@
 //! A bot with `on.github` instead of `schedule` starts one run per new branch matching a
 //! pattern, polled by the same tick — see [`crate::core::gh_watch`].
 //!
+//! A bot with `on.slack` is a resident: `{ "channel": "<channel link>", "mode": "mention" |
+//! "proactive", "task": "<the link's instructions>" }`. Fleet keeps exactly one session of it
+//! live, linked to that channel for good (`fleet slack link --for forever`), its prompt the
+//! link's first message. A tick with no live session starts one; a live one that lost its link is
+//! linked again; never a second one. `keep` / `closeDone` don't apply: pause the bot to stop it.
+//! Its sessions run in this host's Slack bridge (`slack.host`).
+//!
 //! State (`$FLEET_JOBS_DIR`, else `${XDG_STATE_HOME:-~/.local/state}/fleet/jobs`):
 //! `<job>.json` — the last slot seen and the latest [`KEEP_RUNS`] runs with their sessions;
 //! `<job>/<run>.md` — the prompt each run started with.
@@ -404,6 +411,8 @@ pub struct Job {
     pub cron: Option<Cron>,
     /// `on.github`: runs start when a matching branch appears (see [`crate::core::gh_watch`]).
     pub github: Option<GithubOn>,
+    /// `on.slack`: a resident bot — one session, always live, linked to a Slack channel.
+    pub slack: Option<SlackOn>,
     /// `sessionName`: the name of a triggered run's session, a template (`{branch}`, `{repo}`,
     /// `{sha}`, `{bot}`); default `<bot> {branch}`.
     pub session_name: Option<String>,
@@ -429,10 +438,11 @@ pub struct Job {
 impl Job {
     /// What starts it, in plain English: the schedule, or the trigger.
     pub fn trigger_text(&self) -> String {
-        match (&self.cron, &self.github) {
-            (Some(c), _) => c.describe(),
-            (None, Some(g)) => g.describe(),
-            (None, None) => String::new(),
+        match (&self.cron, &self.github, &self.slack) {
+            (Some(c), _, _) => c.describe(),
+            (None, Some(g), _) => g.describe(),
+            (None, None, Some(s)) => s.describe(),
+            (None, None, None) => String::new(),
         }
     }
 
@@ -523,25 +533,47 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         }
     };
     let schedule = text("schedule")?;
-    let github = match o.get("on") {
-        None | Some(Value::Null) => None,
+    let (github, slack) = match o.get("on") {
+        None | Some(Value::Null) => (None, None),
         Some(Value::Object(on)) => {
-            if let Some(k) = on.keys().find(|k| *k != "github") {
-                return Err(format!("on.{k}: unknown trigger (github)"));
+            if let Some(k) = on.keys().find(|k| *k != "github" && *k != "slack") {
+                return Err(format!("on.{k}: unknown trigger (github, slack)"));
             }
-            on.get("github")
+            let github = on
+                .get("github")
                 .filter(|v| !v.is_null())
                 .map(GithubOn::parse)
-                .transpose()?
+                .transpose()?;
+            let slack = on
+                .get("slack")
+                .filter(|v| !v.is_null())
+                .map(SlackOn::parse)
+                .transpose()?;
+            (github, slack)
         }
         Some(other) => return Err(format!("on must be an object, not {other}")),
     };
-    let cron = match (&schedule, &github) {
-        (Some(_), Some(_)) => return Err("set schedule or on.github, not both".into()),
-        (None, None) => return Err("schedule (or on.github) is required".into()),
-        (Some(s), None) => Some(Cron::parse(s)?),
-        (None, Some(_)) => None,
-    };
+    let starts = [schedule.is_some(), github.is_some(), slack.is_some()]
+        .iter()
+        .filter(|x| **x)
+        .count();
+    if starts > 1 {
+        return Err("set one of schedule, on.github, on.slack".into());
+    }
+    if starts == 0 {
+        return Err("schedule (or on.github, on.slack) is required".into());
+    }
+    let cron = schedule.as_deref().map(Cron::parse).transpose()?;
+    // A resident's one session lives until the bot is paused: nothing closes it.
+    if slack.is_some() {
+        for k in ["keep", "closeDone"] {
+            if o.get(k).is_some_and(|v| !v.is_null()) {
+                return Err(format!(
+                    "{k}: a resident bot (on.slack) keeps its session — pause the bot to stop it"
+                ));
+            }
+        }
+    }
     let dir = text("dir")?.ok_or("dir is required")?;
     let prompt = match (o.get("prompt"), text("promptFile")?) {
         (Some(Value::String(p)), None) if !p.trim().is_empty() => PromptSrc::Inline(p.clone()),
@@ -573,11 +605,16 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
     {
         return Err(format!("ghIdentity `{g}` is not a valid name"));
     }
-    let keep = match text("keep")?.as_deref().unwrap_or(DEFAULT_KEEP) {
+    let (default_keep, default_close_done) = if slack.is_some() {
+        ("never", "never")
+    } else {
+        (DEFAULT_KEEP, DEFAULT_CLOSE_DONE)
+    };
+    let keep = match text("keep")?.as_deref().unwrap_or(default_keep) {
         "never" => None,
         k => Some(crate::core::tmux::parse_span(k).map_err(|e| format!("keep: {e}"))?),
     };
-    let close_done = match text("closeDone")?.as_deref().unwrap_or(DEFAULT_CLOSE_DONE) {
+    let close_done = match text("closeDone")?.as_deref().unwrap_or(default_close_done) {
         "never" => None,
         k => Some(crate::core::tmux::parse_span(k).map_err(|e| format!("closeDone: {e}"))?),
     };
@@ -586,6 +623,7 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         schedule: schedule.unwrap_or_default(),
         cron,
         github,
+        slack,
         session_name: text("sessionName")?,
         dir,
         prompt,
@@ -599,6 +637,82 @@ fn job_from_value(name: &str, v: &Value) -> std::result::Result<Job, String> {
         pull,
         section: "bots",
     })
+}
+
+// --- resident (on.slack) ---------------------------------------------------------
+
+/// `on.slack`: a resident bot. Fleet keeps exactly one session of it live, linked to one Slack
+/// channel for good; when it is gone (or its link is), the next tick starts (or links) it again.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SlackOn {
+    /// The channel's link (`https://<workspace>.slack.com/archives/C…`).
+    pub url: String,
+    /// The channel id, from `url`.
+    pub channel: String,
+    /// `mention` (woken when mentioned, or in a thread it posted in) or `proactive` (every message).
+    pub mode: String,
+    /// The link's instructions (`fleet slack link --task`); default: follow the bot's prompt.
+    pub task: Option<String>,
+}
+
+impl SlackOn {
+    pub fn parse(v: &Value) -> std::result::Result<SlackOn, String> {
+        let o = v.as_object().ok_or("on.slack must be an object")?;
+        for k in o.keys() {
+            if !["channel", "mode", "task"].contains(&k.as_str()) {
+                return Err(format!("on.slack.{k}: unknown key (channel, mode, task)"));
+            }
+        }
+        let text = |k: &str| -> std::result::Result<Option<String>, String> {
+            match o.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.trim().to_string())),
+                Some(other) => Err(format!("on.slack.{k} must be a string, not {other}")),
+            }
+        };
+        let url = text("channel")?
+            .ok_or("on.slack.channel is required (the channel's link, …/archives/C…)")?;
+        let channel = channel_of(&url).ok_or_else(|| {
+            format!("on.slack.channel `{url}`: not a channel link (https://<workspace>.slack.com/archives/C…)")
+        })?;
+        let mode = text("mode")?.unwrap_or_else(|| "mention".into());
+        if mode != "mention" && mode != "proactive" {
+            return Err(format!("on.slack.mode `{mode}`: mention or proactive"));
+        }
+        Ok(SlackOn {
+            url,
+            channel,
+            mode,
+            task: text("task")?,
+        })
+    }
+
+    pub fn describe(&self) -> String {
+        format!("Resident in Slack {} ({})", self.channel, self.mode)
+    }
+}
+
+/// The channel id of a channel link: `https://x.slack.com/archives/C123` → `C123`. A message's
+/// link (`…/p<ts>`) is a thread, not a channel: `None`.
+fn channel_of(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/')?;
+    if !host.ends_with(".slack.com") {
+        return None;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let mut parts = path.trim_end_matches('/').split('/');
+    if parts.next() != Some("archives") {
+        return None;
+    }
+    let id = parts.next()?;
+    let ok = id.len() >= 9
+        && (id.starts_with('C') || id.starts_with('G'))
+        && id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    (ok && parts.next().is_none()).then(|| id.to_string())
 }
 
 // --- pull ----------------------------------------------------------------------
@@ -1297,6 +1411,41 @@ mod tests {
         assert_eq!(
             trigger_run_id(at(2026, 11, 3, 9, 5), "release/42"),
             "20261103-090500-release-42"
+        );
+    }
+
+    #[test]
+    fn settings_read_slack_residents() {
+        let ch = "https://team.slack.com/archives/C0123ABCDEF";
+        let s = Settings::from_value(
+            &json!({
+                "ci": { "on": { "slack": { "channel": ch, "mode": "proactive", "task": "CI help" } }, "dir": "/tmp" },
+                "plain": { "on": { "slack": { "channel": ch } }, "dir": "/tmp" },
+                "thread": { "on": { "slack": { "channel": format!("{ch}/p1700000000123456") } }, "dir": "/tmp" },
+                "notslack": { "on": { "slack": { "channel": "https://evil.test/archives/C0123ABCDEF" } }, "dir": "/tmp" },
+                "badmode": { "on": { "slack": { "channel": ch, "mode": "loud" } }, "dir": "/tmp" },
+                "kept": { "on": { "slack": { "channel": ch } }, "keep": "24h", "dir": "/tmp" },
+                "both": { "schedule": "@daily", "on": { "slack": { "channel": ch } }, "dir": "/tmp" }
+            }),
+            "bots",
+        );
+        assert_eq!(s.jobs.len(), 2, "{:?}", s.problems);
+        assert_eq!(s.problems.len(), 5, "{:?}", s.problems);
+        let ci = s.get("ci").unwrap();
+        let on = ci.slack.as_ref().unwrap();
+        assert_eq!(on.channel, "C0123ABCDEF");
+        assert_eq!(on.mode, "proactive");
+        assert_eq!(on.task.as_deref(), Some("CI help"));
+        assert!(ci.cron.is_none() && ci.github.is_none());
+        // Nothing closes a resident's session.
+        assert_eq!((ci.keep, ci.close_done), (None, None));
+        assert_eq!(
+            ci.trigger_text(),
+            "Resident in Slack C0123ABCDEF (proactive)"
+        );
+        assert_eq!(
+            s.get("plain").unwrap().slack.as_ref().unwrap().mode,
+            "mention"
         );
     }
 
