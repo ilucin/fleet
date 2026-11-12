@@ -26,6 +26,7 @@ const SESSIONS = () => [
   S({ host: 'devbox', session_id: 'b2c3d4e5-2222-4000-8000-000000000002', pid: 9188, display_title: 'Onboarding copy & emails', cwd: `${H}/Code/acme-web`, status: 'idle', updated_at: now() - 7 * M, handle: '%5', tmux_session: 'onboarding-copy', model: 'claude-sonnet-5-5', stack: { id: 'onboarding-redesign', label: 'Onboarding redesign', host: 'devbox' }, context: { used: 30_000, window: 200_000, pct: 15 } }),
   S({ host: 'workstation', session_id: 'a1b2c3d4-1111-4000-8000-000000000007', pid: 41790, display_title: 'Onboarding API endpoints', cwd: `${H}/Code/acme-api`, status: 'busy', updated_at: now() - 15_000, handle: '%28', tmux_session: 'onboarding-api', model: 'claude-sonnet-5-5', stack: { id: 'onboarding-redesign', label: 'Onboarding redesign', host: 'devbox' }, context: { used: 66_000, window: 200_000, pct: 33 } }),
   S({ host: 'devbox', session_id: 'b2c3d4e5-2222-4000-8000-000000000003', pid: 9301, display_title: 'Dashboard perf profiling', harness: 'pi', cwd: `${H}/Code/acme-web`, status: 'idle', updated_at: now() - 48 * M, handle: '%7', tmux_session: 'dashboard-perf', model: 'claude-sonnet-5-5', context: null }),
+  S({ host: 'devbox', session_id: 'b2c3d4e5-2222-4000-8000-0000000000a1', pid: 9402, display_title: 'Spec review: pricing-annual', cwd: `${H}/Code/acme-web`, status: 'busy', updated_at: now() - 20_000, handle: '%11', tmux_session: 'spec-review-pricing-annual', gh_identity: 'acme-bot', origin: { job: 'spec-review', run: 'gh-spec-pricing-annual' }, model: 'claude-opus-5-5', context: { used: 52_000, window: 200_000, pct: 26 } }),
   S({ host: 'devbox', session_id: 'b2c3d4e5-2222-4000-8000-000000000004', pid: 9355, display_title: 'October release notes', cwd: `${H}/Code/docs`, status: 'waiting', waiting_for: 'Ready for your review', updated_at: now() - 3 * M, handle: '%9', tmux_session: 'release-notes-oct', model: 'claude-sonnet-5-5', context: { used: 44_000, window: 200_000, pct: 22 } }),
   S({ host: 'laptop', session_id: 'c3d4e5f6-3333-4000-8000-000000000001', pid: 77120, display_title: 'Docs site search', backend: 'iterm', handle: 'w0t2p0', tab: 'docs', cwd: `${H}/Code/docs`, status: 'idle', updated_at: now() - 2 * HR, model: 'claude-sonnet-5-5', context: { used: 18_000, window: 200_000, pct: 9 } }),
   S({ host: 'laptop', session_id: 'c3d4e5f6-3333-4000-8000-000000000002', pid: 77333, display_title: 'Billing webhook retries', cwd: `${H}/Code/billing-service`, status: 'busy', updated_at: now() - 6_000, handle: '%2', tmux_session: 'billing-webhooks', model: 'claude-opus-5-5', context: { used: 410_000, window: 1_000_000, pct: 41 } }),
@@ -149,7 +150,8 @@ function brief(host, id) {
     { kind: 'Origin', label: 'Invoice totals off by a cent', url: 'https://app.acme.dev/tasks/2041', path: null, text: 'Origin' },
     { kind: 'Origin', label: 'acme.slack.com/archives/C04BILLING/p1760000000', url: 'https://acme.slack.com/archives/C04BILLING/p1760000000', path: null, text: 'Origin' },
     { kind: 'Git', label: null, url: null, path: '~/Code/acme-api/.worktrees/fix-invoice-rounding', text: 'Git: `fix-invoice-rounding` · worktree', branch: 'fix-invoice-rounding', linked: true },
-    { kind: 'PR', label: 'acme/acme-api#482', url: 'https://github.com/acme/acme-api/pull/482', path: null, text: 'PR' },
+    { kind: 'PR', label: 'acme/acme-api#482', url: 'https://github.com/acme/acme-api/pull/482', path: null, text: 'PR', prState: 'open' },
+    { kind: 'PR', label: 'acme/acme-api#479', url: 'https://github.com/acme/acme-api/pull/479', path: null, text: 'PR', prState: 'merged' },
     { kind: 'Issue', label: 'acme/acme-api#1777', url: 'https://github.com/acme/acme-api/issues/1777', path: null, text: 'Issue' },
     { kind: 'Spec', label: null, url: null, path: 'docs/billing/rounding.md', text: 'Spec' },
     { kind: 'File', label: null, url: null, path: 'src/billing/invoice_total.ts', text: 'File' },
@@ -206,6 +208,31 @@ function stack() {
   }
 }
 
+// ---------------------------------------------------------------- beads (bd issues a session works on)
+const BEAD = (o) => ({ status: 'open', type: 'task', priority: 2, labels: [], assignee: null, owner: 'demo', description: '', design: '', acceptance: '', notes: '', parent: null, blockedBy: [], related: [], createdAt: iso(now() - 2 * D), updatedAt: iso(now() - HR), closedAt: null, closeReason: null, commentCount: 0, ...o })
+const BEADS = {
+  'si-1': BEAD({ id: 'si-1', title: 'Search index v2 migration', type: 'epic', status: 'in_progress', priority: 1, labels: ['search', 'migration'], description: 'Move product search from the v1 index to the v2 schema (per-locale analyzers, price as integer cents) without downtime.', acceptance: '- Dual-write until the backfill catches up\n- Reads switch per tenant behind a flag\n- v1 index deleted after a week with no fallbacks', commentCount: 1 }),
+  'si-2': BEAD({ id: 'si-2', title: 'v2 mapping with per-locale analyzers', status: 'closed', parent: 'si-1', closedAt: iso(now() - D), closeReason: 'merged in #88' }),
+  'si-3': BEAD({ id: 'si-3', title: 'Dual-write from the indexer', status: 'closed', parent: 'si-1', closedAt: iso(now() - 5 * HR), closeReason: 'merged in #91' }),
+  'si-4': BEAD({ id: 'si-4', title: 'Backfill job (resumable, 5k docs per batch)', status: 'in_progress', parent: 'si-1', priority: 1 }),
+  'si-5': BEAD({ id: 'si-5', title: 'Per-tenant read switch behind a flag', parent: 'si-1', blockedBy: ['si-4'] }),
+  'si-6': BEAD({ id: 'si-6', title: 'Delete the v1 index', parent: 'si-1', priority: 3, blockedBy: ['si-5'] }),
+  'si-7': BEAD({ id: 'si-7', title: 'Synonyms file drifts between staging and prod', type: 'bug', parent: null, labels: ['search'] }),
+}
+function beads(host, id) {
+  if (!(host === 'workstation' && id === SID(5))) return { host, enabled: true, beads: [] }
+  const kids = (pid) => Object.values(BEADS).filter((b) => b.parent === pid)
+  const sum = (b) => { const k = kids(b.id); return { id: b.id, title: b.title, status: b.status, type: b.type, priority: b.priority, labels: b.labels, updatedAt: b.updatedAt, children: { total: k.length, closed: k.filter((c) => c.status === 'closed').length, inProgress: k.filter((c) => c.status === 'in_progress').length } } }
+  return { host, enabled: true, beads: [sum(BEADS['si-1']), sum(BEADS['si-7'])] }
+}
+function bead(host, bid) {
+  const issue = BEADS[bid] ?? BEAD({ id: bid, title: bid })
+  const parent = issue.parent ? BEADS[issue.parent] : null
+  return { host, issue, parent: parent ? { id: parent.id, title: parent.title, status: parent.status } : null,
+    children: Object.values(BEADS).filter((b) => b.parent === bid),
+    comments: bid === 'si-1' ? [{ author: 'codex', text: 'Backfill is at 62% (1.9M of 3.1M docs); dual-write lag stays under 2 s.', createdAt: iso(now() - 25 * M) }] : [] }
+}
+
 // ---------------------------------------------------------------- dormant / closed
 const dormant = (host) => host !== 'workstation' ? { host, bootId: 'boot-2', dormant: [], closed: [] } : {
   host, bootId: 'boot-2',
@@ -215,10 +242,11 @@ const dormant = (host) => host !== 'workstation' ? { host, bootId: 'boot-2', dor
 
 // ---------------------------------------------------------------- jobs
 function jobs(host) {
+  if (host === 'devbox') return devboxJobs(host)
   if (host !== 'workstation') return { host, jobs: [] }
   const run = (id, ago, outcome, trig = 'schedule', sessions = []) => ({ id, trigger: trig, startedAt: now() - ago, slot: now() - ago, outcome, reason: outcome === 'skipped' ? 'previous run still working' : null, promptFile: null, sessions })
   return { host, jobs: [
-    { host, name: 'dependency-audit', schedule: '0 7 * * 1-5', scheduleText: 'Weekdays at 07:00', enabled: true, dir: '~/Code/acme-web', harness: 'claude', model: 'claude-sonnet-5-5', command: null, keep: 7 * 86400,
+    { host, name: 'dependency-audit', schedule: '0 7 * * 1-5', scheduleText: 'Weekdays at 07:00', enabled: true, dir: '~/Code/acme-web', harness: 'claude', model: 'claude-sonnet-5-5', command: null, keep: 7 * 86400, closeDone: 86400,
       prompt: { file: '~/Code/ops/jobs/dependency-audit.md', abs: `${H}/Code/ops/jobs/dependency-audit.md`, root: `${H}/Code/ops`, editorUrl: 'vscode://file/x', rootEditorUrl: 'vscode://file/x' },
       nextRun: now() + 15 * HR, lastSlot: now() - 9 * HR,
       runs: [run('20261015-0700', 9 * HR, 'spawned', 'schedule', [{ tmuxSession: 'job-dependency-audit', name: 'Dependency audit', parent: null, at: now() - 9 * HR, closedAt: null }, { tmuxSession: 'fix-lodash-advisory', name: 'Fix lodash advisory', parent: 'job-dependency-audit', at: now() - 8.5 * HR, closedAt: now() - 7 * HR }]), run('20261014-0700', 33 * HR, 'spawned'), run('20261013-0700', 57 * HR, 'spawned')],
@@ -229,6 +257,23 @@ function jobs(host) {
     { host, name: 'weekly-metrics', schedule: '0 9 * * 1', scheduleText: 'Mondays at 09:00', enabled: false, dir: '~/Code/analytics', harness: 'codex', model: null, command: null, keep: null,
       prompt: { inline: 'Pull last week\'s product metrics and write the weekly report.' }, nextRun: null, lastSlot: now() - 3 * D,
       runs: [run('20261012-0900', 3 * D, 'skipped')], live: [] },
+  ] }
+}
+
+// A shared shed's bots: one started by new branches on GitHub instead of a schedule.
+function devboxJobs(host) {
+  const sub = (branch, sha, gone = null) => ({ kind: 'branch', repo: 'acme/acme-web', branch, sha, url: `https://github.com/acme/acme-web/tree/${branch}`, goneAt: gone })
+  const run = (id, ago, branch, sha, sessions = [], gone = null) => ({ id, trigger: 'github', startedAt: now() - ago, slot: now() - ago, outcome: 'spawned', reason: null, promptFile: null, subject: sub(branch, sha, gone), sessions })
+  return { host, jobs: [
+    { host, name: 'spec-review', schedule: '', scheduleText: 'New branch spec/* in acme/acme-web', enabled: true, dir: '~/Code/acme-web', harness: 'claude', model: 'claude-opus-5-5', command: null, keep: 3 * 86400, closeDone: 86400,
+      on: { github: { repo: 'acme/acme-web', branch: 'spec/*', every: 300, backfill: false } },
+      github: { lastPoll: now() - 2 * M, lastOk: now() - 2 * M, nextPoll: now() + 3 * M, error: null, rateRemaining: 4890, branches: {} },
+      prompt: { inline: 'Review the PlainLang spec on this branch: missing edge cases, conflicts with other modules, untestable clauses. Comment on the PR as the bot.' }, nextRun: null, lastSlot: now() - 40 * M,
+      runs: [run('gh-spec-pricing-annual', 40 * M, 'spec/pricing-annual', 'c41e9a2', [{ tmuxSession: 'spec-review-pricing-annual', name: 'Spec review: pricing-annual', parent: null, at: now() - 40 * M, closedAt: null }]), run('gh-spec-invoice-credit-notes', 26 * HR, 'spec/invoice-credit-notes', '8b02f17', [{ tmuxSession: 'spec-review-credit-notes', name: 'Spec review: credit notes', parent: null, at: now() - 26 * HR, closedAt: now() - 2 * HR }]), run('gh-spec-sso-groups', 3 * D, 'spec/sso-groups', '19aa3c0', [], now() - 2 * D)],
+      live: [{ run: 'gh-spec-pricing-annual', sessionId: 'b2c3d4e5-2222-4000-8000-0000000000a1', tmuxSession: 'spec-review-pricing-annual', status: 'busy', title: 'Spec review: pricing-annual' }] },
+    { host, name: 'nightly-e2e', schedule: '0 2 * * *', scheduleText: 'Every day at 02:00', enabled: true, dir: '~/Code/acme-web', harness: 'claude', model: 'claude-sonnet-5-5', command: null, keep: 86400, closeDone: 6 * 3600,
+      prompt: { inline: 'Run the e2e suite on main three times; open an issue for every flaky test with the failing runs attached.' }, nextRun: now() + 14 * HR, lastSlot: now() - 10 * HR,
+      runs: [{ id: '20261111-0200', trigger: 'schedule', startedAt: now() - 10 * HR, slot: now() - 10 * HR, outcome: 'spawned', reason: null, promptFile: null, sessions: [] }], live: [] },
   ] }
 }
 
@@ -646,6 +691,8 @@ function schedule(host) {
 function slack() {
   const t = now()
   return { enabled: true, host: 'workstation', socket: { connected: true, error: null }, ended: [],
+    bot: { userId: 'U0FLEET', name: 'acme-fleet', team: 'Acme', url: 'https://acme.slack.com' },
+    spawn: { host: 'workstation', dir: '~/Code/acme-api', model: 'claude-opus-5-5', harness: 'claude', ghIdentity: null, mode: 'mention', task: null, minutes: '1d', from: 'anyone' },
     links: [{ id: 'sl-3c9e1a', host: 'workstation', session: SID(8), sessionName: 'Billing questions (#billing)', channel: 'C04BILLING', threadTs: '1761.0001', permalink: 'https://acme.slack.com/archives/C04BILLING/p1761', dm: null,
       task: 'Answer questions about the invoice rounding fix and when the affected invoices can be re-issued. Do not promise dates.', mode: 'mention', createdAt: t - 2 * HR, until: t + 6 * HR, minutes: 480, pending: 0, delivered: 5, replies: 3, endedAt: null, endReason: null }] }
 }
@@ -672,6 +719,8 @@ function route(method, p, q, b) {
     const id = decodeURIComponent(s[1]); const what = s[2]; const sess = find(host, id)
     if (what === 'messages') { const msgs = chat(id); return { host, id, status: sess?.status ?? 'idle', backend: 'tmux', name: sess?.display_title, limit: 60, messages: msgs, total: msgs.length, truncated: false, queue: id === SID(1) ? { items: [{ id: 'q-1', text: 'Then add a KWD case (3 decimals) to the regression test.', createdAt: now() - 40_000 }], paused: false, held: false } : null, updatedAt: sess?.updated_at, capturedAt: now() } }
     if (what === 'peek') return { host, id, backend: 'tmux', lines: 200, text: PEEK, capturedAt: now() }
+    if (what === 'beads') return beads(host, id)
+    if (what.startsWith('beads/')) return bead(host, decodeURIComponent(what.slice(6)))
     if (what === 'brief') return brief(host, id)
     if (what === 'diffs') return diffs(host, id)
     if (what === 'review') return review(host, id)

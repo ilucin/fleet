@@ -10,6 +10,7 @@ const RL = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000003'  // waiting on
 const ONB = '#/s/devbox/b2c3d4e5-2222-4000-8000-000000000001'      // in a stack across two hosts
 const DONE = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000006'    // reported itself done (fleet done)
 const SLK = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000008'     // linked to a Slack thread
+const SIM = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000005' // Search index migration (Codex): beads
 const MUTE = { 'fleet.operator.speak': 'false' }                    // no read-aloud toast on the operator
 const focus = `document.querySelector('textarea[aria-label=Message]').focus()`
 const scrollTo = (t) => `(() => { const e = [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && e.textContent?.trim() === ${JSON.stringify(t)}); e?.scrollIntoView({ block: 'start' }); return !!e })()`
@@ -43,6 +44,10 @@ const SHOTS = [
   ['d-file', DESKTOP, async (p) => { await p.go(U + INV); await p.click('=docs/billing/rounding.md', { ms: 1500 }) }],
   ['d-stack', DESKTOP, async (p) => { await p.go(U + ONB); await p.click('StackBrief', { ms: 1500 }) }],
   ['d-prs', DESKTOP, async (p) => { await p.go(U + '#/prs') }],
+  ['d-bots-shared', DESKTOP, async (p) => { await p.go(U + '#/bots'); await p.click('Shared', { sel: '[role=radio]', ms: 900 }); await p.click('spec-review', { sel: 'button', ms: 1500 }) }],
+  ['d-settings-slack', DESKTOP, async (p) => { await p.go(U + '#/settings/slack') }],
+  ['d-beads', DESKTOP, async (p) => { await p.go(U + SIM); await p.click('Search index v2 migration', { sel: 'button', ms: 1500 }) }],
+  ['d-shared', DESKTOP, async (p) => { await p.go(U + '#/'); await p.click('devbox: ', { sel: 'button', ms: 900 }) }],
   ['d-jobs', DESKTOP, async (p) => { await p.go(U + '#/bots'); await p.click('dependency-audit', { ms: 1500 }) }],
   ['d-notes', DESKTOP, async (p) => { await p.go(U + '#/notes/devbox/projects/billing.md') }],
   ['d-notes-search', DESKTOP, async (p) => { await p.go(U + '#/notes/devbox'); await p.key('f', { meta: true }); await p.type('rounding', 1200) }],
@@ -58,11 +63,11 @@ const SHOTS = [
   ['d-slack', DESKTOP, async (p) => { await p.go(U + SLK) }],
   ['d-done', DESKTOP, async (p) => { await p.go(U + DONE) }],
   ['d-later', DESKTOP, async (p) => { await p.go(U + INV); await p.key('o', { meta: true, shift: true, ms: 1200 }); await p.click('=Later', { ms: 900 }) }],
-  ['d-host', DESKTOP, async (p) => { await p.go(U + INV); await p.click('workstation: ', { sel: 'button', ms: 900 }) }],
+  ['d-host', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(`(() => { const b = [...document.querySelectorAll('button')].find((e) => (e.getAttribute('aria-label') || '').startsWith('workstation: ')); const r = b.getBoundingClientRect(); b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })); return true })()`); await p.sleep(900) }],
   ['d-memo', DESKTOP, async (p) => { await p.go(U + '#/memos/2026-10-15-0930-billing-sync') }],
   ['d-operator', DESKTOP, async (p) => { await p.go(U + '#/operator', MUTE) }],
   ['d-complete', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(focus); await p.type('/', 1200) }],
-  ['d-undo', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(focus); await p.type('Also add a test for KWD (3 decimals).'); await p.key('Enter', { ms: 900 }) }],
+  ['d-undo', DESKTOP, async (p) => { await p.go(U + '#/s/laptop/c3d4e5f6-3333-4000-8000-000000000001'); await p.eval(focus); await p.type('Also index the changelog pages.'); await p.key('Enter', { ms: 900 }) }],
   ['d-scratch', DESKTOP, async (p) => { await p.go(U + INV, { 'fleet.scratchpad': 'TODO today\n- review acme-web#1310\n- answer rate limits question\n- ship invoice fix before 16:00\n\nfleet -H workstation enter invoice' }); await p.key('s', { meta: true, shift: true, ms: 1000 }) }],
   ['d-dusk', { ...DESKTOP, dark: true }, async (p) => { await p.go(U + INV, { 'fleet.palette': 'dusk', 'fleet.theme': 'dark' }) }],
   ['d-earth', DESKTOP, async (p) => { await p.go(U + '#/', { 'fleet.palette': 'earth', 'fleet.view': 'board' }) }],
@@ -77,7 +82,7 @@ const SHOTS = [
   // PlainLang specs: the reviewer's Spec view, a term's definition from another module, the preview
   ['d-plain-review', DESKTOP, async (p) => { await p.go(U + REV, { ...UNI, 'fleet.reviewChat': 'false' }); await p.eval(toCard('invoices.plain')); await p.sleep(800) }],
   ['d-plain-specs', DESKTOP, async (p) => { await p.go(U + REV, { ...UNI, 'fleet.reviewChat': 'false' }); await p.eval(`document.querySelector('article[id$="plain-1"]')?.scrollIntoView({ block: 'start' })`); await p.sleep(800) }],
-  ['d-plain-term', DESKTOP, async (p) => { await p.go(U + REV, { ...UNI, 'fleet.reviewChat': 'false' }); await p.eval(`document.querySelector('[id$="sec-definitions"]')?.scrollIntoView({ block: 'start' })`); await p.sleep(500); await p.click('=Customer', { sel: 'button', ms: 1500 }) }],
+  ['d-plain-term', DESKTOP, async (p) => { await p.go(U + REV, { ...UNI, 'fleet.reviewChat': 'false' }); await p.eval(toCard('invoices.plain')); await p.sleep(500); await p.click('Only what changed', { sel: 'label', ms: 600 }); await p.eval(`document.querySelector('[id$="sec-definitions"]')?.scrollIntoView({ block: 'start' })`); await p.sleep(500); await p.click('=Customer', { sel: 'button', ms: 1500 }) }],
   ['d-plain-preview', DESKTOP, async (p) => { await p.go(U + INV); await p.click('=docs/specs/invoices.plain', { ms: 1500 }); await p.click('=InvoiceTotal', { sel: 'button', nth: 1, ms: 1200 }) }],
   // mobile
   ['m-list', MOBILE, async (p) => { await p.go(U + '#/') }],
