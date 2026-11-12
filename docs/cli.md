@@ -216,7 +216,9 @@ first prompt — only when the person who requested it is in `github.spawn.from`
 `"anyone"`; none = nobody), and only for requests made after the bridge first ran.
 `fleet config set github '{"host":"<host>","spawn":{"dir":"~/work","model":"opus","keep":"1d","from":["<login>"]}}'`
 (`keep`, default `1d`: such sessions sleep after that long idle; the next event resumes them, and if
-that fails a new session takes the link over and reads the PR's history first). `github.spawn`
+that fails a new session takes the link over and reads the PR's history first). Once its PR is
+merged or closed, such a session is put to sleep as soon as it is idle (after a 10-minute grace);
+an ended link shows `retired: true` then. Sessions linked by hand are left alone. `github.spawn`
 applies within a few seconds; `github.host` needs a restart of the web server.
 
 ### Briefs

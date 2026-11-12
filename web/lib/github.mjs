@@ -26,6 +26,8 @@
 // (spawned ones: `spawn.keep`, default 1d) puts its session to sleep (`fleet sleep`: closed,
 // kept dormant) once it has been idle that long; the next event resumes it (`fleet restore`),
 // and when that fails a new session takes the link over and reads the PR's history first.
+// A session the bridge started itself (`startedBy`) is put to sleep once its PR is merged or
+// closed and it is idle (after a short grace): nothing will ever be typed into it again.
 //
 // State (`<fleet state>/github-links.json`, 0600): the links, what each has seen, the ended
 // ones, the review requests that started a session, and when the bridge first ran.
@@ -51,6 +53,7 @@ const WAKE_RETRY_MS = 3 * 60_000; // a resume is tried at most this often per li
 const WAKE_TRIES = 2; // then a new session takes the link over
 const SPAWN_WAIT_MS = 90_000;
 const ERROR_BACKOFF_MS = 5 * 60_000;
+const RETIRE_GRACE_MS = 10 * 60_000; // after its PR merged or closed, a session it started gets this long to wrap up
 const MAX_SEEN = 3000;
 const MAX_ENDED = 20;
 const MAX_STARTED = 300;
@@ -406,6 +409,7 @@ export function createGithubBridge({ settings = {}, self = null, gh, listSession
     asleep: Boolean(l.asleep),
     endedAt: l.endedAt ?? null,
     endReason: l.endReason ?? null,
+    retired: Boolean(l.retired),
   });
 
   const linkFor = (repo, number) => state.links.find((l) => prKey(l.repo, l.number) === prKey(repo, number)) ?? null;
@@ -731,6 +735,27 @@ export function createGithubBridge({ settings = {}, self = null, gh, listSession
     }
   }
 
+  /** An ended link whose session the bridge started and has not closed yet (not on `unlink`). */
+  function retires(l) {
+    return Boolean(l.startedBy) && (l.endReason === 'merged' || l.endReason === 'closed') && !l.retired;
+  }
+
+  /** Its PR is done: the session it started sleeps once idle (a gone session needs nothing). */
+  async function retire(l, s) {
+    if (s && (s.status !== 'idle' || now() - (l.endedAt ?? 0) < RETIRE_GRACE_MS)) return;
+    if (s && sleep) {
+      try {
+        await sleep(l.session);
+        log(`[github] ${l.id}: ${l.sessionName ?? l.session} closed, its PR is ${l.endReason}`);
+      } catch (err) {
+        log(`[github] ${l.id}: close failed: ${err?.message ?? err}`);
+        return;
+      }
+    }
+    l.retired = true;
+    await save();
+  }
+
   async function tick() {
     if (ticking) return;
     ticking = true;
@@ -771,9 +796,11 @@ export function createGithubBridge({ settings = {}, self = null, gh, listSession
           }
         }
       }
-      if (!state.links.length) return;
+      const retiring = state.ended.filter(retires);
+      if (!state.links.length && !retiring.length) return;
       const sessions = await listSessions();
       if (!sessions) return;
+      for (const l of retiring) await retire(l, findSession(sessions, l.session));
       for (const l of [...state.links]) {
         if (busy.has(l.id)) continue;
         const s = findSession(sessions, l.session);

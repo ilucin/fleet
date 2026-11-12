@@ -398,6 +398,39 @@ test('an idle session sleeps after keep; the next event resumes it and is delive
   assert.deepEqual(s.gh.reactions, [`repos/${REPO}/issues/comments/300/reactions`]);
 });
 
+test('a session it started is closed once its PR is merged and it is idle; a linked one is not', async () => {
+  const s = setup();
+  await s.bridge.tick();
+  const pr = s.gh.pr(10, { requested: true });
+  pr.requests.push({ id: 'R1', at: s.at(1000), actor: 'alex' });
+  s.gh.notify(10, 'review_requested');
+  await s.tick();
+  await s.tick();
+  assert.equal(s.spawned.length, 1);
+  // A session linked by hand stays when its PR closes.
+  s.sessions.push({ session_id: SID2, handle: '%9', name: 'mine', status: 'idle' });
+  s.gh.pr(11);
+  await s.bridge.link({ url: `https://github.com/${REPO}/pull/11`, pane: '%9' });
+  pr.state = 'MERGED';
+  s.gh.pr(11).state = 'CLOSED';
+  s.advance(16 * 60_000); // the linked PRs are re-read
+  s.sessions[0].status = 'busy';
+  await s.tick();
+  assert.deepEqual((await s.bridge.status()).ended.map((l) => l.endReason).sort(), ['closed', 'merged']);
+  assert.deepEqual(s.slept, []); // busy, and within the grace
+  s.idle();
+  await s.tick();
+  assert.deepEqual(s.slept, []); // still within the grace
+  s.advance(10 * 60_000);
+  await s.tick();
+  assert.deepEqual(s.slept, [SID]);
+  const st = await s.bridge.status();
+  assert.equal(st.ended.find((l) => l.session === SID).retired, true);
+  assert.equal(st.ended.find((l) => l.session === SID2).retired, false);
+  await s.tick();
+  assert.deepEqual(s.slept, [SID]); // once
+});
+
 test('link: an open PR, a live session; a second session on the same PR is refused', async () => {
   const s = setup({ spawnCfg: null });
   s.sessions.push({ session_id: SID, handle: '%1', name: 'mine', status: 'idle' }, { session_id: SID2, handle: '%2', name: 'other', status: 'idle' });
