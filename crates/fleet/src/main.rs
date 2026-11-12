@@ -161,6 +161,25 @@ enum Commands {
         target: String,
     },
 
+    /// Set a session aside until a time: it keeps running, the views move it to Snoozed and
+    /// bring it back (marked) once the time has passed. Prompting it ends the snooze
+    Snooze {
+        /// sessionId prefix, derived name, or pid
+        target: String,
+        /// How long: 30m, 4h, 1d (or a number of hours)
+        #[arg(long = "for", value_name = "SPAN", conflicts_with_all = ["until", "clear"])]
+        for_: Option<String>,
+        /// Until when: "2026-11-13 09:00" (local), an RFC 3339 time, or epoch ms
+        #[arg(long, value_name = "TIME", conflicts_with = "clear")]
+        until: Option<String>,
+        /// End the snooze (or drop the back-from-snooze mark)
+        #[arg(long)]
+        clear: bool,
+        /// `{ host, sessionId, title, cleared, snooze: { at, until } | null }`
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Close a session but keep it dormant: its agent ends (and its tmux window, or the tmux
     /// session when that was its only window), and `fleet restore <target>` resumes it later.
     /// The app calls this Deactivate, and the dormant list Inactive
@@ -1590,6 +1609,13 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
         Commands::Done { note, cancel } => commands::done(note, cancel)?,
         Commands::AskDone { target } => commands::ask_done(&target)?,
         Commands::Sleep { target, json } => commands::sleep(&target, json)?,
+        Commands::Snooze {
+            target,
+            for_,
+            until,
+            clear,
+            json,
+        } => commands::snooze(&target, for_.as_deref(), until.as_deref(), clear, json)?,
         Commands::Rename {
             target,
             name,

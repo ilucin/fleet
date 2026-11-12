@@ -44,8 +44,8 @@ import { GithubError, validLinkId as validGithubLinkId } from './github.mjs';
 
 export const API_VERSION = 1;
 
-const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|sleep|rename|autoname)$/;
-const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'sleep', 'rename', 'autoname']);
+const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|sleep|snooze|rename|autoname)$/;
+const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'sleep', 'snooze', 'rename', 'autoname']);
 
 const GROUP_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
 const MEMBER_HOST_RE = /^[^/\s]{1,128}$/;
@@ -407,6 +407,33 @@ export function createApi({
       return {
         status: 200,
         body: { ...report, ok: true, host: config.self, id: session.session_id, name: session.name ?? null, terminal },
+      };
+    }
+
+    if (action === 'snooze') {
+      // Set aside until a time (it keeps running), or `clear: true` to end the snooze / drop the
+      // back-from-snooze mark. The browser resolves "tomorrow 9:00" in its own time zone.
+      if (typeof cli?.snooze !== 'function') throw new HttpError('snooze is not available on this server', 501);
+      const clear = body.clear === true;
+      const until = Number(body.until);
+      if (!clear && (!Number.isSafeInteger(until) || until <= Date.now())) {
+        throw new HttpError('until: a future time in epoch ms (or clear: true)', 400);
+      }
+      const session = await resolveLocalSession(id);
+      if (!session.session_id || session.session_id.startsWith('pid-')) {
+        throw new HttpError('this session has no session id yet', 409);
+      }
+      let report;
+      try {
+        report = await cli.snooze({ target: session.session_id, until, clear });
+      } catch (err) {
+        if (err?.missing) throw new HttpError("this host's fleet CLI has no `snooze` command — update fleet there", 501);
+        throw new HttpError(`snooze failed: ${err?.message ?? err}`, err?.timedOut ? 504 : 502);
+      }
+      await refreshFleet({ wait: true });
+      return {
+        status: 200,
+        body: { ...report, ok: true, host: config.self, id: session.session_id, name: session.name ?? null },
       };
     }
 

@@ -22,6 +22,7 @@ pub mod repos;
 pub mod schedule;
 pub mod sleep;
 pub mod snapshot;
+pub mod snooze;
 pub mod stack;
 pub mod tasks;
 pub mod title;

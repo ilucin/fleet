@@ -5,7 +5,7 @@ import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSlack } from '@/hooks/useSlack'
 import { relTime } from '@/lib/format'
 import { DEFAULT_SELECTION, isShared, parseSelection, resolveSelection, serializeSelection, type HostSelection } from '@/lib/hosts'
-import { allSessions, findStatusFilter, keepOrder, listView, slackLinked, statusSummary, type StatusFilterId } from '@/lib/sessions'
+import { allSessions, findStatusFilter, keepOrder, listView, slackLinked, snoozedView, statusSummary, type StatusFilterId } from '@/lib/sessions'
 
 /**
  * The session list's state, shared by the mobile list screen and the desktop sidebar:
@@ -34,20 +34,23 @@ export function useSessionList(now: number) {
 
   const slackStatus = useSlack()
   const slack = useMemo(() => slackLinked(slackStatus?.enabled ? slackStatus.links : null), [slackStatus])
-  const live = useMemo(() => listView(fleet, { query, hosts: hostSet, status, slack }), [fleet, query, hostSet, status, slack])
+  // Snoozes run out on the clock, not on a poll: the minute is enough.
+  const minute = Math.floor(now / 60_000) * 60_000
+  const live = useMemo(() => listView(fleet, { query, hosts: hostSet, status, slack, now: minute }), [fleet, query, hostSet, status, slack, minute])
   // The order the list froze in (session keys); null when it follows the live order.
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null)
   const setFrozen = (on: boolean) => setFrozenOrder(on ? live.sessions.map((s) => `${s.host}/${s.session_id}`) : null)
   const view = useMemo(() => (frozenOrder ? { ...live, sessions: keepOrder(live.sessions, frozenOrder) } : live), [live, frozenOrder])
   // Counts over every host, unfiltered: which kind chips (Slack / Apps) exist, so picking a host
   // without such sessions does not drop a chip and shift the bar.
-  const fleetCounts = useMemo(() => listView(fleet, { query: '', hosts: null, status, slack }).counts, [fleet, status, slack])
+  const fleetCounts = useMemo(() => listView(fleet, { query: '', hosts: null, status, slack, now: minute }).counts, [fleet, status, slack, minute])
   const hostCounts = useMemo(() => {
     const counts = new Map<string, number>()
     for (const s of allSessions(fleet)) counts.set(s.host, (counts.get(s.host) ?? 0) + 1)
     return counts
   }, [fleet])
-  const summary = useMemo(() => statusSummary(fleet, ownHosts), [fleet, ownHosts])
+  const summary = useMemo(() => statusSummary(fleet, ownHosts, minute), [fleet, ownHosts, minute])
+  const snoozed = useMemo(() => snoozedView(fleet, { query, hosts: hostSet, now: minute }), [fleet, query, hostSet, minute])
   // Sessions waiting on each shared host: the rail's quiet hint that something happens there.
   const sharedWaiting = useMemo(() => {
     const out = new Map<string, number>()
@@ -81,6 +84,8 @@ export function useSessionList(now: number) {
     hostSet,
     sharedWaiting,
     view,
+    /** Snoozed sessions (search + host scope), soonest back first: the Snoozed section. */
+    snoozed,
     fleetCounts,
     setFrozen,
     hostCounts,

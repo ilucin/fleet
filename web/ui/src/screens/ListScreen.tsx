@@ -6,6 +6,7 @@ import { GroupedList } from '@/components/board/GroupedList'
 import { GroupsStatus } from '@/components/board/GroupsStatus'
 import { ClosedSection } from '@/components/ClosedSection'
 import { DormantSection } from '@/components/DormantSection'
+import { SnoozedSection } from '@/components/SnoozedSection'
 import { NewSessionDrawer } from '@/components/NewSessionDrawer'
 import { MemoRecordFab } from '@/components/MemoRecorder'
 import { FocusMenuItem } from '@/components/FocusToggle'
@@ -34,7 +35,7 @@ import { cn } from '@/lib/utils'
 export function ListScreen() {
   const now = useNow(1000)
   const list = useSessionList(now)
-  const { fleet, error, query, setQuery, status, setStatus, selection, setSelection, hosts, hostSet, view, summary, unreachable, note } = list
+  const { fleet, error, query, setQuery, status, setStatus, selection, setSelection, hosts, hostSet, view, snoozed, summary, unreachable, note } = list
   const [newOpen, setNewOpen] = useState(false)
   const [, navigate] = useLocation()
   const [mode, setMode] = useViewMode()
@@ -251,7 +252,8 @@ export function ListScreen() {
             <EmptyState anySessions={allSessions(fleet).length > 0} />
           ) : null}
 
-          {fleet ? <DormantSection now={now} hosts={hostSet} query={query} className="mt-6" /> : null}
+          {fleet ? <SnoozedSection sessions={snoozed} now={now} query={query} className="mt-6" /> : null}
+          {fleet ? <DormantSection now={now} hosts={hostSet} query={query} className={snoozed.length ? 'mt-4' : 'mt-6'} /> : null}
           {fleet ? <ClosedSection now={now} hosts={hostSet} query={query} className="mt-4" /> : null}
         </div>
       </main>

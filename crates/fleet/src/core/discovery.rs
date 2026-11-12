@@ -104,6 +104,9 @@ pub struct Session {
     /// It reported its work finished (`fleet done`: `{ at, note }`) and was not prompted since;
     /// `null` otherwise. Stamped by `list`; `None` inside discovery.
     pub done: Option<crate::core::done::DoneRef>,
+    /// Snoozed until a time (`fleet snooze`: `{ at, until }`), or back from it once `until` has
+    /// passed; `null` otherwise or once prompted since. Stamped by `list`; `None` inside discovery.
+    pub snooze: Option<crate::core::snooze::SnoozeRef>,
 }
 
 impl Default for Session {
@@ -138,6 +141,7 @@ impl Default for Session {
             embed: None,
             git: None,
             done: None,
+            snooze: None,
         }
     }
 }
@@ -401,6 +405,7 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             embed: pane.map(|p| p.embed.clone()).filter(|e| !e.is_empty()),
             git: None,
             done: None,
+            snooze: None,
         });
     }
     crate::core::context::apply_native_1m(out.iter_mut().filter_map(|s| s.context.as_mut()));

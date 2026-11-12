@@ -50,6 +50,7 @@ import { modelLabel, relTime, shortCwd } from '@/lib/format'
 import { harnessLabel } from '@/lib/harness'
 import { tailAnchor } from '@/lib/outbox'
 import { findSession, sessionDone, statusMeta } from '@/lib/sessions'
+import { isBack } from '@/lib/snooze'
 import { reviewHref } from '@/lib/review'
 import { stacksKnown } from '@/lib/stacks'
 import { isUndoBackspace } from '@/lib/shortcuts'
@@ -463,6 +464,7 @@ export function SessionScreen({
     onNewFromHere: session ? newFromHere : undefined,
     onReview: session?.cwd && !embedded ? () => navigate(reviewHref(host, id)) : undefined,
     stack: embedded ? null : stackMenu,
+    onSnoozed: pane ? undefined : () => (onBack ? onBack() : navigate('/', { replace: true })),
     onClosed: () => {
       // Drop it from the list now and keep stale polls from bringing it back.
       dropSession(host, id)
@@ -471,6 +473,16 @@ export function SessionScreen({
       else navigate('/', { replace: true })
     },
   }
+
+  // Back from a snooze: opening it is seeing it — the Back mark goes after a moment here.
+  const backFrom = isBack(session, now) ? session?.snooze?.until : undefined
+  useEffect(() => {
+    if (!backFrom) return
+    const t = setTimeout(() => {
+      api.snooze(host, id, { clear: true }).then(() => refreshFleet(), () => {})
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [backFrom, host, id, refreshFleet])
 
   // Close from the Done card at the end of the chat: like Close in the details panel.
   const done = gone ? null : sessionDone(session)

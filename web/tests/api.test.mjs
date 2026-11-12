@@ -39,6 +39,10 @@ function fakeHost(self, sessions) {
     calls.push(['sleep', target]),
     { sessionId: target, title: 'one', process: 'terminated', terminal: 'tmux-session-killed', dormant: { kind: 'tmux', target: 'one', slept: true }, dryRun: false }
   );
+  cli.snooze = async ({ target, until, clear }) => (
+    calls.push(['snooze', target, clear ? 'clear' : until]),
+    { sessionId: target, title: 'one', cleared: clear, snooze: clear ? null : { at: 1, until } }
+  );
   cli.rename = async ({ target, title }) => {
     calls.push(['rename', target, title]);
     if (title === 'while waiting') return { ok: false, result: 'held', held: 'waiting', title, message: `${target} is waiting on you — nothing sent (--force overrides)` };
@@ -281,6 +285,25 @@ test('sleep is POST-only, runs fleet sleep on the session id and reports the dor
   assert.equal(proxied.body.host, 'workstation');
   assert.deepEqual(remote.calls.at(-1), ['sleep', 'bbbbbbbb-0000-0000-0000-000000000002']);
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/zzzzzzzzzz/sleep`, {})).status, 404);
+});
+
+test('snooze is POST-only, takes a future until or clear, and runs fleet snooze on the session id', async (t) => {
+  const { urls, lap, remote } = await startPair(t);
+  assert.equal((await get(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/snooze`)).status, 405);
+  const until = Date.now() + 3_600_000;
+  const local = await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/snooze`, { until });
+  assert.equal(local.status, 200);
+  assert.equal(local.body.id, 'aaaaaaaa-0000-0000-0000-000000000001');
+  assert.deepEqual(local.body.snooze, { at: 1, until });
+  assert.deepEqual(lap.calls.at(-1), ['snooze', 'aaaaaaaa-0000-0000-0000-000000000001', until]);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/snooze`, { until: Date.now() - 1 })).status, 400);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/snooze`, {})).status, 400);
+  const cleared = await post(`${urls.laptop}/api/hosts/workstation/sessions/bbbbbbbb/snooze`, { clear: true });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.host, 'workstation');
+  assert.equal(cleared.body.snooze, null);
+  assert.deepEqual(remote.calls.at(-1), ['snooze', 'bbbbbbbb-0000-0000-0000-000000000002', 'clear']);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/zzzzzzzzzz/snooze`, { until })).status, 404);
 });
 
 test('autoname runs on the target host and shows up in /api/health', async (t) => {

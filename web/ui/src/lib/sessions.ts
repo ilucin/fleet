@@ -1,5 +1,6 @@
 // Session list logic: status metadata, filtering, search, sorting — pure, unit-tested.
 import type { FleetResponse, Session, SessionStatus, SlackLink } from '@/api/types'
+import { isBack, isSnoozed } from '@/lib/snooze'
 
 export type StatusKey = SessionStatus
 export interface StatusMeta {
@@ -160,7 +161,9 @@ export function setAside(s: Session, slack: ReadonlySet<string> = NO_SLACK): boo
 
 /**
  * `host` null = every host. Bots / Slack / Apps show only job / Slack-linked / embed sessions;
- * the other filters show the rest, plus those waiting on you.
+ * the other filters show the rest, plus those waiting on you. Snoozed sessions (their time still
+ * ahead of `now`) are left out — they live in Snoozed (`snoozedView`); one back from a snooze
+ * goes on top.
  */
 export function listView(
   fleet: FleetResponse | null | undefined,
@@ -169,20 +172,32 @@ export function listView(
     hosts = null,
     status = 'all',
     slack = NO_SLACK,
-  }: { query?: string; hosts?: ReadonlySet<string> | null; status?: StatusFilterId; slack?: ReadonlySet<string> },
+    now = Date.now(),
+  }: { query?: string; hosts?: ReadonlySet<string> | null; status?: StatusFilterId; slack?: ReadonlySet<string>; now?: number },
 ): ListView {
-  const matched = allSessions(fleet).filter((s) => (hosts == null || hosts.has(s.host)) && matchesSearch(s, query))
+  const matched = allSessions(fleet).filter((s) => (hosts == null || hosts.has(s.host)) && !isSnoozed(s, now) && matchesSearch(s, query))
   const visible = matched.filter((s) => !setAside(s, slack))
   const scope = (f: StatusFilter) => (SET_ASIDE.includes(f.id) ? matched : visible).filter((s) => f.match(s, slack))
   const counts = Object.fromEntries(STATUS_FILTERS.map((f) => [f.id, scope(f).length])) as Record<StatusFilterId, number>
-  return { sessions: clusterByStack(scope(findStatusFilter(status)).sort(byLastPrompt)), counts }
+  const backFirst = (a: Session, b: Session) => Number(isBack(b, now)) - Number(isBack(a, now)) || byLastPrompt(a, b)
+  return { sessions: clusterByStack(scope(findStatusFilter(status)).sort(backFirst)), counts }
 }
 
-/** Every session by status, job sessions included — the header's counters. `hosts`: only those. */
-export function statusSummary(fleet: FleetResponse | null | undefined, hosts: ReadonlySet<string> | null = null): Record<'waiting' | 'busy' | 'idle', number> {
+/** The snoozed sessions (time still ahead of `now`) the search + host scope match, soonest back first. */
+export function snoozedView(
+  fleet: FleetResponse | null | undefined,
+  { query = '', hosts = null, now = Date.now() }: { query?: string; hosts?: ReadonlySet<string> | null; now?: number },
+): Session[] {
+  return allSessions(fleet)
+    .filter((s) => (hosts == null || hosts.has(s.host)) && isSnoozed(s, now) && matchesSearch(s, query))
+    .sort((a, b) => (a.snooze?.until ?? 0) - (b.snooze?.until ?? 0))
+}
+
+/** Every session by status, job sessions included, snoozed ones left out — the header's counters. `hosts`: only those. */
+export function statusSummary(fleet: FleetResponse | null | undefined, hosts: ReadonlySet<string> | null = null, now = Date.now()): Record<'waiting' | 'busy' | 'idle', number> {
   const out = { waiting: 0, busy: 0, idle: 0 }
   for (const s of allSessions(fleet)) {
-    if (hosts && !hosts.has(s.host)) continue
+    if ((hosts && !hosts.has(s.host)) || isSnoozed(s, now)) continue
     const k = statusMeta(s.status).key
     if (k === 'waiting' || k === 'busy' || k === 'idle') out[k] += 1
   }

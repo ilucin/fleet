@@ -68,6 +68,7 @@ import type {
   SlackSpawn,
   SlackStatus,
   SleepResponse,
+  SnoozeResponse,
   SpawnDirEntry,
   SpawnDirsResponse,
   SpawnRequest,
@@ -225,6 +226,9 @@ export const api = {
     request<KillResponse>(sessionPath(host, id, 'kill'), { ...o, method: 'POST', body: {} }),
   sleep: (host: string, id: string, o: Opts = {}) =>
     request<SleepResponse>(sessionPath(host, id, 'sleep'), { ...o, method: 'POST', body: {} }),
+  /** Snooze until `until` (epoch ms), or `{ clear: true }` to end it / drop the back-from-snooze mark. */
+  snooze: (host: string, id: string, body: { until: number } | { clear: true }, o: Opts = {}) =>
+    request<SnoozeResponse>(sessionPath(host, id, 'snooze'), { ...o, method: 'POST', body }),
 
   spawn: (host: string, body: SpawnRequest, o: Opts = {}) =>
     request<SpawnResponse>(`${hostPath(host)}/spawn`, { ...o, method: 'POST', body }),

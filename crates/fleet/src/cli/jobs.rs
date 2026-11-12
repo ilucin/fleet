@@ -685,6 +685,11 @@ pub fn tick(quiet: bool) -> Result<()> {
             log(quiet, &line);
         }
     }
+    if !crate::core::snooze::load().snoozes.is_empty() {
+        for line in crate::core::snooze::prune(&rows_now(&mut rows))? {
+            log(quiet, &line);
+        }
+    }
     failed += crate::cli::schedule::tick(quiet)?;
     if failed > 0 {
         return Err(Error::exit(

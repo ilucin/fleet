@@ -99,6 +99,12 @@ export interface Session {
    * prompted since; null / absent = not done. Older CLIs omit it.
    */
   done?: SessionDone | null
+  /**
+   * `fleet snooze` (`fleet list --json` → `snooze`): set aside until `until` — Snoozed while it is
+   * ahead, back in the list (marked) once it has passed; null / absent once prompted or cleared.
+   * Older CLIs omit it.
+   */
+  snooze?: SessionSnooze | null
   /** The host's voice operator (web/lib/operator.mjs): kept out of session lists. Older servers omit it. */
   operator?: boolean
 }
@@ -107,6 +113,12 @@ export interface Session {
 export interface SessionDone {
   at: number
   note?: string | null
+}
+
+/** `snooze` on a session row: when it was snoozed and until when (epoch ms). */
+export interface SessionSnooze {
+  at: number
+  until: number
 }
 
 /** `origin` on a session row: the job and the run id (`<job>/<run>` in its tmux environment). */
@@ -641,6 +653,17 @@ export interface SleepResponse {
   process: string
   terminal: string
   dormant?: DormantView | null
+}
+
+/** POST /api/hosts/:host/sessions/:id/snooze → `fleet snooze <id> (--until <ms> | --clear) --json`. */
+export interface SnoozeResponse {
+  ok: true
+  host: string
+  id: string
+  name?: string | null
+  title?: string
+  cleared: boolean
+  snooze: SessionSnooze | null
 }
 
 /** POST /api/hosts/:host/sessions/:id/autoname → `fleet name <id> --apply --refresh` (409 when held). */

@@ -192,6 +192,8 @@ pub fn list_rows() -> Vec<Session> {
     crate::core::stack::stamp_stacks(&mut rows);
     // Which sessions reported themselves done (`fleet done`) and were not prompted since.
     crate::core::done::stamp_done(&mut rows);
+    // Which sessions are snoozed (`fleet snooze`), or back from a snooze and not prompted since.
+    crate::core::snooze::stamp_snoozes(&mut rows);
     // The branch + GitHub repo of each row's checkout (views link PRs by it, on any host).
     crate::core::git::stamp_git(&mut rows);
     // What runs now, for session recovery after a reboot (core::snapshot). Never fails the
@@ -294,6 +296,67 @@ pub fn ask_done(target: &str) -> Result<()> {
         "asked {} to report itself done when finished",
         s.headline().bold()
     );
+    Ok(())
+}
+
+/// `fleet snooze <target>`: set a session aside until a time, or `--clear` its snooze.
+pub fn snooze(
+    target: &str,
+    for_: Option<&str>,
+    until: Option<&str>,
+    clear: bool,
+    json: bool,
+) -> Result<()> {
+    use crate::core::snooze;
+    let s = discovery::resolve(target).map_err(Error::Other)?;
+    let title = s.headline();
+    let sid = s.session_id.clone().unwrap_or_default();
+    if clear {
+        let had = snooze::clear(&sid)?;
+        if json {
+            let v = serde_json::json!({ "host": host_label(), "sessionId": sid, "title": title, "cleared": had, "snooze": null });
+            println!("{}", serde_json::to_string_pretty(&v)?);
+        } else if had {
+            println!("{}: no longer snoozed", title.bold());
+        } else {
+            println!("{}: was not snoozed", title.bold());
+        }
+        return Ok(());
+    }
+    let now = chrono::Utc::now().timestamp_millis();
+    let until = match (for_, until) {
+        (Some(f), None) => now + crate::core::tmux::parse_span(f).map_err(Error::Other)? * 1000,
+        (None, Some(u)) => snooze::parse_until(u).map_err(Error::Other)?,
+        _ => {
+            return Err(Error::Other(
+                "say how long: --for 4h, or --until \"2026-11-13 09:00\" (or --clear)".into(),
+            ));
+        }
+    };
+    let z = snooze::set(&s, until, now)?;
+    if json {
+        let v = serde_json::json!({
+            "host": host_label(),
+            "sessionId": z.session_id,
+            "title": title,
+            "cleared": false,
+            "snooze": snooze::SnoozeRef { at: z.at, until: z.until },
+        });
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        let when = chrono::DateTime::from_timestamp_millis(z.until)
+            .map(|t| {
+                t.with_timezone(&chrono::Local)
+                    .format("%a %Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        println!(
+            "{} snoozed until {when} — it keeps running (fleet snooze {} --clear to undo)",
+            title.bold(),
+            crate::core::tools::shq_min(&z.session_id)
+        );
+    }
     Ok(())
 }
 

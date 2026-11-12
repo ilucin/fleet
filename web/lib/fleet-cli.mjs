@@ -126,6 +126,27 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return parseObject(stdout, 'fleet sleep');
   }
 
+  /**
+   * Snooze one session until `until` (epoch ms), or `clear` its snooze:
+   * `fleet --local snooze <target> (--until <ms> | --clear) --json`. Resolves
+   * { sessionId, title, cleared, snooze: { at, until } | null }; throws FleetCliError
+   * (`missing` when the binary predates `snooze`).
+   */
+  async function snooze({ target, until, clear = false, timeoutMs: t = 15 * 1000 } = {}) {
+    const argv = ['--local', 'snooze', String(target), ...(clear ? ['--clear'] : ['--until', String(until)]), '--json'];
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, argv, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, 'fleet snooze', t);
+      const why = String(err?.stderr ?? '').replace(/^Error:\s*/, '').trim();
+      if (why && !e.timedOut) e.message = why.split('\n')[0];
+      e.missing = !e.timedOut && /unrecognized subcommand|invalid subcommand/i.test(why);
+      throw e;
+    }
+    return parseObject(stdout, 'fleet snooze');
+  }
+
   function tryObject(text) {
     try {
       const v = JSON.parse(String(text ?? '').trim());
@@ -657,5 +678,6 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     stackSync,
     restore,
     sleep,
+    snooze,
   };
 }

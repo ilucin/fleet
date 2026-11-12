@@ -3,6 +3,7 @@ import { NotebookTextIcon } from 'lucide-react'
 
 import { ClosedSection } from '@/components/ClosedSection'
 import { DormantSection } from '@/components/DormantSection'
+import { SnoozedSection } from '@/components/SnoozedSection'
 import { SessionListSkeleton } from '@/components/SessionListSkeleton'
 import type { Session } from '@/api/types'
 import { SessionRow } from '@/components/SessionRow'
@@ -23,9 +24,9 @@ export interface SidebarProps {
   selectedKey: string | null
 }
 
-/** Desktop left column under the top bar (TopBar): the session list, dormant and recently closed. */
+/** Desktop left column under the top bar (TopBar): the session list, snoozed, dormant and recently closed. */
 export function Sidebar({ list, now, cursorKey, selectedKey }: SidebarProps) {
-  const { fleet, error, query, hostSet, view, unreachable, setFrozen } = list
+  const { fleet, error, query, hostSet, view, snoozed, unreachable, setFrozen } = list
   const listRef = useRef<HTMLDivElement>(null)
   useFlip(listRef, view.sessions.map(sessionKey).join(' '))
 
@@ -80,7 +81,8 @@ export function Sidebar({ list, now, cursorKey, selectedKey }: SidebarProps) {
             {allSessions(fleet).length > 0 ? 'Nothing matches.' : unreachable.length ? 'No sessions from the reachable hosts.' : 'No Claude sessions running.'}
           </div>
         )}
-        {fleet ? <DormantSection now={now} hosts={hostSet} query={query} desktop className="mt-4" /> : null}
+        {fleet ? <SnoozedSection sessions={snoozed} now={now} query={query} selectedKey={selectedKey} className="mt-4" /> : null}
+        {fleet ? <DormantSection now={now} hosts={hostSet} query={query} desktop className={snoozed.length ? 'mt-3' : 'mt-4'} /> : null}
         {fleet ? <ClosedSection now={now} hosts={hostSet} query={query} desktop className="mt-3" /> : null}
       </div>
 

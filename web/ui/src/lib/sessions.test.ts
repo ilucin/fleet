@@ -24,6 +24,7 @@ import {
   withoutClosed,
   withoutSession,
   closedKey,
+  snoozedView,
 } from './sessions'
 
 const s = (over: Partial<Session>): Session => ({ host: 'laptop', session_id: 'id', status: 'idle', ...over })
@@ -319,4 +320,28 @@ test('sessionDone: the mark counts only while the session sits idle on it', () =
   expect(sessionDone({ status: 'idle', done: null })).toBeNull()
   expect(sessionDone({ status: 'idle' })).toBeNull()
   expect(sessionDone(null)).toBeNull()
+})
+
+test('snoozed sessions leave the list (and the counters) for Snoozed; one back from a snooze goes on top', () => {
+  const now = 10_000
+  const fleet: FleetResponse = {
+    self: 'laptop',
+    hosts: [
+      {
+        name: 'laptop',
+        ok: true,
+        sessions: [
+          s({ session_id: 'a', prompted_at: 5_000 }),
+          s({ session_id: 'z1', prompted_at: 9_000, snooze: { at: 1, until: 30_000 } }),
+          s({ session_id: 'z2', status: 'waiting', snooze: { at: 1, until: 20_000 } }),
+          s({ session_id: 'back', prompted_at: 1, snooze: { at: 1, until: 9_000 } }),
+        ],
+      },
+    ],
+  }
+  expect(listView(fleet, { now }).sessions.map((x) => x.session_id)).toEqual(['back', 'a'])
+  expect(snoozedView(fleet, { now }).map((x) => x.session_id)).toEqual(['z2', 'z1'])
+  expect(statusSummary(fleet, null, now)).toEqual({ waiting: 0, busy: 0, idle: 2 })
+  // once its time has passed, it is back in the list
+  expect(listView(fleet, { now: 25_000 }).sessions.map((x) => x.session_id)).toEqual(['back', 'z2', 'a'])
 })

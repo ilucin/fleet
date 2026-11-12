@@ -87,7 +87,7 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | area | commands |
 | --- | --- |
 | Claude sessions | `list` · `peek` · `send` · `rename` · `name` · `spawn` · `handoff` · `brief` · `stack` · `group` · `watch` (default) · `skill` |
-| finishing | `done` — an agent reports its work finished (the UI shows it Done; you close it) · `ask-done` · `sleep` — close a session but keep it dormant (the app's Deactivate) |
+| finishing | `done` — an agent reports its work finished (the UI shows it Done; you close it) · `ask-done` · `snooze` — set a session aside until a time (it keeps running; back in the list, marked, then) · `sleep` — close a session but keep it dormant (the app's Deactivate) |
 | Slack | `slack link <thread-url \| @person> --for 2h` · `slack` · `slack unlink` · `slack reply` — a session talks, for a while, with the people in one Slack thread, channel or DM; with `slack.spawn`, mentioning the app in a thread opens a new session there |
 | tmux sessions | `tmux list\|enter\|last\|new\|kill\|rename\|stale` (alias `t`), shortcuts `enter` · `last` · `new` |
 | after a reboot | `restore` — dormant sessions (the app's Inactive): list, bring back (same tmux layout, `claude --resume`), forget; `--closed` for recently closed ones |

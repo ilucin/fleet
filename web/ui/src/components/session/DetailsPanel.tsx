@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  AlarmClockIcon,
   FileDiffIcon,
   GitForkIcon,
   LayersIcon,
@@ -17,14 +18,17 @@ import type { Session } from '@/api/types'
 import { BeadsSection } from '@/components/session/BeadsSection'
 import { BriefSection, type BriefSectionProps } from '@/components/session/BriefSection'
 import { SlackLinkSection } from '@/components/SlackLink'
+import { SnoozePicker } from '@/components/session/SnoozePicker'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { useDormant } from '@/hooks/useDormant'
+import { useNow } from '@/hooks/useNow'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { canAttachInApp, copyWithToast, sessionAttachCommand, sessionAttachLink } from '@/lib/clipboard'
 import { ctxLevel, ctxSummary, shortCwd } from '@/lib/format'
 import { harnessLabel } from '@/lib/harness'
 import { CTX_TEXT } from '@/lib/styles'
+import { isSnoozed, snoozeTime } from '@/lib/snooze'
 import { cn } from '@/lib/utils'
 
 export interface DetailsPanelProps {
@@ -35,6 +39,8 @@ export interface DetailsPanelProps {
   session: Session | null
   /** Called after a successful close (navigate away). */
   onClosed: () => void
+  /** Called after the session was snoozed (mobile: back to the list, where it left for Snoozed). */
+  onSnoozed?: () => void
   /** The brief at the top of the panel. */
   brief: Omit<BriefSectionProps, 'desktop' | 'cancelEditRef'>
   /** "New session from here…": the form with Hand off / Sibling (absent: no session row yet). */
@@ -165,7 +171,12 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
     }
   }
 
+  // Snooze: the clock button opens the picker under the header (presets + custom time).
+  const [snoozeOpen, setSnoozeOpen] = useState(false)
+
   const s = p.session
+  const now = useNow(30_000)
+  const snoozed = isSnoozed(s, now)
   const { title } = useSessionTitle(s, `${p.host}/${p.id}`)
   const attachCmd = sessionAttachCommand(s)
   const attachLink = canAttachInApp() ? sessionAttachLink(s) : null
@@ -202,6 +213,20 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              {s && !armed && !sleeping ? (
+                <Button
+                  variant={snoozeOpen || snoozed ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label="Snooze session"
+                  aria-expanded={snoozeOpen}
+                  title={snoozed && s.snooze ? `Snoozed until ${snoozeTime(s.snooze.until, now)} — change or unsnooze` : 'Snooze: set it aside until a time (it keeps running)'}
+                  disabled={closing}
+                  onClick={() => setSnoozeOpen((o) => !o)}
+                  className={cn('size-8 shrink-0 rounded-lg', snoozed ? 'text-primary' : 'text-muted-foreground')}
+                >
+                  <AlarmClockIcon />
+                </Button>
+              ) : null}
               {armed || sleeping ? (
                 <Button
                   variant="outline"
@@ -233,6 +258,23 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
               </Button>
             </div>
           </Header>
+
+          {snoozeOpen && s ? (
+            <div className="pb-2">
+              <SnoozePicker
+                host={p.host}
+                id={p.id}
+                session={s}
+                onDone={(didSnooze) => {
+                  setSnoozeOpen(false)
+                  if (didSnooze && p.onSnoozed) {
+                    onOpenChange(false)
+                    p.onSnoozed()
+                  }
+                }}
+              />
+            </div>
+          ) : null}
 
           {/* Actions first: Review, New (from here), Link (to a stack), Attach. Standard small outline buttons, left-aligned; they wrap when the pane is narrow. */}
           {p.onReview || p.onNewFromHere || p.stack || attachCmd ? (

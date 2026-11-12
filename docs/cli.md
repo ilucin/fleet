@@ -45,6 +45,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet peek <target> [--lines N]` | what the session's terminal shows now (default 40 lines) |
 | `fleet send <target> <text>` | type text into the session and press Enter |
 | `fleet done [--note <text>] [--cancel]` | run by an agent **inside its own session** (by `$TMUX_PANE`; a Codex session by `$CODEX_THREAD_ID`, since Codex runs commands through a shared daemon whose `$TMUX_PANE` is another pane's; never sent over ssh): its work is finished and nothing waits on the user. Fleet shows the session as done (nothing closes it) — see [Ask done](#ask-done). `--cancel` takes the mark back |
+| `fleet snooze <target> (--for <30m\|4h\|1d> \| --until <time> \| --clear) [--json]` | set a session aside until a time — see [Snooze](#snooze). It keeps running; the views move it to **Snoozed** and bring it back, marked, once the time has passed. `--until`: `"2026-11-13 09:00"` (local time), an RFC 3339 time, or epoch ms. `--clear` ends the snooze (or drops the back mark). `--json`: `{ host, sessionId, title, cleared, snooze: { at, until } \| null }` |
 | `fleet sleep <target> [--json]` (alias `deactivate`) | close a session but keep it [dormant](#session-recovery) (Deactivate in the app, which lists dormant sessions as **Inactive**): SIGTERM (then SIGKILL) its agent, kill its tmux window (or its tmux session when that was the only window; an iTerm tab is left — the app closes it), and put it in the dormant list, marked `slept`, instead of recently closed. `fleet restore <target>` (or `enter`, or Resume in the app) brings it back with `--resume`; `--all` and `restore.onBoot` leave it be. `--json`: `{ host, sessionId, title, process, terminal, dormant: DormantView, dryRun }` |
 | `fleet ask-done <target>` | ask a tmux session to report itself done once finished: types the [instruction](#ask-done) into it. A session waiting on a prompt is refused |
 | `fleet rename <target> <title> [--no-tmux-sync] [--force] [--json]` | rename the session's one title: Claude's `/rename` (the source of truth), then its tmux session follows as a slug of it (`Fix Login` → `fix-login`, `-2` on a collision) when the tmux session is that Claude session's own (one window, one pane). A session **waiting on a prompt** is held (exit 1; `--json`: exit 3) — typed keys would be its answer; busy sessions are fine (Claude runs `/rename` mid-turn without disturbing the turn). Codex gets `/rename`, pi `/name`; a busy Codex / pi session is held too (`held: "busy"`) — they would queue the text as a message. `--force` overrides the hold. `--json` prints `{ ok, result: renamed\|sent\|held, session_id, pid, host, from, title, held, tmux: { renamed, from, to, note }, message }` |
@@ -784,6 +785,21 @@ bot's `schedule` is `""`, `scheduleText` the trigger in words, `nextRun` null. A
 `subject: { kind: "branch", repo, branch, sha, url, goneAt }` and an id `YYYYMMDD-HHMMSS-<branch>`.
 The state is `github` in the bot's state file (`<bot>.json`, below). Tests poll a fixture instead
 of GitHub: `FLEET_GH_WATCH_FIXTURE` = a JSON file `{ "<owner/repo>": [{ "name", "sha" }] }`.
+
+## Snooze
+
+Set a session aside until a time, like snoozing a mail: `fleet snooze <target> --for 4h` (or
+`--until "2026-11-13 09:00"`; Snooze in the app's session details offers 1 hour, 4 hours, this
+evening, tomorrow morning, 1 day, next week and a custom date and time). Nothing stops: the
+session keeps running. `fleet list` stamps `snooze: { at, until }` on the row; while `until` is
+ahead the views leave it out of the session list, the board and the header counters and show it
+under **Snoozed** (beside Inactive and Closed) with the time it comes back. Once `until` has
+passed it is back in the list, on top, with a **Back** chip, until the user opens it (the app
+then clears it) or prompts it. A prompt also ends a snooze early, and `--clear` ends it by hand.
+`fleet bots tick` drops the snoozes of gone or re-prompted sessions.
+
+Snoozes: `${XDG_STATE_HOME:-~/.local/state}/fleet/snooze.json` (`FLEET_SNOOZE_STATE`),
+`{ "snoozes": [{ sessionId, tmuxSession, at, until }] }`, on the session's host.
 
 ## Ask done
 
