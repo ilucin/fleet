@@ -37,9 +37,11 @@ The setup it is built for:
   (`ssh <host> fleet <same args>`).
 - **Web** — every machine runs the same server. It serves its own sessions and merges in its
   peers', so any one URL shows the whole fleet. A keyboard-first desktop UI and a phone PWA:
-  session list and board, chat with a prompt queue, briefs, a live diff reviewer, spawning now
+  session list and board, chat with a prompt queue, briefs, a live diff reviewer (side
+  questions, PlainLang specs read as specs, PR review with or without a session), spawning now
   or later — plus the modules around the sessions: an Inbox of everything waiting on you,
-  Productive tasks, pull requests, Slack links, bots, a voice operator, voice memos and notes.
+  Productive tasks, pull requests, Slack and GitHub links, bots, a voice operator, voice memos and
+  notes. Your own machines and shared sheds sit side by side in one host rail.
 - **Config** — one small JSON file per machine (`~/.config/fleet/config.json`), written by
   `fleet init`, read by both the CLI and the web server.
 
@@ -91,7 +93,8 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | after a reboot | `restore` — dormant sessions (the app's Inactive): list, bring back (same tmux layout, `claude --resume`), forget; `--closed` for recently closed ones |
 | hosts | `exec` · `ssh` · `doctor` · `usage` (Claude and ChatGPT plan limits) · `harness` · `gh-identity` (act on GitHub as a GitHub App) |
 | setup | `init` · `config path\|show\|edit\|set` · `install --host <name>` |
-| pull requests | `prs` — the GitHub PRs that need you (unseen @mentions, yours, waiting on your review, waiting on their author), through `gh`, with their local worktrees |
+| pull requests | `prs` — the GitHub PRs that need you (unseen @mentions, yours, waiting on your review, waiting on their author), through `gh`, with their local worktrees · `pr checkout\|spawn` — a PR in a worktree, a session on it |
+| GitHub links | `github` — a session follows one pull request: review requests, replies in its review threads and mentions are typed into it; a review request can start one |
 | Productive tasks | `tasks` · `task show\|status\|spawn\|schedule` — your open Productive tasks (due soon, in progress, to do), moved between statuses, a session started on one now or on its start date |
 | later | `schedule add --at <when> \| --task <task>` · `schedule` · `schedule cancel` — one-off sessions started later on this host |
 | git repos | `repos` · `repos sync` · `repos install-service` — fetch + fast-forward every repo under `~/Code`, on a timer |
@@ -127,7 +130,9 @@ fleet tmux stale                        # idle shells nothing is using
 ## Security
 
 There is **no authentication** in the web app. It is meant to be reachable only over your
-tailnet: bind it to the Tailscale interface (or firewall it) and never expose it publicly. Anyone
+tailnet: bind it to the Tailscale interface (or firewall it) and never expose it publicly. A
+Host/Origin guard refuses DNS rebinding and cross-site requests from pages open in your browser
+([docs/architecture.md](docs/architecture.md)), but it is not a login. Anyone
 who can reach the port can type into your Claude sessions (and read the notes under `web.notes.root`, when set). See
 [docs/setup.md#security](docs/setup.md#security).
 

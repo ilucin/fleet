@@ -255,7 +255,11 @@ changes), builds the CLI into `~/.local/bin/fleet`, runs `fleet web build`, rest
 - **The web app has no authentication.** Anyone who reaches the port can read your sessions and
   type into them. Keep it on the tailnet: set `web.bind` to the machine's Tailscale IP (or keep
   `0.0.0.0` behind a firewall that only admits the tailnet), and never port-forward it or publish
-  it with Tailscale Funnel.
+  it with Tailscale Funnel. Bound to the tailnet IP, the server also listens on loopback, so local
+  tools keep working.
+- A Host/Origin guard returns 403 to requests that name the server by an unknown host (DNS
+  rebinding) or come from another site's page in your browser. Behind a reverse proxy, add its
+  name to `web.allowedHosts`. It complements the tailnet; it is not authentication.
 - Use Tailscale ACLs if your tailnet has other users or devices you don't fully trust.
 - ssh with keys only; consider `PasswordAuthentication no` on the workstation once keys work.
 - The workstation holds your Claude credentials and whatever your agents can reach — treat it
