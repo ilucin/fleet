@@ -145,7 +145,7 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
     <div class="cols c3">
       <div class="cell"><span class="k">web UI · desktop</span><p>Keyboard-first od 1024 px naviše: gornja traka s modulima, lista, chat, details panel, board.</p></div>
       <div class="cell"><span class="k">PWA · mobitel</span><p>Add to Home Screen preko Tailscalea. Swipe geste, quick replyji, mic za operatora.</p></div>
-      <div class="cell"><span class="k">Fleet.app</span><p>Tauri ljuska oko istog UI-ja: Dock, ⌘-Tab, pravi meniji, <kbd>⌘N</kbd>, Attach u iTerm. Ista ljuska pakira Brain.app i Fin.app.</p></div>
+      <div class="cell"><span class="k">Fleet.app</span><p>Tauri ljuska oko istog UI-ja: Dock, ⌘-Tab, pravi meniji, <kbd>⌘N</kbd>, Attach u iTerm. Ista ljuska pakira i druge web appove.</p></div>
       <div class="cell"><span class="k">fleet · CLI</span><p><code>list</code>, <code>peek</code>, <code>send</code>, <code>spawn</code>, <code>handoff</code>… s <code>-H &lt;host&gt;</code> na bilo kojoj mašini.</p></div>
       <div class="cell"><span class="k">fleet watch · TUI</span><p>Živi dashboard u terminalu; javi kad sesija završi ili zapne.</p></div>
       <div class="cell"><span class="k">fleet mcp · skill</span><p>Cijeli CLI kao MCP alati, pa agenti sami upravljaju flotom.</p></div>
@@ -257,13 +257,13 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
 </section>
 
 <section class="row" id="review">
-  <div class="label">06 · Diff review<b>Files changed, uživo</b><code>#/review</code></div>
+  <div class="label">06 · Diff review<b>Files changed, užsam</b><code>#/review</code></div>
   <div class="body">
     <h2>PR review sa sesijom, dok još kodira</h2>
     <p class="prose">GitHubov „Files changed”, ali nad <b>radnim stablom sesije</b>, ne nad PR-om. Diff gleda sve checkoute u kojima sesija radi: njen cwd i svaki worktree u kojem editira datoteke. Sesija iz meta repoa koja vodi tri PR-a kroz tri worktreeja vidi sva tri, svaki prema svom default branchu, s necommitanim i novim datotekama. Otvara se diff gumbom u headeru sesije ili s <kbd>⌘K</kbd> → Review changes; <kbd>Esc</kbd> vraća u sesiju.</p>
     <figure><img src="img/d-review.webp" alt="Diff reviewer: stablo datoteka po worktreeju, unified diff s threadom i Claudeovim odgovorom, sesija desno" width="1600" height="1000" loading="lazy"><figcaption>Lijevo datoteke po worktreeju, u sredini diff s threadom, desno ista sesija s chatom i composerom</figcaption></figure>
     <ul class="prose">
-      <li><b>Uživo:</b> diff se osvježava svake 2 s dok agent radi; datoteka koju je upravo promijenio dobije obrub i istakne se u stablu.</li>
+      <li><b>Užsam:</b> diff se osvježava svake 2 s dok agent radi; datoteka koju je upravo promijenio dobije obrub i istakne se u stablu.</li>
       <li><b>Viewed</b> po datoteci, kao na GitHubu, i sam se odznači kad se datoteka ponovno promijeni. Unified ili split, collapse all.</li>
       <li>Diff ne dira repo: radno stablo snimi kroz privremenu kopiju indexa, bez refova i bez stashanja.</li>
       <li><b>Filteri</b> ispod headera: Specs, Docs, Code, Tests, svaki s brojem datoteka. Po defaultu su upaljeni specovi i kod; izbor se pamti.</li>
@@ -285,7 +285,7 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
       <figure class="phone"><img src="img/m-review.webp" alt="Mobitel: diff s threadom" width="640" height="1385" loading="lazy"><figcaption>Na mobitelu sam diff, s istim threadovima</figcaption></figure>
     </div>
     <h3>Pitanje sa strane</h3>
-    <p class="prose">Označi kod i klikni <b>Ask</b> (ili „Ask on the side” u composeru komentara): pitanje ide forku sesije (<code>claude -p --fork-session</code>) koji zna cijeli razgovor, ali samo čita. Ništa se ne utipka u sesiju i ništa ne ostaje u njenom transcriptu. Odgovor stiže uživo u panel <b>Side questions</b> ispod diffa; zatvoriš ga i nestane.</p>
+    <p class="prose">Označi kod i klikni <b>Ask</b> (ili „Ask on the side” u composeru komentara): pitanje ide forku sesije (<code>claude -p --fork-session</code>) koji zna cijeli razgovor, ali samo čita. Ništa se ne utipka u sesiju i ništa ne ostaje u njenom transcriptu. Odgovor stiže užsam u panel <b>Side questions</b> ispod diffa; zatvoriš ga i nestane.</p>
     <figure><img src="img/d-review-ask.webp" alt="Side questions panel ispod diffa: pitanje o linijama 23–25 i odgovor" width="1600" height="1000" loading="lazy"><figcaption>„Why BigInt here?” Odgovor iz forka, sesija desno radi dalje kao da se ništa nije dogodilo</figcaption></figure>
     <h3>PR review bez sesije</h3>
     <p class="prose">Na Pull requests ekranu <b>Review</b> otvara isti reviewer nad tuđim PR-om, bez sesije i bez worktreeja: clone na hostu dohvati head i base PR-a u svoje refove (checkout i branchevi ostaju kakvi jesu) i diffa ih od merge-basea. Komentari su <b>bilješke</b> u Fleetu; svaku možeš <b>Post to GitHub</b> kao review komentar na tim linijama, a <b>Hand to a session</b> pokrene sesiju na worktreeju PR-a sa svim otvorenim bilješkama kao prvim promptom. Ask radi i ovdje.</p>
@@ -416,7 +416,7 @@ fleet task schedule 2090 --time 08:00  # sesija na dan početka</code></pre>
   <div class="body">
     <h2>Sesija koja neko vrijeme razgovara u Slacku</h2>
     <p class="prose">Sesiju povežeš s jednim Slack threadom, kanalom ili DM-om s osobom (<code>@ime</code>), na određeno vrijeme (30 min do tjedan dana, ili bez kraja) i s uputom što smije. Ono što ljudi tamo napišu ulazi u sesiju kad je slobodna, s imenom autora, a ona odgovara s <code>fleet slack reply</code>. Po defaultu se budi samo kad je netko spomene, piše joj u DM ili u threadu u kojem je već pisala (a tada sama procijeni je li poruka za nju); <i>proactive</i> mod vidi sve i javi se kad treba.</p>
-    <figure><img src="img/d-slack.webp" alt="Sesija povezana s #billing threadom: poruka iz Slacka i odgovor, Details → Slack s Unlink" width="1600" height="1000" loading="lazy"><figcaption>Marta pita u #billing, sesija provjeri PR i odgovori u threadu; Details → Slack: thread, koliko je ostalo, Unlink</figcaption></figure>
+    <figure><img src="img/d-slack.webp" alt="Sesija povezana s #billing threadom: poruka iz Slacka i odgovor, Details → Slack s Unlink" width="1600" height="1000" loading="lazy"><figcaption>Alex pita u #billing, sesija provjeri PR i odgovori u threadu; Details → Slack: thread, koliko je ostalo, Unlink</figcaption></figure>
     <div class="cols c2">
       <div class="cell"><span class="k">što Fleet jamči</span><p>Samo taj razgovor, samo do isteka, samo povezana sesija smije odgovoriti; tokeni su samo na hostu koji vrti bridge.</p></div>
       <div class="cell"><span class="k">kako se poveže</span><p>Details → <b>Link to Slack</b>, New session → Slack, ili sesija sama kad je zamoliš („linkaj se na ovaj thread”). Istekli link se vraća s <b>Link again</b>.</p></div>
@@ -477,7 +477,7 @@ fleet task schedule 2090 --time 08:00  # sesija na dan početka</code></pre>
       <figure><img src="img/d-scratch.webp" alt="Plutajući scratchpad preko chata" width="1600" height="1000" loading="lazy"><figcaption>Scratchpad: plutajući tekst koji se sam sprema; app ispod ostaje upotrebljiv</figcaption></figure>
       <div class="prose">
         <h3 style="margin-top:0">Fleet.app i ostali appovi</h3>
-        <p>Isti UI kao macOS app (Tauri 2, system WebKit, ~10 MB). Pravi meniji, <kbd>⌘N</kbd> kao <i>File → New Session</i>, nativni title bar, Attach otvara iTerm tab s <code>fleet -H &lt;host&gt; enter</code>, a gumb hosta otvara tmux na njemu. Ista ljuska kroz <b>profile</b> pakira i druge web appove (Brain.app, Fin.app). Ti appovi preko <b>embed viewa</b> (<code>#/embed</code>) uokvire sesije jednog direktorija kao svoj chat panel; takve sesije idu u filter Apps.</p>
+        <p>Isti UI kao macOS app (Tauri 2, system WebKit, ~10 MB). Pravi meniji, <kbd>⌘N</kbd> kao <i>File → New Session</i>, nativni title bar, Attach otvara iTerm tab s <code>fleet -H &lt;host&gt; enter</code>, a gumb hosta otvara tmux na njemu. Ista ljuska kroz <b>profile</b> pakira i druge web appove. Ti appovi preko <b>embed viewa</b> (<code>#/embed</code>) uokvire sesije jednog direktorija kao svoj chat panel; takve sesije idu u filter Apps.</p>
         <p><b>Focus</b> u gornjoj traci pokreće <code>focus</code> na odabranom hostu: Do Not Disturb i gašenje appova koji ometaju.</p>
       </div>
     </div>
