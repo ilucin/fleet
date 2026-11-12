@@ -720,6 +720,9 @@ fn channel_of(url: &str) -> Option<String> {
 /// `pull: true`: bring the git checkout `dir` is in up to date — `fleet repos sync` on that one
 /// repo: fetch, then a fast-forward only (and the default branch when it is checked out
 /// nowhere). Never stashes, resets or merges; what can't fast-forward is a warning.
+/// How long a bot's `pull` may fetch before the run starts without it.
+const PULL_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 pub fn pull_dir(dir: &Path) -> Pull {
     let top = std::process::Command::new("git")
         .arg("-C")
@@ -740,11 +743,16 @@ pub fn pull_dir(dir: &Path) -> Pull {
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
-    let r = crate::core::repos::sync_one(&crate::core::repos::Repo {
-        name,
-        path: top,
-        every: 0,
-    });
+    // The tick waits on this, and every other bot with it: a fetch that hangs (it did, for 8
+    // minutes on a shed) costs this run its pull, not the whole tick.
+    let r = crate::core::repos::sync_one_within(
+        &crate::core::repos::Repo {
+            name,
+            path: top,
+            every: 0,
+        },
+        PULL_FETCH_TIMEOUT,
+    );
     use crate::core::repos::Outcome;
     let warning = match r.outcome {
         Outcome::Updated | Outcome::Current | Outcome::Ahead => None,

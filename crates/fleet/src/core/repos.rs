@@ -417,6 +417,11 @@ pub struct DefaultBranch {
 
 /// Fetch one repo and fast-forward what can be.
 pub fn sync_one(repo: &Repo) -> SyncResult {
+    sync_one_within(repo, FETCH_TIMEOUT)
+}
+
+/// [`sync_one`] with its own limit on the fetch — a caller that others wait on keeps it short.
+pub fn sync_one_within(repo: &Repo, fetch_timeout: Duration) -> SyncResult {
     let mut r = SyncResult {
         name: repo.name.clone(),
         path: tools::tildify(&repo.path.display().to_string()),
@@ -433,7 +438,7 @@ pub fn sync_one(repo: &Repo) -> SyncResult {
     }
     match output_with_timeout(
         git_cmd(dir, &["fetch", "--all", "--prune", "--quiet"]),
-        FETCH_TIMEOUT,
+        fetch_timeout,
     ) {
         Ok(o) if o.status.success() => {}
         Ok(o) => {
