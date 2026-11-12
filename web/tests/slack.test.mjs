@@ -459,6 +459,23 @@ test('reply: posts in the thread, only for the linked session, only while linked
   assert.match(fx.slack.calls.findLast((c) => c.method === 'chat.postMessage').params.text, /left the conversation/);
 });
 
+test('goodbye: none on an unlink, none top-level in a channel', async (t) => {
+  const fx = fixture(t);
+  const goodbyes = () => fx.slack.calls.filter((c) => /left the conversation/.test(c.params?.text ?? '')).length;
+  // A thread link the session replied in, unlinked: deliberate, so nothing posted.
+  const a = await fx.bridge.link({ session: SID, url: URL_, minutes: 5, host: 'h' });
+  await fx.bridge.reply({ link: a.id, text: 'hi', pane: '%5' });
+  await fx.bridge.unlink(a.id);
+  assert.equal(goodbyes(), 0);
+  // A whole-channel link that expires: a goodbye would land top-level in the channel, so nothing posted.
+  fx.slack.handlers['conversations.history'] = () => ({ messages: [] });
+  const b = await fx.bridge.link({ session: SID, url: 'https://team.slack.com/archives/C0123ABCDEF', minutes: 5, host: 'h' });
+  await fx.bridge.reply({ link: b.id, text: 'hi', pane: '%5', thread: THREAD });
+  fx.advance(6 * 60 * 1000);
+  await assert.rejects(fx.bridge.reply({ link: b.id, text: 'late' }), { status: 410 });
+  assert.equal(goodbyes(), 0);
+});
+
 test('a renamed session (/rename): list shows the name it has now', async (t) => {
   const fx = fixture(t);
   await fx.bridge.link({ session: SID, url: URL_, minutes: 30, host: 'h' });

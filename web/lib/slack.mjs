@@ -830,8 +830,10 @@ export function createSlackBridge({ settings = {}, self = null, call, socket = n
     ended = [l, ...ended].slice(0, MAX_ENDED);
     await save();
     log(`[slack] ${l.id} ended (${reason})${dropped ? `, ${dropped} undelivered` : ''}`);
-    // Tell the thread, but only if the session ever got there: an intro never typed in means nobody was told it came.
-    if (l.delivered > 0 || l.replies > 0) {
+    // Tell the thread only when the link ran out on its own (an unlink is deliberate; whoever unlinked knows),
+    // only in a thread or a one-on-one DM (never top-level in a channel), and only if the session ever got
+    // there: an intro never typed in means nobody was told it came.
+    if (reason === 'expired' && (l.threadTs || oneOnOne(l)) && (l.delivered > 0 || l.replies > 0)) {
       try {
         await call('chat.postMessage', {
           channel: l.channel,
