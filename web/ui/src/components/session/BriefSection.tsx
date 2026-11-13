@@ -424,9 +424,8 @@ function reviewAction(root: string | null, onReview: (root: string) => void): ((
 /** The per-checkout Review: the whole diff reviewer, scoped to one worktree / PR. */
 function ReviewButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
-    <Button variant="outline" size="xs" className="shrink-0" aria-label="Review" title={title} onClick={onClick}>
+    <Button variant="outline" size="icon-xs" className="shrink-0" aria-label="Review" title={title} onClick={onClick}>
       <FileDiffIcon />
-      Review
     </Button>
   )
 }
