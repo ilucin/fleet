@@ -460,7 +460,7 @@ export function SessionScreen({
     host,
     id,
     session,
-    brief: { host, brief, fileLinks },
+    brief: { host, brief, fileLinks, onReviewRoot: session?.cwd && !embedded ? (root: string) => navigate(reviewHref(host, id, root)) : undefined },
     onNewFromHere: session ? newFromHere : undefined,
     onReview: session?.cwd && !embedded ? () => navigate(reviewHref(host, id)) : undefined,
     stack: embedded ? null : stackMenu,

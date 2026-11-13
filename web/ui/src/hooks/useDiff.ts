@@ -17,18 +17,18 @@ function diffError(err: unknown): string {
  * A session's diffs — every checkout it works in — polled with `since=<fingerprint>` so nothing
  * re-renders while nothing moved. `changedAt`: when the files last changed (the "changed" hint).
  */
-export function useDiff(host: string, id: string) {
+export function useDiff(host: string, id: string, root: string | null = null) {
   const [data, setData] = useState<{ key: string; diff: DiffsResponse } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [changedAt, setChangedAt] = useState<number | null>(null)
   const last = useRef<{ key: string; fingerprint: string } | null>(null)
-  const key = `${host}/${id}`
+  const key = `${host}/${id}/${root ?? ''}`
 
   const poll = useCallback(
     async (signal: AbortSignal) => {
       const since = last.current?.key === key ? last.current.fingerprint : null
       try {
-        const r = await api.diffs(host, id, since, { signal })
+        const r = await api.diffs(host, id, since, { signal }, root)
         setError(null)
         if (r.unchanged && since) return
         last.current = { key, fingerprint: r.fingerprint }
@@ -39,7 +39,7 @@ export function useDiff(host: string, id: string) {
         setError(diffError(err))
       }
     },
-    [host, id, key],
+    [host, id, key, root],
   )
   const refresh = usePoller(poll, DIFF_POLL_MS)
   return { data: data?.key === key ? data.diff : null, error, changedAt, refresh }

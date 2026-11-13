@@ -2,7 +2,9 @@ import type { DiffFile, DiffHunk, DiffLine, DiffRepo, ReviewThread } from '@/api
 import { clauseKey, flatClauses, type Clause, type PlainDiff } from '@/lib/plain'
 
 /** `#/review/<host>/<id>`: the diff reviewer for that session. */
-export const reviewHref = (host: string, id: string) => `/review/${encodeURIComponent(host)}/${encodeURIComponent(id)}`
+/** `root`: the review of one checkout (a worktree or a PR's) instead of every one the session works in. */
+export const reviewHref = (host: string, id: string, root?: string | null) =>
+  `/review/${encodeURIComponent(host)}/${encodeURIComponent(id)}${root ? `/root/${encodeURIComponent(root)}` : ''}`
 
 /** `#/review/pr/<host>/<owner>/<repo>/<n>`: the diff reviewer over a PR from that host's clone, without a session. */
 export const prReviewHref = (host: string, pr: { owner: string; repo: string; number: number }) =>
@@ -18,11 +20,11 @@ export function parsePrReviewLocation(location: string): { host: string; owner: 
   }
 }
 
-export function parseReviewLocation(location: string): { host: string; id: string } | null {
-  const m = /^\/review\/([^/]+)\/([^/]+)\/?$/.exec(location)
-  if (!m) return null
+export function parseReviewLocation(location: string): { host: string; id: string; root?: string } | null {
+  const m = /^\/review\/([^/]+)\/([^/]+)(?:\/root\/([^/]+))?\/?$/.exec(location)
+  if (!m || m[1] === 'pr') return null
   try {
-    return { host: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) }
+    return { host: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]), ...(m[3] ? { root: decodeURIComponent(m[3]) } : {}) }
   } catch {
     return null
   }

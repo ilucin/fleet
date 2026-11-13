@@ -27,6 +27,12 @@ describe('review routes', () => {
     expect(parseReviewLocation('/s/a/b')).toBeNull()
     expect(parseReviewLocation('/review/a')).toBeNull()
   })
+  it('round-trips a review scoped to one checkout', () => {
+    const href = reviewHref('ws', 'abc', '/home/u/Code/app-fix')
+    expect(href).toBe('/review/ws/abc/root/%2Fhome%2Fu%2FCode%2Fapp-fix')
+    expect(parseReviewLocation(href)).toEqual({ host: 'ws', id: 'abc', root: '/home/u/Code/app-fix' })
+    expect(parseReviewLocation(reviewHref('ws', 'abc', null))).toEqual({ host: 'ws', id: 'abc' })
+  })
 })
 
 describe('fileTree', () => {

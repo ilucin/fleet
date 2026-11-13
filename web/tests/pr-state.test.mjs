@@ -44,3 +44,12 @@ test('pr-state: a failing or slow gh gives null, not an error', async () => {
   const slow = createPrStates({ gh: () => new Promise(() => {}), waitMs: 10 });
   assert.equal((await slow([u])).has(u), false);
 });
+
+test('pr-state: headOf gives the head branch once the PR was read', async () => {
+  const states = createPrStates({ gh: async () => ({ stdout: JSON.stringify({ state: 'OPEN', isDraft: false, headRefName: 'fix-login' }) }) });
+  const u = 'https://github.com/o/r/pull/3';
+  assert.equal(states.headOf(u), null);
+  await states([u]);
+  assert.equal(states.headOf(u), 'fix-login');
+  assert.equal(states.headOf('https://example.com/x'), null);
+});

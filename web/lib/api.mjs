@@ -1501,8 +1501,17 @@ export function createApi({
           const cwd = typeof session.cwd === 'string' && session.cwd ? session.cwd : null;
           if (d[3] === 'diffs') {
             // Every checkout the session works in: its cwd's, then those of the files it worked on.
-            const worked = (await touched?.get(session).catch(() => null))?.worked ?? [];
-            const roots = await differ.roots(cwd, worked);
+            // `?root=<checkout>`: just that one (the per-worktree / per-PR review in the brief).
+            const only = url.searchParams.get('root');
+            let roots;
+            if (only) {
+              const top = await differ.checkout?.(only);
+              if (!top) throw new HttpError('root is not a git checkout on this host', 400);
+              roots = [top];
+            } else {
+              const worked = (await touched?.get(session).catch(() => null))?.worked ?? [];
+              roots = await differ.roots(cwd, worked);
+            }
             const all = await differ.diffAll(roots, { since: url.searchParams.get('since') });
             const home = os.homedir();
             const label = (root) => {

@@ -23,7 +23,7 @@ import { useNow } from '@/hooks/useNow'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSessionTitle } from '@/hooks/useTitles'
 import { relTime } from '@/lib/format'
-import { DEFAULT_KINDS, FILE_KINDS, fileAnchor, fileKey, fileSignature, kindCounts, orphanThreadsByKey, parsePrReviewLocation, parseReviewLocation, rangeText, repoViews, rowsToRange, selectLine, selectionCode, threadKey, type FileKind, type LineRow, type LineSelection, type Side } from '@/lib/review'
+import { reviewHref, DEFAULT_KINDS, FILE_KINDS, fileAnchor, fileKey, fileSignature, kindCounts, orphanThreadsByKey, parsePrReviewLocation, parseReviewLocation, rangeText, repoViews, rowsToRange, selectLine, selectionCode, threadKey, type FileKind, type LineRow, type LineSelection, type Side } from '@/lib/review'
 import type { DiffRepo, PrNote, ReviewAnchor, ReviewThread, SideAsk } from '@/api/types'
 import { prHref } from '@/lib/prs'
 import { findSession, sessionHref } from '@/lib/sessions'
@@ -90,23 +90,48 @@ export function ReviewScreen({ layout = 'screen' }: { layout?: Layout }) {
   if (prLoc) return <PrReview key={`${prLoc.host}/${prLoc.owner}/${prLoc.repo}/${prLoc.number}`} host={prLoc.host} pr={prLoc} layout={layout} />
   const loc = parseReviewLocation(location)
   if (!loc) return null
-  return <SessionReview key={`${loc.host}/${loc.id}`} host={loc.host} id={loc.id} layout={layout} />
+  return <SessionReview key={`${loc.host}/${loc.id}/${loc.root ?? ''}`} host={loc.host} id={loc.id} root={loc.root ?? null} layout={layout} />
 }
 
-function SessionReview({ host, id, layout }: { host: string; id: string; layout: Layout }) {
+/** A thread on checkout `root` (one without a root is the cwd's). */
+function threadInRoot(t: ReviewThread, root: string, cwd: string | null | undefined): boolean {
+  if (t.root) return t.root === root
+  return !!cwd && (cwd === root || cwd.startsWith(`${root}/`))
+}
+
+/**
+ * `root`: the review of that one checkout (a worktree or a PR's, from the Brief) — its diff, its
+ * threads, and Submit sends only its drafts. Without it: every checkout the session works in.
+ */
+function SessionReview({ host, id, root, layout }: { host: string; id: string; root: string | null; layout: Layout }) {
   const [, navigate] = useLocation()
   const { fleet } = useFleet()
   const session = findSession(fleet, host, id)
   const plainSession = useMemo(() => ({ host, id }), [host, id])
   const { title } = useSessionTitle(session, `${host}/${id}`)
-  const { data, error, changedAt } = useDiff(host, id)
-  const review = useReview(host, id)
+  const { data, error, changedAt } = useDiff(host, id, root)
+  const fullReview = useReview(host, id, root)
+  const cwd = session?.cwd
+  const scoped = useMemo(() => {
+    if (!root || !fullReview.review) return fullReview.review
+    const threads = fullReview.review.threads.filter((t) => threadInRoot(t, root, cwd))
+    return { ...fullReview.review, threads, drafts: threads.filter((t) => t.status === 'draft').length }
+  }, [fullReview.review, root, cwd])
+  const review = root ? { ...fullReview, review: scoped } : fullReview
+  const scopeRepo = root ? (data?.repos?.[0] ?? null) : null
+  const scopeLabel = root ? (scopeRepo?.branch ?? scopeRepo?.label ?? root.split('/').pop() ?? root) : null
   const askStart = useCallback((body: AskBody) => api.ask(host, id, body).then((r) => r.ask), [host, id])
   const source: ReviewSource = {
     kind: 'session',
     host,
     storageKey: `${host}/${id}`,
-    title: <>Changes · {title}</>,
+    title: scopeLabel ? (
+      <>
+        Changes · {title} · <span className="font-mono text-muted-foreground" title={root ?? undefined}>{scopeLabel}</span>
+      </>
+    ) : (
+      <>Changes · {title}</>
+    ),
     backLabel: 'Back to session',
     back: () => navigate(session ? sessionHref(session) : `/s/${encodeURIComponent(host)}/${encodeURIComponent(id)}`),
     data,
@@ -125,7 +150,13 @@ function SessionReview({ host, id, layout }: { host: string; id: string; layout:
       run: (summary) => review.submit(summary),
     },
     hint: 'To comment: select code with the mouse, or click a line number (shift-click for a range). The comment goes to the session with those lines.',
-    empty: 'This session works in no git checkout yet. Checkouts show up here as the session edits files in them.',
+    empty: root ? 'This checkout has no changes against its base branch.' : 'This session works in no git checkout yet. Checkouts show up here as the session edits files in them.',
+    headerActions: root ? (
+      <Button variant="ghost" size="sm" className="shrink-0" title="Review every checkout the session works in" onClick={() => navigate(reviewHref(host, id))}>
+        <FolderGitIcon />
+        All checkouts
+      </Button>
+    ) : undefined,
   }
   return <ReviewView layout={layout} source={source} />
 }

@@ -181,3 +181,22 @@ test('a thread in another checkout names its file from the session cwd (or absol
   await assert.rejects(fx.reviews.create(meta, { ...anchor, root: 'relative/x', body: 'x' }), { status: 400 });
   await assert.rejects(fx.reviews.create(meta, { ...anchor, root: '/a/../b', body: 'x' }), { status: 400 });
 });
+
+test('submit with a root sends only the drafts on that checkout (a rootless thread is the cwd’s)', async (t) => {
+  const fx = fixture(t);
+  await fx.reviews.create(session, { ...anchor, body: 'In the cwd', draft: true });
+  await fx.reviews.create(session, { ...anchor, root: '/tmp/wt/api', body: 'In api', draft: true });
+  await fx.reviews.create(session, { ...anchor, root: '/tmp/wt/ui', body: 'In ui', draft: true });
+  await assert.rejects(fx.reviews.submit(session, { root: 'relative' }), { status: 400 });
+
+  const s = await fx.reviews.submit(session, { root: '/tmp/wt/api' });
+  assert.equal(fx.sent.length, 1);
+  assert.match(fx.sent[0], /In api/);
+  assert.doesNotMatch(fx.sent[0], /In ui|In the cwd/);
+  assert.equal(s.drafts, 2);
+
+  await fx.reviews.submit(session, { root: '/tmp/x' });
+  assert.match(fx.sent[1], /In the cwd/);
+  assert.doesNotMatch(fx.sent[1], /In ui/);
+  await assert.rejects(fx.reviews.submit(session, { root: '/tmp/wt/api' }), { status: 409 });
+});

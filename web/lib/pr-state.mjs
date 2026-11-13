@@ -23,22 +23,28 @@ export function stateOf(json) {
 
 /**
  * `gh(args, opts)` → { stdout }. Returns `states(urls)` → Map(url → state | null) for the urls
- * that are GitHub PR links.
+ * that are GitHub PR links; `states.headOf(url)`: the PR's head branch from the cache (null
+ * until known) — the brief matches it to a worktree for a review of just that PR.
  */
 export function createPrStates({ gh, now = Date.now, waitMs = WAIT_MS }) {
-  const cache = new Map(); // prKey → { at, ttl, state }
+  const cache = new Map(); // prKey → { at, ttl, state, head }
   const inflight = new Map(); // prKey → Promise<state | null>
 
   function fetchState(pr, key) {
     let p = inflight.get(key);
     if (p) return p;
-    p = gh(['pr', 'view', pr.url, '--json', 'state,isDraft'], { timeout: 15000 })
-      .then(({ stdout }) => stateOf(JSON.parse(stdout)))
+    let head = null;
+    p = gh(['pr', 'view', pr.url, '--json', 'state,isDraft,headRefName'], { timeout: 15000 })
+      .then(({ stdout }) => {
+        const json = JSON.parse(stdout);
+        head = typeof json?.headRefName === 'string' && json.headRefName ? json.headRefName : null;
+        return stateOf(json);
+      })
       .catch(() => undefined)
       .then((state) => {
         const ttl = state === undefined ? ERROR_TTL_MS : state === 'merged' || state === 'closed' ? DONE_TTL_MS : OPEN_TTL_MS;
         if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value);
-        cache.set(key, { at: now(), ttl, state: state ?? null });
+        cache.set(key, { at: now(), ttl, state: state ?? null, head });
         inflight.delete(key);
         return state ?? null;
       });
@@ -46,7 +52,7 @@ export function createPrStates({ gh, now = Date.now, waitMs = WAIT_MS }) {
     return p;
   }
 
-  return async function states(urls) {
+  async function states(urls) {
     const out = new Map();
     const pending = [];
     const prs = [];
@@ -70,5 +76,10 @@ export function createPrStates({ gh, now = Date.now, waitMs = WAIT_MS }) {
       clearTimeout(t);
     }
     return new Map(out); // late answers land in the cache, not in a returned map
+  }
+  states.headOf = (url) => {
+    const pr = parsePrUrl(url);
+    return (pr && cache.get(prKey(pr.repo, pr.number))?.head) || null;
   };
+  return states;
 }

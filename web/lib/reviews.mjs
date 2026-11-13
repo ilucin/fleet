@@ -336,12 +336,19 @@ export function createReviews({ dir, send, messages, now = () => Date.now(), ran
       });
     },
 
-    /** Send every draft in one prompt (with an optional overall note). */
+    /**
+     * Send every draft in one prompt (with an optional overall note). `root`: only the drafts on
+     * that checkout (a review scoped to one worktree / PR); a thread without a root is the cwd's.
+     */
     async submit(session, body) {
       const note = typeof body?.body === 'string' ? body.body : '';
       if (note.length > MAX_BODY) throw new ReviewError(`body too long (max ${MAX_BODY} chars)`, 400);
+      const root = body?.root ?? null;
+      if (root != null && (typeof root !== 'string' || !path.isAbsolute(root) || root.length > 4096)) throw new ReviewError('invalid root', 400);
+      const cwd = typeof session.cwd === 'string' ? session.cwd : null;
+      const inScope = (t) => root == null || t.root === root || (t.root == null && cwd != null && (cwd === root || cwd.startsWith(`${root}/`)));
       return locked(session.session_id, async (state) => {
-        const drafts = state.threads.filter((t) => t.status === 'draft');
+        const drafts = state.threads.filter((t) => t.status === 'draft' && inScope(t));
         if (!drafts.length) throw new ReviewError('no draft comments to submit', 409);
         await deliver(session, reviewPrompt(drafts, note));
         const at = now();

@@ -3,6 +3,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CircleDotIcon,
+  FileDiffIcon,
   FileIcon,
   FlagIcon,
   FolderGit2Icon,
@@ -70,6 +71,8 @@ export interface BriefSectionProps {
   desktop?: boolean
   /** Filled with "cancel the edit" while editing (the drawer's Esc cancels it instead of closing). */
   cancelEditRef?: React.RefObject<(() => void) | null>
+  /** Review one checkout: the diff reviewer scoped to it (a worktree's row, a PR's on its branch). Absent: no buttons. */
+  onReviewRoot?: (root: string) => void
 }
 
 /**
@@ -77,7 +80,7 @@ export interface BriefSectionProps {
  * Edit), then Summary, Todos (clickable checkboxes, "3/7"), Resources grouped by kind (files
  * open the in-app preview, URLs a new tab; Files collapsed by default). Edit = the body markdown in a textarea (⌘/Ctrl+Enter saves, Esc cancels).
  */
-export function BriefSection({ host, brief: st, fileLinks, desktop = false, cancelEditRef }: BriefSectionProps) {
+export function BriefSection({ host, brief: st, fileLinks, desktop = false, cancelEditRef, onReviewRoot }: BriefSectionProps) {
   const now = useNow(15_000)
   const b = st.brief
   const [draft, setDraft] = useState<string | null>(null)
@@ -128,6 +131,8 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
   const topGroups = groups.filter((g) => g.kind != null && TOP_KINDS.has(g.kind))
   const restGroups = groups.filter((g) => !(g.kind != null && TOP_KINDS.has(g.kind)))
   const empty = !!b && !b.exists && !summary && !todos.length && !groups.length && !worktrees.length
+  // A PR row's Review: the worktree on its head branch (gh tells the branch; none checked out → no button).
+  const prRoot = (r: BriefResource) => (r.kind === 'PR' && r.prBranch ? (worktrees.find((w) => w.branch === r.prBranch)?.path ?? null) : null)
 
   const regenerateButton = (label: string, className?: string) => (
     <Button variant="outline" size="lg" className={className} disabled={busy || !b} onClick={() => void st.regenerate()}>
@@ -225,7 +230,7 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
             <Part key={g.kind} title={g.label} aside={g.items.length > 1 ? <span className="tabular-nums">{g.items.length}</span> : null}>
               <ul className="space-y-1">
                 {g.items.map((r, i) => (
-                  <ResourceRow key={`${r.text}-${i}`} r={r} fileLinks={fileLinks} />
+                  <ResourceRow key={`${r.text}-${i}`} r={r} fileLinks={fileLinks} onReview={onReviewRoot ? reviewAction(prRoot(r), onReviewRoot) : undefined} />
                 ))}
               </ul>
             </Part>
@@ -261,7 +266,7 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
           {restGroups.length || worktrees.length ? (
             <Part title="Resources">
               <div className="space-y-3">
-                {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} /> : null}
+                {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} onReview={onReviewRoot} /> : null}
                 {restGroups.map((g) => (g.kind === 'File' ? <FilesGroup key="files" g={g} fileLinks={fileLinks} /> : <Group key={g.kind ?? 'notes'} g={g} fileLinks={fileLinks} />))}
               </div>
             </Part>
@@ -376,7 +381,7 @@ function FilesGroup({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }
 }
 
 /** The checkouts the session works in, each with an "open in editor" button (hidden on touch-first screens). */
-function WorktreesGroup({ worktrees, editor }: { worktrees: BriefWorktree[]; editor: string | null | undefined }) {
+function WorktreesGroup({ worktrees, editor, onReview }: { worktrees: BriefWorktree[]; editor: string | null | undefined; onReview?: (root: string) => void }) {
   const label = editor === 'cursor' ? 'Cursor' : 'VSC'
   return (
     <div>
@@ -393,6 +398,7 @@ function WorktreesGroup({ worktrees, editor }: { worktrees: BriefWorktree[]; edi
               <span className="text-muted-foreground"> · {w.linked ? 'worktree' : 'repo'} </span>
               <span className="text-muted-foreground select-all">{w.display}</span>
             </span>
+            {onReview ? <ReviewButton onClick={() => onReview(w.path)} title={`Review ${w.branch ?? w.display}: the diff of this checkout only`} /> : null}
             {w.editorUrl ? (
               <Button asChild variant="outline" size="xs" className="pointer-coarse:hidden">
                 <a href={w.editorUrl} title={`Open ${w.display} in ${editor === 'cursor' ? 'Cursor' : 'VS Code'}`}>
@@ -410,7 +416,22 @@ function WorktreesGroup({ worktrees, editor }: { worktrees: BriefWorktree[]; edi
 const rowClass = 'flex min-w-0 items-start gap-2 rounded-md py-1 text-sm'
 const linkClass = 'min-w-0 break-words text-primary underline decoration-primary/40 underline-offset-2 [overflow-wrap:anywhere] active:opacity-70'
 
-function ResourceRow({ r, fileLinks }: { r: BriefResource; fileLinks: FileStats }) {
+/** `root` → the click that reviews it; null root → no button. */
+function reviewAction(root: string | null, onReview: (root: string) => void): (() => void) | undefined {
+  return root ? () => onReview(root) : undefined
+}
+
+/** The per-checkout Review: the whole diff reviewer, scoped to one worktree / PR. */
+function ReviewButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <Button variant="outline" size="xs" className="shrink-0" aria-label="Review" title={title} onClick={onClick}>
+      <FileDiffIcon />
+      Review
+    </Button>
+  )
+}
+
+function ResourceRow({ r, fileLinks, onReview }: { r: BriefResource; fileLinks: FileStats; onReview?: () => void }) {
   const Icon = (r.kind && KIND_ICON[r.kind]) || StickyNoteIcon
   const icon = <Icon className="mt-0.5 size-4 shrink-0 text-dimmer" />
   const pr = r.kind === 'PR' && r.prState ? PR_STATE[r.prState] : null
@@ -424,6 +445,7 @@ function ResourceRow({ r, fileLinks }: { r: BriefResource; fileLinks: FileStats 
         {pr ? (
           <span className={cn('mt-px shrink-0 rounded-full border px-1.5 text-[0.6875rem] leading-[1.125rem] font-medium whitespace-nowrap', pr.className)}>{pr.label}</span>
         ) : null}
+        {onReview ? <ReviewButton onClick={onReview} title={`Review ${r.label || 'this PR'}: the diff of its worktree (${r.prBranch}) only`} /> : null}
       </li>
     )
   }

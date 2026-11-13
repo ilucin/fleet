@@ -355,7 +355,17 @@ export function createDiffer({ run, tmpDir = os.tmpdir(), home = os.homedir() })
     return { ...meta, unchanged: false, ...(await filesOf(meta)) };
   }
 
-  return { diff, roots, diffAll, prDiff };
+  /**
+   * `dir` as a checkout the reviewer may be scoped to: git's toplevel when `dir` is exactly one
+   * (absolute, not $HOME or `/`), else null.
+   */
+  async function checkout(dir) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir) || dir.includes('\0') || dir === home || dir === '/') return null;
+    const top = await revParse(dir, ['--show-toplevel']);
+    return top && path.resolve(top) === path.resolve(dir) ? top : null;
+  }
+
+  return { diff, roots, diffAll, prDiff, checkout };
 }
 
 function cutHunks(hunks, max) {

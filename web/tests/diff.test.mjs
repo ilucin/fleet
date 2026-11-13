@@ -322,3 +322,33 @@ test('prDiff: a PR from a clone, no checkout — refs fetched privately, diffed 
   await assert.rejects(differ.prDiff(clone.dir, { number: 8, baseBranch: 'main' }), { status: 502 });
   await assert.rejects(differ.prDiff(clone.dir, { number: 7, baseBranch: '--upload-pack=x' }), { status: 400 });
 });
+
+test('HTTP: …/diffs?root= — just that checkout; a path that is not a checkout root is a 400', async (t) => {
+  const meta = repo(t);
+  meta.write('.gitignore', 'wt/\n');
+  meta.write('m.txt', 'm\n');
+  meta.git('add', '-A');
+  meta.git('commit', '-qm', 'meta');
+  meta.write('m.txt', 'changed\n');
+  const wt = path.join(meta.dir, 'wt', 'one');
+  fs.mkdirSync(wt, { recursive: true });
+  execFileSync('git', ['-C', wt, 'init', '-q', '-b', 'main']);
+  fs.writeFileSync(path.join(wt, 'x.txt'), 'x\n');
+  const id = 'aaaaaaaa-0000-0000-0000-000000000002';
+  const config = normalizeConfig({ self: 'laptop' }, { env: {}, home: '/home/tester' });
+  const fleet = { localHost: async () => ({ name: 'laptop', ok: true, sessions: [{ session_id: id, cwd: meta.dir, status: 'idle', backend: 'tmux' }] }) };
+  const touched = { get: async () => ({ version: '1', paths: [], worked: [path.join(wt, 'x.txt')] }) };
+  const api = createApi({ config, fleet, backend: {}, transcripts: {}, spawner: {}, differ: createDiffer({ run, home: '/nonexistent-home' }), touched, warmFleet: false });
+  t.after(() => api.stop());
+  const server = createHttpServer({ handleApi: api, uiDir: null });
+  await new Promise((res) => server.listen(0, '127.0.0.1', res));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}/api/hosts/laptop/sessions/aaaaaaaa/diffs`;
+  const one = await (await fetch(`${base}?root=${encodeURIComponent(wt)}`)).json();
+  assert.deepEqual(one.repos.map((r) => [r.root, r.files.map((f) => f.path)]), [[wt, ['x.txt']]]);
+  const main = await (await fetch(`${base}?root=${encodeURIComponent(meta.dir)}`)).json();
+  assert.deepEqual(main.repos.map((r) => [r.root, r.files.map((f) => f.path)]), [[meta.dir, ['m.txt']]]);
+  assert.equal((await fetch(`${base}?root=${encodeURIComponent(path.join(wt, 'sub'))}`)).status, 400);
+  assert.equal((await fetch(`${base}?root=relative/path`)).status, 400);
+  assert.equal((await fetch(`${base}?root=${encodeURIComponent('/')}`)).status, 400);
+});

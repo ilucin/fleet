@@ -515,7 +515,7 @@ export function createBriefs({
       text: r.text,
       branch: r.branch ?? null,
       linked: r.linked ?? null,
-      ...(r.kind === 'PR' && r.url ? { prState: prs.get(r.url) ?? null } : {}),
+      ...(r.kind === 'PR' && r.url ? { prState: prs.get(r.url) ?? null, prBranch: prStates?.headOf?.(r.url) ?? null } : {}),
     }));
     return {
       host: self,

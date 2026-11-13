@@ -178,8 +178,11 @@ export const api = {
   },
 
   /** Every checkout the session works in (cwd's + those of the files it worked on); `since` = the last fingerprint. */
-  diffs: (host: string, id: string, since: string | null = null, o: Opts = {}) =>
-    request<DiffsResponse>(`${sessionPath(host, id, 'diffs')}${since ? `?since=${enc(since)}` : ''}`, o),
+  /** `root`: just that checkout (a review scoped to one worktree / PR). */
+  diffs: (host: string, id: string, since: string | null = null, o: Opts = {}, root: string | null = null) => {
+    const q = [since ? `since=${enc(since)}` : null, root ? `root=${enc(root)}` : null].filter(Boolean).join('&')
+    return request<DiffsResponse>(`${sessionPath(host, id, 'diffs')}${q ? `?${q}` : ''}`, o)
+  },
   // Prompt queue (server-side): sent one per run once the session is idle.
   queueAdd: (host: string, id: string, text: string, o: Opts = {}) =>
     request<PromptQueue & { item: QueuedPrompt }>(sessionPath(host, id, 'queue'), { ...o, method: 'POST', body: { text } }),
@@ -204,8 +207,9 @@ export const api = {
   reviewDelete: (host: string, id: string, thread: string, o: Opts = {}) =>
     request<ReviewState>(sessionPath(host, id, `review/threads/${enc(thread)}`), { ...o, method: 'DELETE' }),
   /** Every draft in one prompt, with an optional overall note. */
-  submitReview: (host: string, id: string, body: string, o: Opts = {}) =>
-    request<ReviewState>(sessionPath(host, id, 'review/submit'), { ...o, method: 'POST', body: { body } }),
+  /** `root`: only the drafts on that checkout. */
+  submitReview: (host: string, id: string, body: string, o: Opts = {}, root: string | null = null) =>
+    request<ReviewState>(sessionPath(host, id, 'review/submit'), { ...o, method: 'POST', body: root ? { body, root } : { body } }),
   /** A side question about lines of the diff, answered by a read-only fork of the session (nothing reaches its thread). */
   ask: (host: string, id: string, body: Partial<ReviewAnchor> & { question: string }, o: Opts = {}) =>
     request<{ host: string; ask: SideAsk }>(sessionPath(host, id, 'ask'), { ...o, method: 'POST', body }),

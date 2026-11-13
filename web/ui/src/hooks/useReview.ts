@@ -19,7 +19,7 @@ function reviewError(err: unknown): string {
  * The session's review threads (answers read from its transcript on every GET) and the actions
  * on them. Each action answers with the whole state, which replaces ours.
  */
-export function useReview(host: string, id: string) {
+export function useReview(host: string, id: string, root: string | null = null) {
   const key = `${host}/${id}`
   const [state, setState] = useState<{ key: string; review: ReviewState } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -67,7 +67,7 @@ export function useReview(host: string, id: string) {
     edit: (thread: string, body: string) => act('Could not save the draft', () => api.reviewUpdate(host, id, thread, { body })),
     resolve: (thread: string, resolved: boolean) => act('Could not update the thread', () => api.reviewUpdate(host, id, thread, { resolved })),
     remove: (thread: string) => act('Could not delete the thread', () => api.reviewDelete(host, id, thread)),
-    submit: (body: string) => act('Could not submit the review', () => api.submitReview(host, id, body)),
+    submit: (body: string) => act('Could not submit the review', () => api.submitReview(host, id, body, {}, root)),
   }
 }
 

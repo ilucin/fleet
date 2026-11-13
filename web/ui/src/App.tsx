@@ -105,6 +105,9 @@ function FleetApp() {
                   <Route path="/review/:host/:id">
                     <ReviewScreen />
                   </Route>
+                  <Route path="/review/:host/:id/root/:root">
+                    <ReviewScreen />
+                  </Route>
                   <Route path="/s/:host/:id">
                     {(p) => <SessionScreen key={`${p.host}/${p.id}`} host={p.host} id={p.id} />}
                   </Route>
