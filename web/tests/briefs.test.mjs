@@ -147,9 +147,14 @@ test('format: model output — valid, fenced, and garbage', () => {
   assert.deepEqual(parseModelOutput('## Summary\nDoing X in repo Y.\n\n## Todos\n- [x] a\n- [ ] b\nchatter\n'), {
     summary: 'Doing X in repo Y.',
     todos: [{ done: true, text: 'a' }, { done: false, text: 'b' }],
+    title: null,
   });
   assert.deepEqual(parseModelOutput('## Summary\nOld heading.\n\n## Plan\n- [ ] a\n').todos, [{ done: false, text: 'a' }], '`## Plan` still accepted');
-  assert.deepEqual(parseModelOutput('```markdown\n## Summary\nOnly this.\n```'), { summary: 'Only this.', todos: null });
+  assert.deepEqual(parseModelOutput('```markdown\n## Summary\nOnly this.\n```'), { summary: 'Only this.', todos: null, title: null });
+  assert.equal(parseModelOutput('## Summary\nok.\n\n## Title\n`Fleet-Brief-Prompt`\n').title, 'fleet-brief-prompt');
+  const prose = parseModelOutput('## Summary\nok.\n\n## Title\nI would call it the brief work\n');
+  assert.equal(prose.summary, 'ok.', 'an unusable title does not sink the brief');
+  assert.equal(prose.title, null);
   assert.equal(parseModelOutput('Sorry, I cannot help with that.'), null);
   assert.equal(parseModelOutput('## Summary\n\n## Plan\n- [ ] x'), null, 'empty summary');
   assert.equal(parseModelOutput(`## Summary\n${'x'.repeat(1300)}`), null, 'too long');
@@ -316,7 +321,7 @@ test('readDelta: only the new conversation, clipped to maxChars, newest kept', a
 
 // ------------------------------------------------------------------ the service
 
-function setup(t, { settings = {}, answer, sessions, prStates = null } = {}) {
+function setup(t, { settings = {}, answer, sessions, prStates = null, titles = null } = {}) {
   const fx = transcriptFixture(t);
   const dir = path.join(fx.root, 'briefs');
   let clock = Date.parse('2026-01-01T10:00:00Z');
@@ -341,6 +346,7 @@ function setup(t, { settings = {}, answer, sessions, prStates = null } = {}) {
     log: (l) => logs.push(l),
     home: fx.home,
     prStates,
+    titles,
   });
   const read = () => fs.readFileSync(path.join(dir, `${SID}.md`), 'utf8');
   const grow = (text) => fs.appendFileSync(fx.file, text);
@@ -373,6 +379,27 @@ test('briefs: an idle session gets resources, its todos and one model summary', 
   await s.svc.tick();
   assert.equal(s.asks.length, 1);
   assert.equal(s.read(), before);
+});
+
+test('briefs: the call answers a title too — the current one goes in, the answer is stored', async (t) => {
+  const stored = new Map([[SID, 'project-look-at-this']]);
+  const titles = { read: (id) => stored.get(id) ?? null, write: (id, v) => stored.set(id, v) };
+  const s = setup(t, { titles, answer: () => '## Summary\nFixing a login bug.\n\n## Title\nproject-login-fix\n' });
+  await s.svc.tick();
+  assert.equal(s.asks.length, 1);
+  assert.match(s.asks[0].prompt, /## Title\n<ONE lowercase kebab-case slug/);
+  assert.match(s.asks[0].prompt, /Current title: project-look-at-this\. Repeat it exactly unless/);
+  assert.equal(stored.get(SID), 'project-login-fix');
+  assert.doesNotMatch(s.read(), /## Title/, 'the title is not part of the brief file');
+});
+
+test('briefs: a title store that throws is logged, the brief is still saved', async (t) => {
+  const titles = { read: () => { throw new Error('boom'); }, write: () => { throw new Error('disk full'); } };
+  const s = setup(t, { titles, answer: () => '## Summary\nFixing a login bug.\n\n## Title\nproject-login-fix\n' });
+  await s.svc.tick();
+  assert.doesNotMatch(s.asks[0].prompt, /Current title/);
+  assert.equal(parseBrief(s.read()).summary, 'Fixing a login bug.');
+  assert.ok(s.logs.some((l) => /title not saved: disk full/.test(l)), s.logs.join('\n'));
 });
 
 test('briefs: GET gives PR resources their state; a failing lookup leaves it null', async (t) => {

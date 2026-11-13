@@ -34,8 +34,9 @@ Env overrides: `FLEET_CONFIG`, `FLEET_WEB_PORT` / `PORT`, `FLEET_WEB_BIND`, `FLE
 `FLEET_WEB_AUTONAME` / `FLEET_WEB_GROUPING` / `FLEET_WEB_BRIEFS` / `FLEET_WEB_STACKS` (`0` / `1`), `FLEET_BRIEFS_DIR`, `FLEET_BIN`, `FLEET_TMUX`.
 
 `web.autoName` (default off; opt in with `{ "enabled": true, "intervalMinutes": 5 }`) makes each server run
-`fleet name --all --apply` on its own host every few minutes, so sessions started without a
-name get a task-shaped one (tmux session included, when its name was generic). Set
+`fleet name --all --settled --adopt-tmux` on its own host every few minutes, so sessions started
+without a name get a task-shaped display title (no `/rename`; with briefs on, the brief keeps it
+current as the work changes). Set
 `"enabled": false` to keep names manual.
 
 `web.grouping` (default off; opt in on ONE host with `{ "enabled": true, "intervalMinutes": 10 }`,

@@ -1,15 +1,14 @@
-// Periodic auto-naming. Sessions started without a name carry Claude's cwd+hash fallback
-// (`project-9d`); the `fleet` CLI can generate task-shaped names and apply them via
-// Claude's own `/rename` (`fleet name --all --apply`, it holds sessions waiting on a prompt), but
-// nothing runs it on a schedule. The web server does: it already runs on every host, inside
-// tmux, which is also where `claude -p` (the name generator) has a logged-in keychain on a
-// headless machine; a plain ssh shell often does not.
+// Periodic titling. Sessions started without a name carry Claude's cwd+hash fallback
+// (`project-9d`); the `fleet` CLI generates a task-shaped title for them into its name cache
+// (`~/.claude/fleet-names.json`), which every view draws (`display_title`). The web server runs
+// it on a schedule: it already runs on every host, inside tmux, which is also where `claude -p`
+// (the generator) has a logged-in keychain on a headless machine; a plain ssh shell often does not.
 //
-// One rename path: the CLI renames the Claude session (the title, the source of truth) and
-// brings the tmux session name along as a slug of it, only for a tmux session that is
-// that one Claude session's own. A tmux session somebody named by hand is not clobbered:
-// the CLI adopts its name as the title instead of generating one (docs/architecture.md →
-// "Session titles"). Nothing here touches tmux.
+// Generated titles are display-only: nothing here sends `/rename`, so the Claude session name
+// stays a human's choice and a title can keep following the work. Once a session has a brief,
+// the brief call keeps its title current (lib/briefs.mjs, lib/titles.mjs) and the CLI leaves it
+// be. The one rename left is `--adopt-tmux`: a session alone in a tmux session somebody named by
+// hand takes that name (docs/architecture.md → "Session titles").
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
@@ -125,11 +124,12 @@ export function findSpawned(rows, tmuxSession) {
 export const SPAWN_NAME_DELAYS_MS = [8000, 10000, 12000, 15000, 20000, 25000, 30000];
 
 /**
- * A targeted naming pass for a session the web just spawned with a first prompt, so it gets
- * a task-shaped name within a minute or two instead of at the next periodic run. For each
+ * A targeted titling pass for a session the web just spawned with a first prompt, so it gets
+ * a task-shaped (provisional, display-only) title within a minute or two instead of at the next
+ * periodic run; its brief refines it later. For each
  * try (after `delaysMs[i]`): find the session by its tmux name in the local fleet; skip the
  * try while it has not registered or is still busy on its first turn; stop once it no longer
- * carries a Claude-derived name; else `fleet name <session_id> --apply` — done when renamed,
+ * carries a Claude-derived name; else `fleet name <session_id>` (cache only) — done when renamed,
  * retried when held (waiting on a prompt) or failed.
  * @param deps
  *   cli          lib/fleet-cli.mjs instance (`nameOne`)

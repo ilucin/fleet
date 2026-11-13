@@ -230,6 +230,10 @@ enum Commands {
         /// second prompt or a brief (what the web server's periodic pass uses)
         #[arg(long, requires = "all")]
         settled: bool,
+        /// Without --apply: still /rename a session alone in a tmux session someone named by
+        /// hand to that name (a human's choice); generated titles stay display-only
+        #[arg(long, conflicts_with = "apply")]
+        adopt_tmux: bool,
     },
 
     /// Sort sessions into work-stream groups (the web Board view) — reads sessions, asks `claude -p`, sends nothing
@@ -1630,6 +1634,7 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
             no_tmux_sync,
             refresh,
             settled,
+            adopt_tmux,
         } => commands::name(
             target,
             commands::NameOpts {
@@ -1639,6 +1644,7 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
                 no_tmux_sync,
                 refresh,
                 settled,
+                adopt_tmux,
             },
         )?,
         Commands::Group {

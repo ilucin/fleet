@@ -534,6 +534,10 @@ pub struct NameOpts {
     pub refresh: bool,
     /// With `all`: only sessions [`naming::is_settled`] — a second prompt or a brief.
     pub settled: bool,
+    /// Without `apply`: still rename a session to the tmux name a human gave it
+    /// ([`title::adoptable_tmux_name`]). Generated titles stay display-only (the name
+    /// cache); this is what the web server's periodic pass runs.
+    pub adopt_tmux: bool,
 }
 
 /// Suggest (and optionally apply) LLM-generated names.
@@ -623,7 +627,8 @@ pub fn name(target: Option<String>, o: NameOpts) -> Result<()> {
             }
         };
         let new = &suggestion.name;
-        if !apply {
+        let adopt = !o.dry_run && o.adopt_tmux && suggestion.source == naming::NameSource::Tmux;
+        if !apply && !adopt {
             println!(
                 "{}  →  {}   {}",
                 was.dimmed(),

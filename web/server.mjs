@@ -18,6 +18,7 @@ import { createTranscriptReader, locateTranscript } from './lib/transcript.mjs';
 import { createSpawner } from './lib/spawn.mjs';
 import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer, createSpawnNamer } from './lib/autoname.mjs';
+import { createTitleStore } from './lib/titles.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
 import { SPEECH_KEY_NAME, createKeySource, createSpeaker, createTranscriber } from './lib/transcribe.mjs';
@@ -124,6 +125,7 @@ const briefs = createBriefs({
   ask: createClaudeAsk({ bin: claudeBin, run }),
   git: (cwd) => gitInfo(cwd, { run }),
   prStates: createPrStates({ gh: (args, opts) => run(ghBin, args, opts) }),
+  titles: createTitleStore(),
   log,
 });
 // Session stacks: the routes always work (the CLI owns the files); the background membership

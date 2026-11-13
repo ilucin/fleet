@@ -23,6 +23,8 @@
 // A human edit is authoritative: parsing tolerates missing sections, extra text and sections,
 // `*` bullets and `[X]`; serialising writes the three sections in canonical order.
 
+import { sanitizeTitle } from './titles.mjs';
+
 export const SECTIONS = ['Summary', 'Resources', 'Todos'];
 export const RESOURCE_KINDS = ['Origin', 'PR', 'Issue', 'Artifact', 'Spec', 'File', 'Git', 'Branch', 'Worktree', 'Link'];
 const KIND_BY_LOWER = new Map(RESOURCE_KINDS.map((k) => [k.toLowerCase(), k]));
@@ -371,7 +373,8 @@ const MAX_TODOS = 20;
 /**
  * Validate what the model answered: `## Summary` (required, prose, ≤ 1200 chars) and
  * optionally `## Todos` (checkbox items only; anything else is dropped; `## Plan` is read the
- * same). → { summary, todos|null } or null for garbage — the caller then keeps the old brief.
+ * same), and `## Title` (lib/titles.mjs#sanitizeTitle; null when unusable — the brief still counts).
+ * → { summary, todos|null, title|null } or null for garbage — the caller then keeps the old brief.
  */
 export function parseModelOutput(text) {
   let t = String(text ?? '').trim();
@@ -383,7 +386,8 @@ export function parseModelOutput(text) {
   if (!summary || summary.length > MAX_SUMMARY_CHARS || /^#/m.test(summary) || /^---$/m.test(summary)) return null;
   const hasTodos = /^##\s+(?:todos|plan)\s*$/im.test(t);
   const todos = hasTodos ? b.todos.filter((i) => i.text && i.text.length <= 300).slice(0, MAX_TODOS) : null;
-  return { summary, todos: todos && todos.length ? todos : null };
+  const titleSec = b.extra.find((x) => x.heading.toLowerCase() === 'title');
+  return { summary, todos: todos && todos.length ? todos : null, title: titleSec ? sanitizeTitle(titleSec.body) : null };
 }
 
 // ------------------------------------------------------------------ continue prompt

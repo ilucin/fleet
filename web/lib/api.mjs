@@ -464,7 +464,10 @@ export function createApi({
       const target = session.session_id && !session.session_id.startsWith('pid-') ? session.session_id : String(session.pid);
       let out;
       try {
-        out = await cli.nameOne({ target, refresh: true });
+        // A generated title is display-only; only a session someone already named is renamed
+        // (asking for a new name there means replacing that one).
+        const named = Boolean(session.name_source) && session.name_source !== 'derived';
+        out = await cli.nameOne({ target, refresh: true, apply: named });
       } catch (err) {
         throw new HttpError(`naming failed: ${err?.message ?? err}`, err?.timedOut ? 504 : 502);
       }

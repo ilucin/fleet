@@ -10,6 +10,11 @@
 //! [`heuristic_from`] is only the fallback for when `claude` is missing, logged
 //! out, rate-limited or answers with prose.
 //!
+//! This is the *provisional* title. Once a session has a brief, the web server's
+//! brief call answers a title too (`web/lib/titles.mjs`, cache source
+//! [`BRIEF_SOURCE`]) and keeps it current as the work moves; [`suggest`] serves
+//! that one as is until an explicit refresh.
+//!
 //! Nothing here applies a name. What comes out is used two ways, and only one of
 //! them needs a confirmation: the `watch` dashboard draws it as a session's
 //! **title** (see [`Session::headline`]) the moment it lands, while renaming the
@@ -658,6 +663,16 @@ where
     let id = s.key();
 
     if opts.allow_llm {
+        // A title the brief generator wrote outranks one built from the opening prompts:
+        // it read the whole conversation and follows the session when it changes course.
+        // Only an explicit refresh replaces it.
+        if let Some(hit) = cache.brief_title(&id).filter(|_| !opts.refresh) {
+            return Ok(Suggestion {
+                name: hit.to_string(),
+                source: NameSource::Cached,
+                note: None,
+            });
+        }
         if let Some(hit) = cache.get(&id, &hash).filter(|_| !opts.refresh) {
             return Ok(Suggestion {
                 name: hit.name.clone(),
@@ -747,6 +762,15 @@ fn cache_path() -> PathBuf {
     claude_home().join("fleet-names.json")
 }
 
+/// [`CachedName::source`] of a title the web server's brief generator wrote
+/// (`web/lib/titles.mjs`): the session's title from then on.
+pub const BRIEF_SOURCE: &str = "brief";
+
+/// Entries not regenerated for this long are dropped on save, so the file does not
+/// grow with every session ever run. A live session's title is rewritten on each
+/// brief update; one idle past this falls back to a fresh title when it resumes.
+pub const PRUNE_AFTER_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 /// Distinguishes one in-flight atomic write from the next. The pid alone does
 /// not: both naming workers save from the same process, routinely within
 /// milliseconds of each other, and a shared temp path lets one worker's
@@ -794,6 +818,15 @@ impl NameCache {
             .filter(|n| !n.is_empty())
     }
 
+    /// The title the brief generator wrote for `id`, whatever input it came from.
+    pub fn brief_title(&self, id: &str) -> Option<&str> {
+        self.entries
+            .get(id)
+            .filter(|e| e.source == BRIEF_SOURCE)
+            .map(|e| e.name.as_str())
+            .filter(|n| !n.is_empty())
+    }
+
     pub fn put(&mut self, id: &str, entry: CachedName) {
         self.entries.insert(id.to_string(), entry);
     }
@@ -830,11 +863,19 @@ impl NameCache {
             && let Ok(disk) = serde_json::from_str::<HashMap<String, CachedName>>(&text)
         {
             for (k, v) in disk {
-                // Ours wins a collision — it's the fresher of the two by
-                // construction. Anything only they have is kept.
-                self.entries.entry(k).or_insert(v);
+                // The newer entry wins a collision: what we loaded may be stale by
+                // now (the brief generator writes this file too). Anything only
+                // they have is kept.
+                match self.entries.get(&k) {
+                    Some(ours) if ours.generated_at >= v.generated_at => {}
+                    _ => {
+                        self.entries.insert(k, v);
+                    }
+                }
             }
         }
+        let cutoff = chrono::Utc::now().timestamp_millis() - PRUNE_AFTER_MS;
+        self.entries.retain(|_, e| e.generated_at >= cutoff);
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -1479,7 +1520,7 @@ mod tests {
             CachedName {
                 name: "cache-warmup".into(),
                 source: "llm".into(),
-                generated_at: 1,
+                generated_at: chrono::Utc::now().timestamp_millis(),
                 input_hash: "deadbeef".into(),
             },
         );
@@ -1514,7 +1555,7 @@ mod tests {
         let entry = |n: &str| CachedName {
             name: n.into(),
             source: "llm".into(),
-            generated_at: 1,
+            generated_at: chrono::Utc::now().timestamp_millis(),
             input_hash: "h".into(),
         };
         theirs.put("phone", entry("from-the-phone"));
@@ -1567,7 +1608,7 @@ mod tests {
                             CachedName {
                                 name: "cache-warmup".repeat(20),
                                 source: "llm".into(),
-                                generated_at: 1,
+                                generated_at: chrono::Utc::now().timestamp_millis(),
                                 input_hash: "h".into(),
                             },
                         );
@@ -1590,6 +1631,92 @@ mod tests {
             .filter(|n| n.contains("tmp"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    fn entry_at(name: &str, source: &str, at: i64) -> CachedName {
+        CachedName {
+            name: name.into(),
+            source: source.into(),
+            generated_at: at,
+            input_hash: "h".into(),
+        }
+    }
+
+    // The brief generator rewrites an entry while a naming pass holds a stale copy
+    // of the file: the newer entry must survive that pass's save.
+    #[test]
+    fn saving_keeps_the_newer_entry_on_a_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet-names.json");
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut stale = NameCache::at(path.clone());
+        stale.put("sid", entry_at("old-title", "llm", now - 1000));
+        stale.put("other", entry_at("other-title", "llm", now));
+
+        let mut brief = NameCache::at(path.clone());
+        brief.put("sid", entry_at("new-title", BRIEF_SOURCE, now));
+        brief.save().unwrap();
+
+        stale.save().unwrap();
+        let merged = NameCache::at(path);
+        assert_eq!(merged.title("sid"), Some("new-title"));
+        assert_eq!(merged.title("other"), Some("other-title"));
+    }
+
+    #[test]
+    fn saving_prunes_entries_older_than_the_cutoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fleet-names.json");
+        let now = chrono::Utc::now().timestamp_millis();
+        // Already on disk, written by someone else: pruned all the same.
+        std::fs::write(
+            &path,
+            serde_json::to_string(&HashMap::from([(
+                "ancient".to_string(),
+                entry_at("ancient-title", "llm", now - PRUNE_AFTER_MS - 1),
+            )]))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut c = NameCache::at(path.clone());
+        c.put("fresh", entry_at("fresh-title", "llm", now));
+        c.save().unwrap();
+        let reread = NameCache::at(path);
+        assert_eq!(reread.title("fresh"), Some("fresh-title"));
+        assert_eq!(reread.title("ancient"), None);
+    }
+
+    #[test]
+    fn a_brief_title_wins_over_the_model_until_a_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = cache_in(dir.path());
+        let s = session("look at this");
+        let id = s.key();
+        cache.put(
+            &id,
+            entry_at(
+                "fleet-title-refresh",
+                BRIEF_SOURCE,
+                chrono::Utc::now().timestamp_millis(),
+            ),
+        );
+        let got = suggest_with(&s, &mut cache, GenOpts::llm(), &live(), |_| {
+            panic!("a brief title must not be re-asked for")
+        })
+        .unwrap();
+        assert_eq!(got.name, "fleet-title-refresh");
+        assert_eq!(got.source, NameSource::Cached);
+
+        let got = suggest_with(
+            &s,
+            &mut cache,
+            GenOpts::llm().with_refresh(true),
+            &live(),
+            |_| Ok("fleet-manual-title".into()),
+        )
+        .unwrap();
+        assert_eq!(got.name, "fleet-manual-title");
+        assert_eq!(cache.brief_title(&id), None);
     }
 
     #[test]

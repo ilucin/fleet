@@ -58,7 +58,9 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
    * Resolves { stdout, stderr } (human output, NO_COLOR); throws FleetCliError.
    */
   async function nameAll({ dryRun = false, timeoutMs: t = 300 * 1000 } = {}) {
-    const args = dryRun ? ['-n', 'name', '--all', '--settled'] : ['name', '--all', '--settled', '--apply'];
+    // Titles are display-only (the name cache): no `/rename` with a generated one. A session alone in a
+    // tmux session a human named is still renamed to that name (`--adopt-tmux`).
+    const args = dryRun ? ['-n', 'name', '--all', '--settled'] : ['name', '--all', '--settled', '--adopt-tmux'];
     try {
       const { stdout, stderr } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
       return { stdout: stdout ?? '', stderr: stderr ?? '' };
@@ -75,8 +77,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
    * `nameAll`, for a session just spawned (lib/autoname.mjs#createSpawnNamer) or a manual
    * regenerate (`refresh`: skip the cache). Output as `nameAll`. Throws FleetCliError.
    */
-  async function nameOne({ target, refresh = false, timeoutMs: t = 120 * 1000 } = {}) {
-    const args = ['name', String(target), '--apply', ...(refresh ? ['--refresh'] : [])];
+  async function nameOne({ target, refresh = false, apply = false, timeoutMs: t = 120 * 1000 } = {}) {
+    const args = ['name', String(target), ...(apply ? ['--apply'] : []), ...(refresh ? ['--refresh'] : [])];
     try {
       const { stdout, stderr } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
       return { stdout: stdout ?? '', stderr: stderr ?? '' };

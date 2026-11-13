@@ -26,7 +26,7 @@ phone ──http──▶ workstation:7777 (self=workstation) ──http──�
 ```
 server.mjs            wiring: config → deps → API → HTTP server → listen
 lib/config.mjs        shared fleet config loader + binary resolution
-lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --apply`, `usage --json`, `config set`, `--local stack … --json`, `--local restore … --json`, …)
+lib/fleet-cli.mjs     the ONLY place that invokes the `fleet` CLI (`list --json`, `name --all --settled --adopt-tmux`, `usage --json`, `config set`, `--local stack … --json`, `--local restore … --json`, …)
 lib/fleet.mjs         local discovery: cache (2s TTL), in-flight de-dup, never throws
 lib/backends.mjs      peek/send/keys straight to tmux / iTerm2 (osascript)
 lib/transcript.mjs    transcript JSONL → chat messages (Claude Code; Codex rollouts and pi sessions via the row's `transcript` path)
@@ -35,7 +35,8 @@ lib/repos.mjs         Settings → Git repos: `fleet repos` list/sync/timer, val
 lib/jobs.mjs          Bots screen: `fleet jobs` (alias of `fleet bots`) list / show / run now / enable|disable, job-name validation
 lib/spawn.mjs         new tmux session + `claude [--model <id>] [-n <name>] '<prompt>'`, auto-accept folder trust
 lib/kill.mjs          close a session: SIGTERM/SIGKILL Claude, then its tmux session/window or iTerm tab
-lib/autoname.mjs      periodic `fleet name --all --apply` + generic-tmux-name sync
+lib/autoname.mjs      periodic `fleet name --all --settled --adopt-tmux` (display titles) + the spawn pass
+lib/titles.mjs        the brief's `## Title` → `~/.claude/fleet-names.json` (source `brief`)
 lib/grouping.mjs      periodic `fleet group` over the merged fleet (the grouping host only)
 lib/snapshot.mjs      warm stale-while-revalidate snapshot of the merged /api/fleet
 lib/uploads.mjs       dropped/pasted files → <uploads dir>/YYYY-MM-DD/<rand>-<name> (streamed, size-capped, daily cleanup)
@@ -126,8 +127,8 @@ chars (+ `…`) for transport: the first prompt can run to 10 KB and the list sh
 Every other field, `context` included, is passed through untouched (older CLIs omit `context`;
 UIs treat a missing one as unknown).
 
-The naming pass is `fleet name --all --apply` (timeout 5 min, `NO_COLOR=1`); its human output is
-parsed line by line: `<from>  →  <to>` renamed, `⏸ …` held (waiting on a prompt), `✕ …` error,
+The naming pass is `fleet name --all --settled --adopt-tmux` (timeout 5 min, `NO_COLOR=1`); its human output is
+parsed line by line: `<from>  →  <to>` titled (or renamed, for an adopted tmux name), `⏸ …` held (waiting on a prompt), `✕ …` error,
 `⧉ …` tmux note (the CLI renames the tmux session with the title).
 
 A rename is `fleet rename <session_id> <title> --json` (timeout 20s): the report
@@ -420,26 +421,27 @@ a placeholder page at `/`.
 ## Auto-naming
 
 Sessions started without a name keep Claude's cwd+hash fallback (`project-9d`). `fleet name`
-generates task-shaped names (`claude -p`, cached) and applies them with Claude's own `/rename`,
-holding sessions waiting on a prompt, but only when someone runs it. The web server is the
-scheduler: each host's server runs `fleet name --all --apply` every
+generates task-shaped titles (`claude -p`) into the name cache (`~/.claude/fleet-names.json`),
+which every view draws as `display_title`; nothing automatic sends `/rename` with one. The web
+server is the scheduler: each host's server runs `fleet name --all --settled --adopt-tmux` every
 `web.autoName.intervalMinutes` (default 5, first run 60s after start) and on
 `POST /api/hosts/:host/autoname` (⋯ menu → Run now). It already runs on every host, inside tmux,
 which on a headless machine is often the one place `claude -p` can reach a logged-in keychain (a
 plain ssh shell may not).
 
-There is one rename path: the CLI renames the Claude session (the title) and the tmux session
-follows as a slug of it, only for a tmux session that is that one Claude session's own. A tmux
-session somebody named by hand (`fleet new fix-login`) is not clobbered — the CLI adopts its name
-as the title instead of generating one. The server touches no tmux names itself (docs/architecture.md
+That title is provisional, built from the opening prompts. Once the session has a brief, each brief
+call also answers a `## Title` (fed the current one, kept unless the work's focus changed) and
+`lib/titles.mjs` stores it with source `brief`; `fleet name` then serves it without a model call
+(until `--refresh`). The one rename left: a session alone in a tmux session somebody named by hand
+(`fleet new fix-login`) adopts that name as its Claude name (`--adopt-tmux`). The server touches no tmux names itself (docs/architecture.md
 → Session titles). Runs are de-duplicated; `/api/health` reports `autoName.lastRun`.
 
 After an unnamed spawn with a first prompt (auto-naming on), `createSpawnNamer` names that one
 session without waiting for the schedule: after 8, 10, 12, 15, 20, 25 and 30s (~2 min) it looks
 the session up by its tmux name in a fresh `fleet list`, skips the try while it has not
 registered or is still busy on its first turn, stops once it no longer carries a derived name,
-and otherwise runs `fleet name <session_id> --apply` — done when renamed, retried when held
-(waiting on a prompt) or failed. Out of tries, the periodic pass picks it up.
+and otherwise runs `fleet name <session_id>` (a provisional title, no `/rename`) — done once it
+prints one, retried when it failed. Out of tries, the periodic pass picks it up.
 
 ## Smart grouping
 

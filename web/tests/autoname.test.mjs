@@ -24,12 +24,12 @@ test('parseNameOutput splits renamed / tmux / held / errors', () => {
   assert.deepEqual(parseNameOutput('no sessions still carry a Claude-derived name — nothing to rename').renamed, []);
 });
 
-test('fleet CLI nameAll runs `fleet name --all --apply` (tmux synced by the CLI) with NO_COLOR (dry run: `-n name --all`)', async () => {
+test('fleet CLI nameAll runs `fleet name --all --settled --adopt-tmux` (titles only, no /rename) with NO_COLOR (dry run: `-n name --all`)', async () => {
   const calls = [];
   const run = async (bin, args, opts) => (calls.push({ bin, args, opts }), { stdout: 'x', stderr: '' });
   const cli = createFleetCli({ run, bin: '/x/fleet' });
   assert.deepEqual(await cli.nameAll(), { stdout: 'x', stderr: '' });
-  assert.deepEqual(calls[0].args, ['name', '--all', '--settled', '--apply']);
+  assert.deepEqual(calls[0].args, ['name', '--all', '--settled', '--adopt-tmux']);
   assert.equal(calls[0].bin, '/x/fleet');
   assert.equal(calls[0].opts.env.NO_COLOR, '1');
   await cli.nameAll({ dryRun: true });
@@ -75,11 +75,13 @@ test('start schedules a first run after the initial delay, stop cancels it', asy
   assert.equal(an.lastRun.reason, 'scheduled');
 });
 
-test('fleet CLI nameOne runs `fleet name <id> --apply` with NO_COLOR', async () => {
+test('fleet CLI nameOne runs `fleet name <id>` (a title, no /rename unless apply) with NO_COLOR', async () => {
   const calls = [];
   const cli = createFleetCli({ run: async (bin, args, opts) => (calls.push([bin, args, opts.env.NO_COLOR]), { stdout: 'a  →  b\n', stderr: '' }) });
   const out = await cli.nameOne({ target: 'abc-123' });
-  assert.deepEqual(calls[0], ['fleet', ['name', 'abc-123', '--apply'], '1']);
+  assert.deepEqual(calls[0], ['fleet', ['name', 'abc-123'], '1']);
+  await cli.nameOne({ target: 'abc-123', refresh: true, apply: true });
+  assert.deepEqual(calls[1][1], ['name', 'abc-123', '--apply', '--refresh']);
   assert.equal(out.stdout, 'a  →  b\n');
 });
 

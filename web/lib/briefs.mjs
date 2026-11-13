@@ -137,7 +137,7 @@ function capText(s, max) {
 }
 
 /** The whole prompt handed to `claude -p`. Pure. */
-export function buildPrompt({ brief, delta, host, cwd, branch, todosFromSession, maxBriefChars = 3000, recap = false }) {
+export function buildPrompt({ brief, delta, host, cwd, branch, todosFromSession, maxBriefChars = 3000, recap = false, title = null }) {
   const where = [host ? `host ${host}` : null, cwd ? `directory ${cwd}` : null, branch ? `git branch ${branch}` : null].filter(Boolean).join(', ');
   const current = [`## Summary\n${brief.summary || '(none yet)'}`, todosFromSession ? null : `## Todos\n${brief.todosText || '(none yet)'}`]
     .filter(Boolean)
@@ -150,9 +150,19 @@ export function buildPrompt({ brief, delta, host, cwd, branch, todosFromSession,
     `${recap ? 'The recent conversation' : 'What happened since the brief was last updated'} (user prompts and the assistant's replies, truncated):\n<conversation>\n${delta.text || '(nothing)'}\n</conversation>`,
     'Update the brief: keep what is still true, fix what changed, add what is new. Do not rewrite it from scratch — unless the session has clearly moved on to a different task, then write the Summary for that task.',
     'Answer with ONLY the following markdown, nothing before or after it:',
-    todosFromSession
-      ? '## Summary\n<at most 3 sentences, under 80 words: what exactly the session is doing and why, where it stands now, and what comes next; name the repo, branch or host only where it adds something beyond the location above>'
-      : '## Summary\n<at most 3 sentences, under 80 words: what exactly the session is doing and why, where it stands now, and what comes next; name the repo, branch or host only where it adds something beyond the location above>\n\n## Todos\n- [x] <done todo>\n- [ ] <open todo>\n(3–8 short todos in order; keep existing todos and their wording while accurate, tick finished ones, add what comes next)',
+    [
+      '## Summary\n<at most 3 sentences, under 80 words: lead with what the session is working on NOW and why, then where it stands and what comes next; earlier work only if it still matters; name the repo, branch or host only where it adds something beyond the location above>',
+      todosFromSession
+        ? null
+        : '## Todos\n- [x] <done todo>\n- [ ] <open todo>\n(3–8 short todos in order; keep existing todos and their wording while accurate, tick finished ones, add what comes next)',
+      `## Title\n<ONE lowercase kebab-case slug of 2-5 words, at most 32 characters, in English: <area>-<what>, where <area> is the repo or project (or the domain outside a repo) and <what> names the work the session is doing now, e.g. fleet-brief-prompt, api-upload-retries; never vague words (work, session, misc, task); no quotes>${
+        title
+          ? `\n(Current title: ${title}. Repeat it exactly unless the focus of the work has changed or it no longer describes the session.)`
+          : ''
+      }`,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
   ];
   return out.join('\n\n');
 }
@@ -199,6 +209,7 @@ export function createBriefs({
   log = () => {},
   home = os.homedir(),
   prStates = null, // lib/pr-state.mjs: PR resource url → draft | open | merged | closed
+  titles = null, // lib/titles.mjs#createTitleStore: current title in, `## Title` answer out (null: none)
 }) {
   if (!store || !extractor || typeof ask !== 'function') throw new TypeError('store, extractor and ask are required');
   const cfg = settings;
@@ -297,6 +308,26 @@ export function createBriefs({
     return memFor(id).lastGenAt ?? (Date.parse(brief.meta.generatedAt ?? '') || null);
   }
 
+  function currentTitle(id) {
+    try {
+      return titles?.read(id) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Store the brief's title (re-stamped even when unchanged, so it is not pruned). → title | null. */
+  function writeTitle(id, title) {
+    if (!titles) return null;
+    try {
+      titles.write(id, title);
+      return title;
+    } catch (err) {
+      log(`[briefs] ${id.slice(0, 8)}: title not saved: ${err?.message ?? err}`);
+      return null;
+    }
+  }
+
   /** The model call for one session. Caller holds the slot (`busy`). */
   async function generate(session, ext, gi, { reason }) {
     const id = session.session_id;
@@ -318,6 +349,7 @@ export function createBriefs({
       todosFromSession: Boolean(ext.todos),
       maxBriefChars: cfg.maxBriefChars,
       recap,
+      title: currentTitle(id),
     });
     const startedAt = now();
     calls.push(startedAt);
@@ -352,7 +384,8 @@ export function createBriefs({
     fresh.meta.generatedThrough = delta.end;
     fresh.meta.generatedAt = iso(startedAt);
     await save(id, fresh);
-    lastRun = { at: startedAt, ms: now() - startedAt, id, reason, ok: true, inputChars: prompt.length, outputChars: out.length };
+    const title = parsed.title ? writeTitle(id, parsed.title) : null;
+    lastRun = { at: startedAt, ms: now() - startedAt, id, reason, ok: true, inputChars: prompt.length, outputChars: out.length, title };
     log(`[briefs] ${tag}: updated in ${((now() - startedAt) / 1000).toFixed(1)}s (${out.length} chars out)`);
     return lastRun;
   }
