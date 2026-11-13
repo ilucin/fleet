@@ -1023,7 +1023,7 @@ callsLastHour, maxCallsPerHour, generating, lastRun }`.
 **PR state.** GET/PUT brief bodies give each `PR` resource with a GitHub url a `prState`
 (`draft` | `open` | `merged` | `closed`, null = not known), from one `gh pr view` per PR on the
 answering host, cached (open ones ~3 min, merged / closed hours); a GET waits up to 3s for a
-missing one, then the next poll fills it in. The Details panel shows it as a badge on the PR row.
+missing one, then the next poll fills it in. The Details panel shows it as the PR row's icon (its colour and shape; the label as its tooltip).
 The same call reads the head branch: `prBranch` (null until known) — the PR row's Review opens
 the diff reviewer on the worktree in `worktrees` with that branch.
 

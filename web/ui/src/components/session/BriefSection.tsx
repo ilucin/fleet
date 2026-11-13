@@ -437,13 +437,16 @@ function ResourceRow({ r, fileLinks, onReview }: { r: BriefResource; fileLinks: 
   if (r.url) {
     return (
       <li className={rowClass}>
-        {pr ? <pr.icon className={cn('mt-0.5 size-4 shrink-0', pr.className)} aria-hidden /> : icon}
-        <a href={r.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, pr && 'mr-auto')} title={r.url}>
+        {pr ? (
+          <span role="img" aria-label={pr.label} title={pr.label} className="mt-0.5 shrink-0">
+            <pr.icon className={cn('size-4', pr.className)} aria-hidden />
+          </span>
+        ) : (
+          icon
+        )}
+        <a href={r.url} target="_blank" rel="noopener noreferrer" className={cn(linkClass, 'mr-auto')} title={r.url}>
           {r.label || r.url}
         </a>
-        {pr ? (
-          <span className={cn('mt-px shrink-0 rounded-full border px-1.5 text-[0.6875rem] leading-[1.125rem] font-medium whitespace-nowrap', pr.className)}>{pr.label}</span>
-        ) : null}
         {onReview ? <ReviewButton onClick={onReview} title={`Review ${r.label || 'this PR'}: the diff of its worktree (${r.prBranch}) only`} /> : null}
       </li>
     )
