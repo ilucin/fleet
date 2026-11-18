@@ -415,6 +415,164 @@ pub fn launchd_agent(label: &str, plist: &str, log: &Path, o: &ServiceOpts) -> R
     Ok(())
 }
 
+/// One word of a systemd unit line (`ExecStart=`, `Environment=`): `%` doubled (systemd
+/// expands `%x` specifiers), quoted when it has whitespace, quotes or backslashes.
+pub fn systemd_quote(s: &str) -> String {
+    let s = s.replace('%', "%%");
+    if s.is_empty()
+        || s.chars()
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '\\'))
+    {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s
+    }
+}
+
+/// A oneshot systemd user service running `exe args…` with this config and `PATH` — what a
+/// fleet timer (`fleet-bots.timer`, `fleet-repos.timer`) starts. `keep_children`: leave what
+/// the run spawned (a tmux server a bot session started) alive when it exits.
+pub fn systemd_oneshot(
+    description: &str,
+    exe: &Path,
+    args: &[&str],
+    config_path: &Path,
+    path_env: &str,
+    keep_children: bool,
+) -> String {
+    let mut exec = vec![systemd_quote(&exe.display().to_string())];
+    exec.extend(args.iter().map(|a| systemd_quote(a)));
+    let env = |k: &str, v: &str| systemd_quote(&format!("{k}={v}"));
+    let kill = if keep_children {
+        "# A tmux server a run starts must outlive it (launchd: AbandonProcessGroup).\nKillMode=process\n"
+    } else {
+        ""
+    };
+    format!(
+        "[Unit]\nDescription={description}\n\n[Service]\nType=oneshot\nExecStart={exec}\nEnvironment={cfg}\nEnvironment={path}\n{kill}",
+        exec = exec.join(" "),
+        cfg = env("FLEET_CONFIG", &config_path.display().to_string()),
+        path = env("PATH", path_env),
+    )
+}
+
+/// The timer that starts `<name>.service` soon after the user manager starts (login, or the
+/// WSL distro booting), when enabled, and then every `every_secs` (launchd: `RunAtLoad` +
+/// `StartInterval`). A start time already past when the timer is (re)started elapses at once.
+pub fn systemd_timer(description: &str, every_secs: u64, accuracy_secs: u64) -> String {
+    format!(
+        "[Unit]\nDescription={description}\n\n[Timer]\nOnStartupSec=10s\nOnUnitActiveSec={every_secs}s\nAccuracySec={accuracy_secs}s\n\n[Install]\nWantedBy=timers.target\n"
+    )
+}
+
+/// Is there a systemd user manager to talk to (`systemctl --user` works)? False on hosts
+/// without systemd, and on WSL without `systemd=true` in /etc/wsl.conf.
+pub fn systemd_user_available() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Where systemd looks for user units: `${XDG_CONFIG_HOME:-~/.config}/systemd/user`.
+pub fn systemd_user_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("systemd/user"))
+}
+
+/// Write (or remove) `<name>.service` + `<name>.timer` in the systemd user dir, reload, and
+/// enable + (re)start the timer — or, with `--print`, only print both. The systemd twin of
+/// [`launchd_agent`]. `no_systemd`: the error when there is no user manager to load them into.
+pub fn systemd_timer_agent(
+    name: &str,
+    service: &str,
+    timer: &str,
+    no_systemd: &str,
+    o: &ServiceOpts,
+) -> Result<()> {
+    let dir = systemd_user_dir().ok_or_else(|| Error::Other("no config directory".into()))?;
+    let service_path = dir.join(format!("{name}.service"));
+    let timer_path = dir.join(format!("{name}.timer"));
+    let show = |p: &Path| tools::tildify(&p.display().to_string());
+    if o.print {
+        println!("# {}", show(&service_path));
+        print!("{service}");
+        println!("\n# {}", show(&timer_path));
+        print!("{timer}");
+        return Ok(());
+    }
+    let dry = hosts::dry_run();
+    let load = !o.no_load;
+    if load && !dry && !o.uninstall && !systemd_user_available() {
+        return Err(Error::exit(1, no_systemd));
+    }
+    let systemctl = |args: &[&str], quiet: bool| -> Result<bool> {
+        let mut c = Command::new("systemctl");
+        c.arg("--user").args(args);
+        if dry {
+            println!("{}", hosts::display_command(&c));
+            return Ok(true);
+        }
+        if quiet {
+            c.stderr(std::process::Stdio::null());
+        }
+        Ok(c.status().is_ok_and(|s| s.success()))
+    };
+    let timer_unit = format!("{name}.timer");
+    if o.uninstall {
+        // Not enabled, or no user manager at all: nothing to stop — still remove the files.
+        let loaded = load && (dry || systemd_user_available());
+        if loaded {
+            systemctl(&["disable", "--now", &timer_unit], true)?;
+        }
+        for p in [&timer_path, &service_path] {
+            if dry {
+                println!("rm {}", p.display());
+            } else if p.exists() {
+                std::fs::remove_file(p)?;
+                println!("removed {}", show(p));
+            }
+        }
+        if loaded {
+            systemctl(&["daemon-reload"], false)?;
+        }
+        return Ok(());
+    }
+    for (p, body) in [(&service_path, service), (&timer_path, timer)] {
+        if dry {
+            println!("write {}", p.display());
+        } else {
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(p, body)?;
+            println!("wrote {}", show(p));
+        }
+    }
+    if !load {
+        println!(
+            "load it with: systemctl --user daemon-reload && systemctl --user enable --now {timer_unit}"
+        );
+        return Ok(());
+    }
+    // restart, not just enable --now: a changed timer only takes effect once restarted, and
+    // the restart also runs the service right away.
+    let ok = systemctl(&["daemon-reload"], false)?
+        && systemctl(&["enable", &timer_unit], false)?
+        && systemctl(&["restart", &timer_unit], false)?;
+    if !ok {
+        return Err(Error::exit(
+            1,
+            format!(
+                "systemctl --user could not enable {timer_unit} — see: systemctl --user status {timer_unit}"
+            ),
+        ));
+    }
+    if !dry {
+        println!("enabled {timer_unit} — logs: journalctl --user -u {name}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +665,48 @@ mod tests {
         let u = systemd_unit(Path::new("/x/fleet"), Path::new("/c.json"));
         assert!(u.contains("ExecStart=/x/fleet web serve"));
         assert!(u.contains("FLEET_CONFIG=/c.json"));
+    }
+
+    #[test]
+    fn systemd_quote_escapes_specifiers_and_spaces() {
+        assert_eq!(systemd_quote("/x/fleet"), "/x/fleet");
+        assert_eq!(systemd_quote("50%"), "50%%");
+        assert_eq!(systemd_quote("/a b/fleet"), "\"/a b/fleet\"");
+        assert_eq!(systemd_quote(r#"say "hi"\"#), r#""say \"hi\"\\""#);
+        assert_eq!(systemd_quote(""), "\"\"");
+    }
+
+    #[test]
+    fn systemd_oneshot_shape() {
+        let u = systemd_oneshot(
+            "fleet test",
+            Path::new("/x/my fleet"),
+            &["--local", "bots", "tick", "-q"],
+            Path::new("/c.json"),
+            "/usr/bin:/bin",
+            true,
+        );
+        assert!(u.starts_with("[Unit]\nDescription=fleet test\n"), "{u}");
+        assert!(u.contains("\n[Service]\nType=oneshot\n"), "{u}");
+        assert!(
+            u.contains("\nExecStart=\"/x/my fleet\" --local bots tick -q\n"),
+            "{u}"
+        );
+        assert!(u.contains("\nEnvironment=FLEET_CONFIG=/c.json\n"), "{u}");
+        assert!(u.contains("\nEnvironment=PATH=/usr/bin:/bin\n"), "{u}");
+        assert!(u.contains("\nKillMode=process\n"), "{u}");
+        assert!(!u.contains("[Install]"), "started by its timer only: {u}");
+        let u = systemd_oneshot("t", Path::new("/x"), &[], Path::new("/c"), "/bin", false);
+        assert!(!u.contains("KillMode"), "{u}");
+    }
+
+    #[test]
+    fn systemd_timer_shape() {
+        let t = systemd_timer("fleet test timer", 600, 30);
+        assert!(
+            t.contains("\n[Timer]\nOnStartupSec=10s\nOnUnitActiveSec=600s\nAccuracySec=30s\n"),
+            "{t}"
+        );
+        assert!(t.ends_with("[Install]\nWantedBy=timers.target\n"), "{t}");
     }
 }

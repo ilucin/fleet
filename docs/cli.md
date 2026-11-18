@@ -636,7 +636,7 @@ left alone. Config: `repos` in [the config](architecture.md#config), or the web 
 | --- | --- |
 | `fleet repos [--json] [--all]` | each repo (`--all`: excluded ones too, `excluded: true`): branch, position (`↓behind ↑ahead ✎dirty`, as of its last fetch — no network), when it was last fetched, its interval and the last sync's outcome |
 | `fleet repos sync [NAME…] [--due] [--notify] [-q] [--json]` | `git fetch --all --prune` (8 in parallel, 10 min timeout, ssh in batch mode), then: `merge --ff-only @{u}` on the checked-out branch when it is only behind; and the remote's default branch (`origin/HEAD`, e.g. `develop`) is fast-forwarded with `update-ref` when it is checked out nowhere. Outcomes: `updated` · `current` · `ahead` · `diverged` (both moved) · `blocked` (local changes in the way) · `busy` (rebase/merge/… in progress — fetched only) · `noUpstream` · `noRemote` · `fetchFailed`. `NAME` is a directory name or a `~/…` path. `--due`: only repos whose interval is up (a daily one is also due on a new local day; a failing fetch backs off 1, 2, 4… ticks). `--notify`: macOS notification when a repo newly diverges or is blocked, or fails to fetch 3 times running. `-q`: print only updates and problems, timestamped. One run at a time (a lock next to the state file; `-q` exits 0 quietly when locked). State: `${XDG_STATE_HOME:-~/.local/state}/fleet/repos.json` (`FLEET_REPOS_STATE`) |
-| `fleet repos install-service` | macOS: a launchd agent `fleet.repos` that runs `fleet --local repos sync --due --notify -q` every 10 minutes and at login (`--uninstall`, `--no-load`, `--print`); logs to `~/Library/Logs/fleet.repos.log`. On another host: `fleet -H <host> repos install-service` |
+| `fleet repos install-service` | macOS: a launchd agent `fleet.repos` that runs `fleet --local repos sync --due --notify -q` every 10 minutes and at login; logs to `~/Library/Logs/fleet.repos.log`. Linux (and WSL with systemd): a systemd user timer — `fleet-repos.service` (oneshot `fleet --local repos sync --due -q`) + `fleet-repos.timer` (every 10 minutes and soon after the user manager starts) in `~/.config/systemd/user/`, then `daemon-reload` + enable and (re)start the timer; logs: `journalctl --user -u fleet-repos`. Without a systemd user manager (`systemctl --user` fails) it errors with the cron line to use instead. `--uninstall`, `--no-load` (write/remove the files only), `--print` (only print them) on both. The timer runs every 10 minutes whatever `every` says: `--due` picks the repos whose interval is up. On another host: `fleet -H <host> repos install-service` |
 
 `--json` of `sync` is the list of results `{ name, path, branch, outcome, pulled, defaultBranch?: { branch, pulled }, detail? }`;
 of `repos` the rows `{ name, path, every, excluded, due, branch, upstream, ahead, behind, dirty, busy, lastAttempt, lastFetch, outcome, detail }` (times in ms epoch, `every` in seconds).
@@ -652,7 +652,8 @@ session spawns in turn (`fleet spawn`, `fleet stack spawn`, a handoff — on thi
 Bots used to be called **jobs**: `fleet jobs` is an alias of `fleet bots`, a `jobs` config
 section is still read (a name in both: the `bots` one wins), and the names below that carry `job`
 — the web API (`/api/hosts/:host/jobs`), `--json` fields, `origin.job`, `FLEET_JOB_RUN`,
-`FLEET_JOBS_DIR`, the state dir and the launchd label `fleet.jobs` — keep it.
+`FLEET_JOBS_DIR`, the state dir and the launchd label `fleet.jobs` — keep it (the newer systemd
+units are `fleet-bots.*`).
 
 ```json
 "bots": {
@@ -692,7 +693,7 @@ as `missed`; a slot that comes while a session of the bot is still working is `s
 | `fleet bots tick [-q]` | fire due bots, record missed / skipped slots, close sessions past `keep` or done for `closeDone` — what the service runs. Exits 1 when a bot failed to start |
 | `fleet bots set <name> [--keep <span>] [--close-done <span>]` | change `keep` / `closeDone` (`6h`, `2d`, `30m`, or `never`); the Bots screen edits them in place |
 | `fleet bots enable\|disable <name>` | set `<section>.<name>.enabled` (`bots`, or `jobs` for a bot still there) |
-| `fleet bots install-service` | macOS: a launchd agent `fleet.jobs` that runs `fleet --local jobs tick -q` every minute and at login (`--uninstall`, `--no-load`, `--print`); logs to `~/Library/Logs/fleet.jobs.log` |
+| `fleet bots install-service` | macOS: a launchd agent `fleet.jobs` that runs `fleet --local jobs tick -q` every minute and at login; logs to `~/Library/Logs/fleet.jobs.log`. Linux (and WSL with systemd): a systemd user timer — `fleet-bots.service` (oneshot `fleet --local bots tick -q`, `KillMode=process` so a tmux server a bot starts outlives the tick) + `fleet-bots.timer` (every minute and soon after the user manager starts) in `~/.config/systemd/user/`, then `daemon-reload` + enable and (re)start the timer; logs: `journalctl --user -u fleet-bots`. Without a systemd user manager it errors with the cron line to use instead. `--uninstall`, `--no-load` (write/remove the files only), `--print` (only print them) on both. `fleet doctor` warns when a bot is enabled and the service is missing |
 
 A run's first session is the tmux session `<bot>-<MMDD>-<HHMM>` (Claude `-n` the same). Every bot
 session has `FLEET_JOB_RUN=<bot>/<run>` in its tmux environment and the pane option
@@ -745,7 +746,7 @@ there is no webhook: the tick polls.
 Everything else (`dir`, `command`, `harness`, `model`, `ghIdentity`, `enabled`, `keep`) is as
 for any bot. A bot has `schedule` or `on`, not both.
 
-**How it polls.** `fleet bots tick` (the `fleet.jobs` launchd agent, every minute — install it
+**How it polls.** `fleet bots tick` (the `fleet.jobs` launchd agent or `fleet-bots.timer`, every minute — install it
 with `fleet bots install-service` on the host that lists the bot) polls each GitHub bot every
 `every` with one `gh api -i repos/<repo>/git/matching-refs/heads/<prefix>` (the pattern's literal
 leading directories, e.g. `release/`), matching the pattern on what comes back. It sends the
@@ -885,7 +886,7 @@ Marks: `${XDG_STATE_HOME:-~/.local/state}/fleet/done.json` (`FLEET_DONE_STATE`),
 
 One-off sessions started later on this host — at a set time, or on a Productive task's start date.
 No config: entries are state, added and cancelled with the commands below (or the web UI). The
-`fleet.jobs` launchd agent ([`bots install-service`](#bots)) fires them: every `bots tick` ends
+`fleet.jobs` launchd agent / `fleet-bots.timer` ([`bots install-service`](#bots)) fires them: every `bots tick` ends
 with the scheduled sessions, so a host needs that service for them to run.
 
 | command | does |

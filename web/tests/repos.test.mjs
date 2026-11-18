@@ -11,7 +11,7 @@ import { createHttpServer } from '../lib/app.mjs';
 import { createFleet } from '../lib/fleet.mjs';
 import { createFleetCli } from '../lib/fleet-cli.mjs';
 import { normalizeConfig } from '../lib/config.mjs';
-import { createRepos, reposSettings, spanSeconds, validateReposSettings } from '../lib/repos.mjs';
+import { createRepos, reposServiceFile, reposSettings, spanSeconds, validateReposSettings } from '../lib/repos.mjs';
 
 function tmpdir(t, prefix) {
   const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -47,8 +47,12 @@ function fakeRun(h) {
       if (args[2] === '--json') return { stdout: JSON.stringify([ROW]), stderr: '' };
       if (args[2] === 'sync') return { stdout: JSON.stringify([{ name: 'app', path: '~/Code/app', outcome: 'updated', pulled: 2 }]), stderr: '' };
       if (args[2] === 'install-service') {
-        if (args.includes('--uninstall')) fs.rmSync(h.plist, { force: true });
-        else fs.writeFileSync(h.plist, '<plist/>');
+        if (args.includes('--uninstall')) {
+          fs.rmSync(h.serviceFile, { force: true });
+        } else {
+          fs.mkdirSync(path.dirname(h.serviceFile), { recursive: true });
+          fs.writeFileSync(h.serviceFile, 'unit');
+        }
         return { stdout: '', stderr: '' };
       }
     }
@@ -61,8 +65,8 @@ async function startPair(t) {
   const hosts = {};
   for (const name of ['laptop', 'workstation']) {
     const home = path.join(root, name);
-    fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
-    hosts[name] = { home, configFile: path.join(home, 'config.json'), calls: [], plist: path.join(home, 'Library', 'LaunchAgents', 'fleet.repos.plist') };
+    fs.mkdirSync(home, { recursive: true });
+    hosts[name] = { home, configFile: path.join(home, 'config.json'), calls: [], serviceFile: reposServiceFile({ home, env: {} }) };
   }
   const urls = {};
   const handles = {};
@@ -88,7 +92,7 @@ async function startPair(t) {
       backend: {},
       transcripts: {},
       spawner: {},
-      repos: createRepos({ cli, configFile: h.configFile, self: name, home: h.home }),
+      repos: createRepos({ cli, configFile: h.configFile, self: name, home: h.home, env: {} }),
       fleetRefreshMs: 60_000,
     });
     t.after(() => api.stop());
@@ -129,7 +133,7 @@ test('GET/PUT repos on this host and through a peer; unknown repos keys survive'
   assert.equal(got.status, 200);
   assert.equal(got.body.host, 'workstation');
   assert.deepEqual(got.body.repos, [ROW]);
-  assert.deepEqual(got.body.service, { installed: false, supported: process.platform === 'darwin', tickMinutes: 10 });
+  assert.deepEqual(got.body.service, { installed: false, supported: ['darwin', 'linux'].includes(process.platform), tickMinutes: 10 });
   assert.ok(hosts.workstation.calls.some((a) => a.join(' ') === '--local repos --json --all'));
 
   const put = await call(`${urls.laptop}/api/hosts/workstation/repos`, 'PUT', { roots: ['~/Code', '~/Code/work/repos'], every: '24h', overrides: { app: '30m' }, exclude: [] });
@@ -147,6 +151,14 @@ test('GET/PUT repos on this host and through a peer; unknown repos keys survive'
   assert.match(invalid.body.error, /absolute or start with ~/);
 });
 
+test('the sync timer file: launchd plist on macOS, systemd user timer on Linux', () => {
+  assert.equal(reposServiceFile({ home: '/h', platform: 'darwin', env: {} }), '/h/Library/LaunchAgents/fleet.repos.plist');
+  assert.equal(reposServiceFile({ home: '/h', platform: 'linux', env: {} }), '/h/.config/systemd/user/fleet-repos.timer');
+  assert.equal(reposServiceFile({ home: '/h', platform: 'linux', env: { XDG_CONFIG_HOME: '/x' } }), '/x/systemd/user/fleet-repos.timer');
+  assert.equal(reposServiceFile({ home: '/h', platform: 'linux', env: { XDG_CONFIG_HOME: 'rel' } }), '/h/.config/systemd/user/fleet-repos.timer');
+  assert.equal(reposServiceFile({ home: '/h', platform: 'win32', env: {} }), null);
+});
+
 test('POST repos/sync and repos/service', async (t) => {
   const { hosts, urls } = await startPair(t);
   const s = await call(`${urls.laptop}/api/hosts/laptop/repos/sync`, 'POST', { names: ['app'] });
@@ -159,7 +171,7 @@ test('POST repos/sync and repos/service', async (t) => {
   assert.equal(busy.status, 409);
   assert.equal((await call(`${urls.laptop}/api/hosts/laptop/repos/sync`, 'POST', { names: [3] })).status, 400);
 
-  if (process.platform === 'darwin') {
+  if (['darwin', 'linux'].includes(process.platform)) {
     const on = await call(`${urls.laptop}/api/hosts/workstation/repos/service`, 'POST', { install: true });
     assert.equal(on.status, 200);
     assert.equal(on.body.service.installed, true);

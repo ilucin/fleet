@@ -20,6 +20,8 @@ use crate::error::{Error, Result};
 
 pub const LAUNCHD_LABEL: &str = "fleet.jobs";
 pub const SERVICE_LOG: &str = "Library/Logs/fleet.jobs.log";
+/// The systemd user units off macOS: `fleet-bots.service` + `fleet-bots.timer`.
+pub const SYSTEMD_UNIT: &str = "fleet-bots";
 /// A session is closed by `keep` only once it has also been quiet this long — someone
 /// may have picked the conversation up.
 const QUIET_BEFORE_CLOSE_MS: i64 = 3600 * 1000;
@@ -1399,12 +1401,17 @@ pub fn health() -> Vec<crate::cli::hosts::BotHealth> {
     if !s.jobs.iter().any(|j| j.enabled) {
         return out;
     }
-    if cfg!(target_os = "macos")
-        && let Some(home) = dirs::home_dir()
-        && !home
-            .join(format!("Library/LaunchAgents/{LAUNCHD_LABEL}.plist"))
-            .exists()
-    {
+    // Off macOS only when systemd is there: without it the tick may well run from cron.
+    let missing = if cfg!(target_os = "macos") {
+        dirs::home_dir().is_some_and(|h| {
+            !h.join(format!("Library/LaunchAgents/{LAUNCHD_LABEL}.plist"))
+                .exists()
+        })
+    } else {
+        web::systemd_user_dir().is_some_and(|d| !d.join(format!("{SYSTEMD_UNIT}.timer")).exists())
+            && web::systemd_user_available()
+    };
+    if missing {
         out.push(BotHealth {
             name: String::new(),
             ok: false,
@@ -1697,24 +1704,45 @@ pub fn launchd_plist(exe: &Path, config_path: &Path, path_env: &str, log: &Path)
     )
 }
 
-/// `fleet jobs install-service`.
+/// The systemd twin of [`launchd_plist`] (`fleet-bots.service`): one tick.
+pub fn systemd_service(exe: &Path, config_path: &Path, path_env: &str) -> String {
+    web::systemd_oneshot(
+        "fleet bots tick: start due bots",
+        exe,
+        &["--local", "bots", "tick", "-q"],
+        config_path,
+        path_env,
+        true,
+    )
+}
+
+/// `fleet-bots.timer`: a tick every [`jobs::TICK_SECS`], on time to the second.
+pub fn systemd_timer() -> String {
+    web::systemd_timer("fleet bots tick every minute", jobs::TICK_SECS, 1)
+}
+
+/// `fleet jobs install-service`: a launchd agent on macOS, a systemd user timer elsewhere.
 pub fn install_service(o: ServiceOpts) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(Error::exit(
-            1,
-            "install-service is macOS-only — elsewhere run `fleet bots tick --quiet` every minute from cron or a systemd timer",
-        ));
-    }
     let exe = crate::cli::hosts::current_exe()?;
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
-    let log = home.join(SERVICE_LOG);
     let tmux = tools::find_binary("tmux").unwrap_or_else(|| "/opt/homebrew/bin/tmux".into());
     let path = web::service_path(
         &tmux,
         &[tools::find_binary("claude"), tools::find_binary("node")],
     );
-    let plist = launchd_plist(&exe, &config::path(), &path, &log);
-    web::launchd_agent(LAUNCHD_LABEL, &plist, &log, &o)?;
+    if cfg!(target_os = "macos") {
+        let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+        let log = home.join(SERVICE_LOG);
+        let plist = launchd_plist(&exe, &config::path(), &path, &log);
+        web::launchd_agent(LAUNCHD_LABEL, &plist, &log, &o)?;
+    } else {
+        web::systemd_timer_agent(
+            SYSTEMD_UNIT,
+            &systemd_service(&exe, &config::path(), &path),
+            &systemd_timer(),
+            "no systemd user manager here (systemctl --user does not work) — run `fleet bots tick --quiet` every minute from cron instead",
+            &o,
+        )?;
+    }
     if !o.uninstall && !o.print && !o.no_load && !crate::core::hosts::dry_run() {
         println!("runs due bots every minute — see them with: fleet bots");
     }
@@ -1835,5 +1863,22 @@ mod tests {
         assert!(p.contains("<integer>60</integer>"));
         assert!(p.contains("<key>AbandonProcessGroup</key><true/>"));
         assert!(p.contains(LAUNCHD_LABEL));
+    }
+
+    #[test]
+    fn systemd_units_tick_every_minute_and_outlive_themselves() {
+        let s = systemd_service(Path::new("/x/fleet"), Path::new("/c.json"), "/usr/bin:/bin");
+        assert!(s.contains("\nType=oneshot\n"), "{s}");
+        assert!(
+            s.contains("\nExecStart=/x/fleet --local bots tick -q\n"),
+            "{s}"
+        );
+        assert!(s.contains("\nEnvironment=FLEET_CONFIG=/c.json\n"), "{s}");
+        assert!(s.contains("\nEnvironment=PATH=/usr/bin:/bin\n"), "{s}");
+        assert!(s.contains("\nKillMode=process\n"), "{s}");
+        let t = systemd_timer();
+        assert!(t.contains("\nOnUnitActiveSec=60s\n"), "{t}");
+        assert!(t.contains("\nAccuracySec=1s\n"), "{t}");
+        assert!(t.contains("\nWantedBy=timers.target\n"), "{t}");
     }
 }

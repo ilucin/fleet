@@ -10,9 +10,25 @@ import path from 'node:path';
 
 export const REPOS_LIMITS = Object.freeze({ maxRoots: 20, maxEntries: 300, maxPath: 1024, maxNames: 300 });
 export const REPOS_DEFAULTS = Object.freeze({ roots: ['~/Code'], every: '24h' });
-/** How often the launchd agent runs `sync --due` (crates/fleet/src/core/repos.rs TICK_SECS). */
+/** How often the launchd agent / systemd timer runs `sync --due` (crates/fleet/src/core/repos.rs TICK_SECS). */
 export const REPOS_TICK_MINUTES = 10;
 export const REPOS_LAUNCHD_LABEL = 'fleet.repos';
+/** The systemd user units elsewhere: `fleet-repos.service` + `fleet-repos.timer`. */
+export const REPOS_SYSTEMD_UNIT = 'fleet-repos';
+
+/**
+ * The file whose presence means the sync timer is installed: the launchd plist on macOS, the
+ * systemd user timer on Linux (`${XDG_CONFIG_HOME:-~/.config}/systemd/user`), else null.
+ */
+export function reposServiceFile({ home, platform = process.platform, env = process.env }) {
+  if (platform === 'darwin') return path.join(home, 'Library', 'LaunchAgents', `${REPOS_LAUNCHD_LABEL}.plist`);
+  if (platform === 'linux') {
+    const xdg = env.XDG_CONFIG_HOME;
+    const config = xdg && path.isAbsolute(xdg) ? xdg : path.join(home, '.config');
+    return path.join(config, 'systemd', 'user', `${REPOS_SYSTEMD_UNIT}.timer`);
+  }
+  return null;
+}
 
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const SPAN_RE = /^(\d{1,5})([mhd])$/;
@@ -119,9 +135,9 @@ export function validateReposSettings(body) {
  * @param configFile  the config path the CLI writes (FLEET_CONFIG)
  * @param self        this host's name
  */
-export function createRepos({ cli, configFile, self, home = os.homedir(), fsImpl = fs }) {
+export function createRepos({ cli, configFile, self, home = os.homedir(), fsImpl = fs, platform = process.platform, env = process.env }) {
   let queue = Promise.resolve(); // one write at a time (the CLI's tmp file is fixed)
-  const plist = path.join(home, 'Library', 'LaunchAgents', `${REPOS_LAUNCHD_LABEL}.plist`);
+  const serviceFile = reposServiceFile({ home, platform, env });
 
   function readRaw() {
     let text;
@@ -140,7 +156,8 @@ export function createRepos({ cli, configFile, self, home = os.homedir(), fsImpl
   }
 
   function service() {
-    return { installed: fsImpl.existsSync(plist), supported: process.platform === 'darwin', tickMinutes: REPOS_TICK_MINUTES };
+    // Linux: `install-service` writes a systemd user timer (and errors when there is no systemd).
+    return { installed: serviceFile != null && fsImpl.existsSync(serviceFile), supported: serviceFile != null, tickMinutes: REPOS_TICK_MINUTES };
   }
 
   /** GET: settings + every repo under the roots (excluded ones flagged) + the timer. */
@@ -191,7 +208,7 @@ export function createRepos({ cli, configFile, self, home = os.homedir(), fsImpl
   /** POST service `{ install: boolean }` → the GET shape. */
   async function setService(body) {
     if (typeof body?.install !== 'boolean') return { status: 400, body: { error: 'install must be true or false' } };
-    if (!service().supported) return { status: 501, body: { error: 'the sync timer is macOS-only (launchd)' } };
+    if (!service().supported) return { status: 501, body: { error: 'the sync timer needs macOS (launchd) or Linux (systemd)' } };
     try {
       await cli.reposService({ uninstall: !body.install });
     } catch (err) {

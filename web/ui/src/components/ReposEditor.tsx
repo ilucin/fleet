@@ -211,8 +211,8 @@ export function ReposEditor() {
               <div className="text-sm">Auto-sync</div>
               <div className="text-xs text-dimmer">
                 {data.service.supported
-                  ? `launchd checks every ${data.service.tickMinutes} min (and at login); each repo syncs when its interval is up`
-                  : 'macOS only — elsewhere run `fleet repos sync --due` from cron'}
+                  ? `A timer checks every ${data.service.tickMinutes} min (and at login); each repo syncs when its interval is up`
+                  : 'macOS (launchd) or Linux (systemd) only — elsewhere run `fleet repos sync --due` from cron'}
               </div>
             </div>
             {busy === 'service' ? <Loader2Icon className="size-4 animate-spin text-dimmer" /> : null}
