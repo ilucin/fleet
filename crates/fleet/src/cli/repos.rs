@@ -15,6 +15,8 @@ use crate::error::{Error, Result};
 
 pub const LAUNCHD_LABEL: &str = "fleet.repos";
 pub const SERVICE_LOG: &str = "Library/Logs/fleet.repos.log";
+/// The systemd user units off macOS: `fleet-repos.service` + `fleet-repos.timer`.
+pub const SYSTEMD_UNIT: &str = "fleet-repos";
 
 fn warn_problems(s: &Settings) {
     for p in &s.problems {
@@ -370,24 +372,52 @@ pub fn launchd_plist(exe: &Path, config_path: &Path, path_env: &str, log: &Path)
     )
 }
 
+/// The systemd twin of [`launchd_plist`] (`fleet-repos.service`): one `sync --due`. No
+/// `--notify` — that is macOS Notification Center.
+pub fn systemd_service(exe: &Path, config_path: &Path, path_env: &str) -> String {
+    web::systemd_oneshot(
+        "fleet repos sync: fetch + fast-forward the due repos",
+        exe,
+        &["--local", "repos", "sync", "--due", "-q"],
+        config_path,
+        path_env,
+        false,
+    )
+}
+
+/// `fleet-repos.timer`: every [`repos::TICK_SECS`] — like the launchd agent; `--due` picks
+/// the repos whose own interval (`every`, overrides, backoff) is up.
+pub fn systemd_timer() -> String {
+    web::systemd_timer(
+        &format!("fleet repos sync every {}m", repos::TICK_SECS / 60),
+        repos::TICK_SECS,
+        30,
+    )
+}
+
+/// `fleet repos install-service`: a launchd agent on macOS, a systemd user timer elsewhere.
 pub fn install_service(o: ServiceOpts) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(Error::exit(
-            1,
-            format!(
-                "install-service is macOS-only — elsewhere run `fleet repos sync --due --quiet` every {}m from cron or a systemd timer",
-                repos::TICK_SECS / 60
-            ),
-        ));
-    }
     let exe = crate::cli::hosts::current_exe()?;
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
-    let log = home.join(SERVICE_LOG);
     // git, plus whatever its credential helpers / ssh need (Homebrew first).
     let git = tools::find_binary("git").unwrap_or_else(|| "/usr/bin/git".into());
     let path = web::service_path(&git, &[tools::find_binary("gh")]);
-    let plist = launchd_plist(&exe, &config::path(), &path, &log);
-    web::launchd_agent(LAUNCHD_LABEL, &plist, &log, &o)?;
+    if cfg!(target_os = "macos") {
+        let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+        let log = home.join(SERVICE_LOG);
+        let plist = launchd_plist(&exe, &config::path(), &path, &log);
+        web::launchd_agent(LAUNCHD_LABEL, &plist, &log, &o)?;
+    } else {
+        web::systemd_timer_agent(
+            SYSTEMD_UNIT,
+            &systemd_service(&exe, &config::path(), &path),
+            &systemd_timer(),
+            &format!(
+                "no systemd user manager here (systemctl --user does not work) — run `fleet repos sync --due --quiet` every {}m from cron instead",
+                repos::TICK_SECS / 60
+            ),
+            &o,
+        )?;
+    }
     if !o.uninstall && !o.print && !o.no_load && !crate::core::hosts::dry_run() {
         println!(
             "syncs due repos every {}m (and at login) — see them with: fleet repos",
@@ -422,6 +452,24 @@ mod tests {
         assert!(p.contains("<string>--local</string>"));
         assert!(p.contains(&format!("<integer>{}</integer>", repos::TICK_SECS)));
         assert!(p.contains(LAUNCHD_LABEL));
+    }
+
+    #[test]
+    fn systemd_units_run_sync_due_on_a_timer() {
+        let s = systemd_service(Path::new("/x/fleet"), Path::new("/c.json"), "/usr/bin:/bin");
+        assert!(s.contains("\nType=oneshot\n"), "{s}");
+        assert!(
+            s.contains("\nExecStart=/x/fleet --local repos sync --due -q\n"),
+            "{s}"
+        );
+        assert!(s.contains("\nEnvironment=FLEET_CONFIG=/c.json\n"), "{s}");
+        assert!(!s.contains("--notify"), "{s}");
+        let t = systemd_timer();
+        assert!(
+            t.contains(&format!("\nOnUnitActiveSec={}s\n", repos::TICK_SECS)),
+            "{t}"
+        );
+        assert!(t.contains("\nWantedBy=timers.target\n"), "{t}");
     }
 
     #[test]

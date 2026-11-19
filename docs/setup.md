@@ -223,8 +223,23 @@ after one.
 
 ```sh
 fleet bots install-service         # macOS: launchd agent `fleet.jobs`, every minute; logs to ~/Library/Logs/fleet.jobs.log
+                                   # Linux/WSL: systemd user timer fleet-bots.timer; logs: journalctl --user -u fleet-bots
 fleet bots                         # each bot, its schedule in plain English, next and last run
 ```
+
+`fleet repos install-service` does the same for [repo syncing](cli.md#repos) (`fleet.repos` /
+`fleet-repos.timer`, every 10 minutes). Check the timers with `systemctl --user list-timers 'fleet-*'`.
+
+On Linux these are systemd **user** units: they run while your user manager does — from login
+until your last session ends — unless lingering is on, which starts the manager at boot and keeps
+it running: `loginctl enable-linger $USER`. Without systemd (`systemctl --user` fails),
+`install-service` says so; run the tick from cron instead (`* * * * * fleet bots tick --quiet`).
+
+**WSL**: systemd needs `systemd=true` under `[boot]` in `/etc/wsl.conf` (then `wsl --shutdown`).
+The timers then run only while the distro is up: WSL stops a distro a while after its last
+`wsl.exe` client (terminal) exits, user services or not, and nothing runs until it starts again.
+Enable lingering (above) so the user manager starts with the distro rather than with your first
+shell, and keep the distro alive on a machine that runs bots (e.g. leave a WSL terminal open).
 
 Bot sessions run unattended, so a bot usually sets `command` to a launcher that does not stop for
 permission prompts, and its working directory must already be trusted by Claude Code (a first-run

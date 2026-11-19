@@ -1224,7 +1224,7 @@ enum ReposCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Run `repos sync --due` every 10 minutes and at login (launchd)
+    /// Run `repos sync --due` every 10 minutes and at login (launchd; a systemd user timer elsewhere)
     InstallService {
         /// Remove the service instead
         #[arg(long)]
@@ -1290,7 +1290,7 @@ enum JobsCmd {
         #[arg(long = "close-done")]
         close_done: Option<String>,
     },
-    /// Run `bots tick` every minute and at login (launchd)
+    /// Run `bots tick` every minute and at login (launchd; a systemd user timer elsewhere)
     InstallService {
         /// Remove the service instead
         #[arg(long)]
