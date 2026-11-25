@@ -279,9 +279,8 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
                 </Button>
               ) : null}
               {p.onCode ? (
-                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Code" title="Code: VS Code in Fleet on this session's checkout, the chat beside it" onClick={p.onCode}>
+                <Button variant="outline" size={panel ? 'icon-xs' : 'icon-sm'} aria-label="Code" title="Code: VS Code in Fleet on this session's checkout, the chat beside it" onClick={p.onCode}>
                   <CodeXmlIcon />
-                  Code
                 </Button>
               ) : null}
               {p.editorUrl ? (

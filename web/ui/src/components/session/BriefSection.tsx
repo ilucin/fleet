@@ -21,6 +21,7 @@ import {
   SquareCheckBigIcon,
   SquareIcon,
   StickyNoteIcon,
+  CodeXmlIcon,
 } from 'lucide-react'
 
 import type { BriefResource, BriefWorktree } from '@/api/types'
@@ -415,8 +416,8 @@ function WorktreesGroup({ worktrees, editor, onReview, onCode }: { worktrees: Br
             </span>
             {onReview ? <ReviewButton onClick={() => onReview(w.path)} title={`Review ${w.branch ?? w.display}: the diff of this checkout only`} /> : null}
             {onCode && w.codeUrl ? (
-              <Button variant="outline" size="xs" title={`Code: ${w.display} in VS Code inside Fleet, the chat beside it`} onClick={() => onCode(w.path)}>
-                Code
+              <Button variant="outline" size="icon-xs" className="shrink-0" aria-label="Code" title={`Code: ${w.display} in VS Code inside Fleet, the chat beside it`} onClick={() => onCode(w.path)}>
+                <CodeXmlIcon />
               </Button>
             ) : null}
             {w.editorUrl ? (
