@@ -149,6 +149,10 @@ export function createCodeProxy({ config, log = () => {}, logError = () => {}, s
       await ensureServer();
       // VS Code builds its WebSocket url from Host, and refuses one whose Origin is another host
       // (the browser's Fleet origin may differ from Host behind a proxy or a peer hop).
+      // Through a peer hop Host is this server's name: the browser's comes in x-fleet-code-host.
+      const browserHost = headers['x-fleet-code-host'];
+      delete headers['x-fleet-code-host'];
+      if (typeof browserHost === 'string' && browserHost) headers.host = browserHost;
       if (headers.origin && headers.host) headers.origin = `http://${headers.host}`;
       return { mod: http, options: { socketPath, path: url.pathname + url.search, method: req.method, headers } };
     }
@@ -156,6 +160,8 @@ export function createCodeProxy({ config, log = () => {}, logError = () => {}, s
     if (!base) return { error: `unknown host: ${host}`, status: 404 };
     delete headers.origin;
     delete headers.referer;
+    // VS Code builds its WebSocket url from Host: keep it the browser's, not the peer's.
+    if (!headers['x-fleet-code-host'] && req.headers.host) headers['x-fleet-code-host'] = req.headers.host;
     const dial = peerDial(new URL(`${base.replace(/\/+$/, '')}${url.pathname}${url.search}`));
     return { mod: dial.protocol === 'https:' ? https : http, options: { ...dial.options, method: req.method, headers: { ...headers, ...dial.headers }, agent: dial.agent } };
   }

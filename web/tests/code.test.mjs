@@ -132,3 +132,33 @@ test('web.code off: this host answers 404', async () => {
   });
   assert.equal(res.status, 404);
 });
+
+test('another host: piped to its server, which hands VS Code the browser’s Host', async (t) => {
+  const socketDir = fs.mkdtempSync('/tmp/fct-');
+  const fake = fakeServeWeb();
+  const serve = (code) =>
+    http.createServer(async (req, res) => {
+      if (!(await code.handle(req, res, new URL(req.url, 'http://x')))) {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+  const peerCode = createCodeProxy({ config: { self: 'workstation', peers: {}, code: { enabled: true, cli: process.execPath, socketDir } }, spawnFn: fake.spawnFn });
+  const peer = serve(peerCode);
+  await new Promise((r) => peer.listen(0, '127.0.0.1', r));
+  const front = serve(createCodeProxy({ config: { self: 'laptop', peers: { workstation: `http://127.0.0.1:${peer.address().port}` }, code: { enabled: true } } }));
+  await new Promise((r) => front.listen(0, '127.0.0.1', r));
+  t.after(() => {
+    peerCode.stop();
+    peer.close();
+    front.close();
+    fs.rmSync(socketDir, { recursive: true, force: true });
+  });
+  const port = front.address().port;
+  const res = await fetch(`http://127.0.0.1:${port}/code/workstation/?folder=%2Ftmp`, { headers: { cookie: 'fleet_auth=secret' } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.host, `127.0.0.1:${port}`, 'VS Code sees the host the browser used');
+  assert.equal(body.cookie, null);
+  assert.equal(fake.seen[0].headers['x-fleet-code-host'], undefined);
+});
