@@ -32,10 +32,18 @@ export const DEFAULTS = {
   /** DM the owner when this host goes critical and when it recovers (the Slack bridge's server
    * sends them). Off for a second fleet on the same machine, so one machine alerts once. */
   alerts: true,
+  /** Hold new sessions while this many on the host are working (0: no cap). A rough backstop for
+   * what the load average sees only minutes later (a stack starting siblings at once). */
+  maxBusy: 10,
+  /** While critical, deactivate sessions until the host recovers (lib/relief.mjs). */
+  relief: true,
+  /** …a busy one only once it has been critical this long and no idle one is left (0: never). */
+  reliefBusySeconds: 180,
 };
 
 const rank = (l) => Math.max(0, LEVELS.indexOf(l));
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d);
+const whole = (v, d) => (Number.isInteger(v) && v >= 0 ? v : d);
 
 /** Config `resources` → settings with defaults; anything malformed falls back to the default. */
 export function loadSettings(raw) {
@@ -49,8 +57,14 @@ export function loadSettings(raw) {
     criticalEnterSeconds: num(r.criticalEnterSeconds, DEFAULTS.criticalEnterSeconds),
     exitSeconds: num(r.exitSeconds, DEFAULTS.exitSeconds),
     alerts: r.alerts !== false,
+    maxBusy: whole(r.maxBusy, DEFAULTS.maxBusy),
+    relief: r.relief !== false,
+    reliefBusySeconds: whole(r.reliefBusySeconds, DEFAULTS.reliefBusySeconds),
   };
 }
+
+/** Spawns the cap counts as working before the registry shows them (a stack's siblings at once). */
+const SPAWN_COUNTS_MS = 30 * 1000;
 
 /**
  * `sysctl -n kern.memorystatus_vm_pressure_level kern.memorystatus_level vm.swapusage` →
@@ -159,13 +173,34 @@ export const MAX_OVERRIDE_MINUTES = 24 * 60;
  * holds spawns and writes the state file only while `settings.enabled`. `configure()` applies
  * new settings live; `override(minutes)` lets new sessions start for a while whatever the load.
  */
-export function createLoadMonitor({ settings: initial, self, file, run, sample = (o) => sampleHost(o), now = Date.now, log = () => {} }) {
+export function createLoadMonitor({ settings: initial, self, file, run, sample = (o) => sampleHost(o), sessions = null, relief = null, now = Date.now, log = () => {} }) {
   let settings = initial;
   let st = null;
   let lastSample = null;
   let error = null;
   let timer = null;
   let overrideUntil = 0;
+  let working = null; // sessions working now (the cap), null when unknown
+  let spawns = []; // when this server last started sessions, for the cap
+
+  async function countWorking() {
+    if (!sessions) return null;
+    try {
+      const rows = await sessions();
+      return Array.isArray(rows) ? rows.filter((r) => r?.status === 'busy').length : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The cap's reason, or null: `maxBusy` sessions are working (spawns of the last moments count). */
+  function capReason() {
+    const max = settings.maxBusy;
+    if (!settings.enabled || !(max > 0) || working == null) return null;
+    spawns = spawns.filter((t) => now() - t < SPAWN_COUNTS_MS);
+    const n = working + spawns.length;
+    return n >= max ? `${n} sessions working (cap ${max})` : null;
+  }
 
   async function write(body) {
     if (!file) return;
@@ -195,6 +230,7 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
     }
     const prevState = st?.state ?? 'ok';
     st = step(st, cls, t, settings);
+    working = await countWorking();
     if (st.state !== prevState && settings.enabled) log(`[load] ${self}: ${prevState} → ${st.state}${st.reasons.length ? ` (${st.reasons.join(', ')})` : ''}`);
     if (overrideUntil && !overridden()) {
       overrideUntil = 0;
@@ -205,6 +241,8 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
     } catch (err) {
       log(`[load] could not write ${file}: ${err.message}`);
     }
+    // Critical: deactivate sessions until it recovers (in the background; it has its own pace).
+    if (relief && settings.enabled) relief.check(current()).catch((err) => log(`[load] relief: ${err?.message ?? err}`));
     return current();
   }
 
@@ -213,6 +251,8 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
     if (!st) return null;
     // An override reads as ok to everyone that gates on it (the CLI, the spawner, the alerts).
     const state = overridden() ? 'ok' : st.state;
+    const cap = overridden() ? null : capReason();
+    const done = relief?.recent() ?? [];
     return {
       state,
       since: st.since,
@@ -220,6 +260,10 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
       level: st.level,
       latest: st.latest ?? [],
       sample: lastSample,
+      ...(working != null ? { working: { count: working, max: settings.maxBusy } } : {}),
+      // Holds new sessions like `hot` (the CLI reads it too), without being a load level.
+      ...(cap ? { cap: { reason: cap } } : {}),
+      ...(done.length ? { relief: done } : {}),
       ...(overridden() ? { override: { until: overrideUntil, held: st.state } } : {}),
       ...(error ? { error } : {}),
       updatedAt: now(),
@@ -230,8 +274,9 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
   function busy() {
     if (!settings.enabled) return null;
     const c = current();
-    if (!c || c.state === 'ok') return null;
-    return busyMessage(self, c);
+    if (!c) return null;
+    if (c.state !== 'ok') return busyMessage(self, c);
+    return c.cap ? busyMessage(self, { reasons: [c.cap.reason] }) : null;
   }
 
   return {
@@ -239,6 +284,10 @@ export function createLoadMonitor({ settings: initial, self, file, run, sample =
     current,
     busy,
     enabled: () => settings.enabled,
+    /** A session was just started here: the cap counts it until the registry shows it. */
+    noteSpawn() {
+      spawns.push(now());
+    },
     settings: () => settings,
     /** New settings, live (Settings → Host load); the state machine keeps its history. */
     configure(next) {
@@ -401,6 +450,9 @@ export function createLoadAlerts({ hosts, fetchLoad, notify, file, now = Date.no
     return `:rotating_light: *${host}* is critically loaded${why}. New automatic sessions wait until it recovers; one you start asks first.`;
   }
 
+  /** "a (1.2 GB), b (800 MB)" */
+  const named = (list) => list.map((d) => `${d.name} (${d.rssMb >= 1024 ? `${(d.rssMb / 1024).toFixed(1)} GB` : `${d.rssMb} MB`}${d.status === 'busy' ? ', was working' : ''})`).join(', ');
+
   async function tick() {
     await load();
     let changed = false;
@@ -411,16 +463,29 @@ export function createLoadAlerts({ hosts, fetchLoad, notify, file, now = Date.no
       } catch {
         st = null;
       }
-      // An override (Settings → Host load) is someone acting on it, not a recovery: no message.
-      if (!st || st.override) continue;
+      if (!st) continue;
       const prev = told[host] ?? {};
+      // What relief deactivated there since the last DM (lib/relief.mjs).
+      const fresh = (st.relief ?? []).filter((d) => typeof d?.at === 'number' && d.at > (prev.reliefAt ?? 0));
+      if (fresh.length) {
+        try {
+          await notify(`:zzz: Fleet deactivated ${fresh.length === 1 ? 'a session' : `${fresh.length} sessions`} on *${host}* to bring it back from critical: ${named(fresh)}. Resume them from Inactive once it has recovered.`);
+          log(`[load] told the owner: relief on ${host} (${fresh.length})`);
+          told[host] = { ...(told[host] ?? prev), reliefAt: Math.max(...fresh.map((d) => d.at)) };
+          changed = true;
+        } catch (err) {
+          log(`[load] could not DM the owner about ${host}: ${err.message}`);
+        }
+      }
+      // An override (Settings → Host load) is someone acting on it, not a recovery: no message.
+      if (st.override) continue;
       const wasCritical = prev.critical ?? prev.state === 'critical'; // older files kept `state`
       const critical = st.state === 'critical';
       if (critical === wasCritical) continue;
       try {
         await notify(text(host, st, { since: prev.since }));
         log(`[load] told the owner: ${host} ${critical ? 'critical' : `no longer critical (${st.state})`}`);
-        told[host] = { critical, since: critical ? st.since ?? now() : null };
+        told[host] = { ...(told[host] ?? {}), critical, since: critical ? st.since ?? now() : null };
         changed = true;
       } catch (err) {
         log(`[load] could not DM the owner about ${host}: ${err.message}`);

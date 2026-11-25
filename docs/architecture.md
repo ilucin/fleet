@@ -197,7 +197,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `claude` | command that launches Claude Code in spawned sessions (default `claude`) |
 | `harnesses` | `{ codex: { command }, pi: { command } }`: how the [other harnesses](#other-harnesses) launch (default the bare name); plus, for `claude` / `codex` / `pi`, `model` and `effort`: the defaults a spawn uses when it picks none ([cli.md](cli.md#harnesses)). Read leniently |
 | `spawnDirs` | directories offered for new sessions, per host (`paths.<host>`); also edited from the web UI (Settings → Start directories, which writes it through `fleet config set`). They are also the spawn allow-list. An entry with `"hidden": true` stays on the allow-list (e.g. a dir only an app's [embedded panel](#embed-view) spawns in) but is not offered in the New session menu up front (its **+N hidden** button shows them); when a host has only hidden entries it offers Home, and the hidden dirs stay allowed. `fleet config show --resolved` lists them with `"hidden": true` |
-| `resources` | `{ enabled, load: { hot, critical }, memory: { hot, critical }, psi: { hot, critical }, enterSeconds, criticalEnterSeconds, exitSeconds, alerts }` (default off; 3 / 5 × cores (5-minute average), 10 / 5 % memory free (macOS), 10 / 10 % (PSI), 300 / 60 / 300 s, alerts on): the web server watches this machine's load and holds new sessions while it is under heavy load — see [Host load](#host-load). Settings → Host load stores only what differs from the defaults. Read at start |
+| `resources` | `{ enabled, load: { hot, critical }, memory: { hot, critical }, psi: { hot, critical }, enterSeconds, criticalEnterSeconds, exitSeconds, alerts, maxBusy, relief, reliefBusySeconds }` (default off; 3 / 5 × cores (5-minute average), 10 / 5 % memory free (macOS), 10 / 10 % (PSI), 300 / 60 / 300 s, alerts on, cap 10 working sessions (0: none), relief on, busy sessions after 180 s (0: never)): the web server watches this machine's load and holds new sessions while it is under heavy load — see [Host load](#host-load). Settings → Host load stores only what differs from the defaults. Read at start |
 | `usage` | `{ enabled, fallback: { claude, codex, pi }, limits: { session, weekly, paceMargin } }` (default off; `claude→codex`, `codex→claude`, `pi→claude`; 90 / 95 %, 15 points): a spawn whose subscription is at its limit starts on the fallback harness — see [Subscription fallback](#subscription-fallback). Read on every CLI run; the web server applies a Settings save at once |
 | `spawn` | `false`: this machine never runs agent sessions — an always-on server that only serves the web app and its single-home services (Slack and GitHub bridges, inbox, grouping). Read by the machine it is set on (its own config; CLI and web server, the server at start). It offers no spawn dirs (`/api/fleet`: `spawn: false`, `spawnDirs` and `hiddenSpawnDirs` both `[]`), every web route that would start an agent on it answers **403** `{ error: "<host> does not run agent sessions (config spawn: false)", noSpawn: true }` (`/spawn` — so the embed view, the Slack and GitHub bridges' spawns on it — `prs/spawn`, the PR notes handoff, `tasks/spawn`, `schedule`, `jobs/:name/run`, `dormant/restore` (a dry run still answers), a stack sibling here, `POST /api/operator`, which then moves on to the next of `web.operator.hosts`); `restore.onBoot` is skipped; the web UI does not offer it in New session or the other spawn entry points; the CLI's `spawn`, `handoff`, `stack spawn` (here; `--on` another host is fine), `pr spawn`, `task spawn`, `schedule add`, `bots run` and `restore <target> \| --all` refuse with that message, locally or via `-H` (the remote CLI reads its own config). tmux-only commands (`new`, `tmux …`) and the bridges themselves keep working. Default (absent, or any other value): `true`, spawning as usual |
 | `tui` | dashboard preferences: `rows` (`"1"`, `"2"`, `"auto"`), `mouse` |
@@ -1452,8 +1452,9 @@ Folder line are added when missing. Anything unparseable, a failed call, `--no-l
 ## Host load
 
 Opt-in per machine (`resources.enabled`), so a shed is not overloaded by its own sessions
-(`web/lib/load.mjs`, `crates/fleet/src/core/load.rs`). It does not cap the number of sessions: an
-idle session costs memory, not CPU, and a busy host is what matters.
+(`web/lib/load.mjs`, `web/lib/relief.mjs`, `crates/fleet/src/core/load.rs`). What it measures is
+the machine, not the number of sessions; the one count it keeps is a rough cap on *working*
+sessions, because the load average sees a burst (a stack starting its siblings) minutes late.
 
 - **Sampling.** The web server samples every 15 s: the **5-minute** load average per core (both
   OSes; a build that takes every core for a few minutes stays below `hot`), and memory — on macOS
@@ -1467,7 +1468,7 @@ idle session costs memory, not CPU, and a busy host is what matters.
 - **State, with hysteresis.** `ok` → `hot` once it has held for `enterSeconds` (5 min), → `critical`
   once that has held for `criticalEnterSeconds` (1 min); back down once a lower level has held for
   `exitSeconds` (5 min). The verdict goes to
-  `<fleet state>/load.json` (`{ state, since, reasons, level, sample, updatedAt }`, 0600), on this
+  `<fleet state>/load.json` (`{ state, since, reasons, level, sample, working, cap, relief, updatedAt }`, 0600), on this
   host in `/api/fleet` (`load: { state, since, reasons, updatedAt }`) and at `GET /api/load`.
 - **What waits.** While `hot` or `critical`, a new session on this host:
   - started by you (web New session, PR / task / stack spawn, a bot's Run now, a restore) — the
@@ -1482,12 +1483,29 @@ idle session costs memory, not CPU, and a busy host is what matters.
     embed view asks like the UI).
   Nothing else is gated — send, peek, keys, kill, tmux and the prompt queue keep working, since
   they are how you bring a host back.
+- **The cap.** Once `maxBusy` sessions on the host are `busy` (default 10; spawns from this web
+  server count for 30 s, until the registry shows them), new sessions wait exactly as above,
+  with the reason `N sessions working (cap M)`; the state stays what the load says. The verdict
+  carries `working: { count, max }`, and `cap: { reason }` while it holds; the CLI reads `cap`
+  from `load.json` like `hot`. An override lifts it too; `maxBusy: 0` turns it off.
+- **Relief.** While the host is `critical` and the latest sample still is (`relief`, default on),
+  the server deactivates sessions (`fleet sleep`: the agent ends, the session waits under
+  Inactive to be resumed), one round at most every 30 s, until it is no longer critical.
+  Memory-bound (pressure critical, free memory or PSI `full` past critical): idle sessions,
+  heaviest first, as many as it takes to get free memory back above `memory.hot` (one at least,
+  five at most). A `busy` one — one per round, heaviest (memory) or busiest (CPU-only critical,
+  where idle ones would not help) — only once the host has been critical for
+  `reliefBusySeconds` (180) and no idle one is left; it loses the turn it was on. Never touched:
+  the voice operator, a resident bot's session (`on.slack`), a stack's lead, a session waiting
+  on you, one without a session id. Not during an override. What it did in the last hour is in
+  the verdict (`relief: [{ at, id, name, status, rssMb, cpu }]`), in the log, in Settings →
+  Host load, and in one DM to the owner per round (the alerts below).
 - **Fail-open.** A sample that cannot be read counts as `ok`; the CLI ignores a `load.json` older
   than 90 s (the server is down, the machine slept); with `resources` off the server removes the
   file at start.
 - **Alerts.** The Slack bridge's server (`slack.host`, with `slack.owner`) polls every host's
-  `/api/load` every 30 s and DMs the owner **only** when one goes `critical`, and when it is no
-  longer critical after such a DM; `hot` holds automatic sessions quietly and shows only in the
+  `/api/load` every 30 s and DMs the owner **only** when one goes `critical`, when it is no
+  longer critical after such a DM, and with what relief deactivated there; `hot` holds automatic sessions quietly and shows only in the
   UI. What it last said is kept in `<fleet state>/load-alerts.json`, so a restart does not repeat
   it. A host that does not answer is skipped, and so is one with `resources.alerts: false` (a
   second fleet on the same machine, so that one machine alerts once). The UI marks a host under

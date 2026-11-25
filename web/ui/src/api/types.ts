@@ -304,6 +304,22 @@ export interface LoadSettings {
   exitSeconds: number
   /** DM the owner when this host goes critical and when it recovers. */
   alerts: boolean
+  /** Hold new sessions while this many are working (0: no cap; older servers: absent). */
+  maxBusy?: number
+  /** While critical, deactivate sessions until it recovers. */
+  relief?: boolean
+  /** …a busy one only after this long critical with no idle one left (0: never). */
+  reliefBusySeconds?: number
+}
+
+/** A session load relief deactivated (web/lib/relief.mjs). */
+export interface ReliefAction {
+  at: number
+  id: string
+  name: string
+  status: string
+  rssMb: number
+  cpu: number
 }
 
 /** GET /api/hosts/:host/load — Settings → Host load. */
@@ -312,7 +328,21 @@ export interface HostLoadView {
   enabled: boolean
   settings: LoadSettings
   defaults: LoadSettings
-  load: (Omit<HostLoad, 'state'> & { state: LoadLevel; level: LoadLevel; latest: string[]; sample: LoadSample | null; error?: string }) | null
+  load:
+    | (Omit<HostLoad, 'state'> & {
+        state: LoadLevel
+        level: LoadLevel
+        latest: string[]
+        sample: LoadSample | null
+        error?: string
+        /** Sessions working now and the cap (older servers: absent). */
+        working?: { count: number; max: number }
+        /** Present while the cap holds new sessions. */
+        cap?: { reason: string }
+        /** What relief deactivated in the last hour. */
+        relief?: ReliefAction[]
+      })
+    | null
   /** This web server can be restarted from the UI (launchd / systemd brings it back). */
   restart: boolean
 }

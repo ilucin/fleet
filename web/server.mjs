@@ -50,6 +50,7 @@ import { fetchPeerHost, proxyToPeer, setPeerConnects, setPeerProxies, setPeerTok
 import { createRelay } from './lib/relay.mjs';
 import { createDormant } from './lib/dormant.mjs';
 import { createLoadAlerts, createLoadMonitor, readProcessUse, retryWhileBusy } from './lib/load.mjs';
+import { createRelief } from './lib/relief.mjs';
 import { createUsageAlerts } from './lib/usage.mjs';
 import { createMemos } from './lib/memos.mjs';
 import { createApi } from './lib/api.mjs';
@@ -84,7 +85,17 @@ const cli = createFleetCli({ run, bin: config.fleetBin });
 // state file a previous run left is removed, so nothing holds spawns on a stale verdict.
 const loadFile = path.join(fleetStateDir(process.env), 'load.json');
 // Always sampling (Settings → Host load shows it); it holds spawns and writes the file only while on.
-const loadMonitor = createLoadMonitor({ settings: config.resources, self: config.self, file: loadFile, run, log });
+// It counts this host's working sessions (the `maxBusy` cap) and, while critical, has `relief`
+// deactivate sessions (lib/relief.mjs; made below, once what it needs exists).
+const loadMonitor = createLoadMonitor({
+  settings: config.resources,
+  self: config.self,
+  file: loadFile,
+  run,
+  sessions: () => fleet.localSessions(),
+  relief: { check: (v) => relief.check(v), recent: () => relief.recent() },
+  log,
+});
 /** A failed spawn POST → an Error that keeps `overloaded` (the host holds new sessions). */
 const spawnFailure = (r, fallback) => Object.assign(new Error(r.body?.error ?? fallback), { status: r.status, overloaded: r.body?.overloaded === true });
 const fleet = createFleet({ cli, self: config.self, ttlMs: 2000 });
@@ -384,11 +395,30 @@ const spawner = createSpawner({
   ghIdentityLauncher: (name, launcher) => cli.ghIdentityLauncher(name, launcher),
   harnessDefaults: () => config.harnessDefaults,
   refuse: config.spawn === false ? noSpawnMessage(config.self) : null,
-  busy: () => loadMonitor?.busy() ?? null,
+  busy: () => {
+    const held = loadMonitor.busy();
+    if (!held) loadMonitor.noteSpawn();
+    return held;
+  },
   // Subscription fallback (lib/usage.mjs): the CLI decides; off unless config `usage.enabled`.
   place: (q) => (config.usage?.enabled ? cli.usageCheck(q) : Promise.resolve(null)),
 });
 const operator = createOperator({ config, fleet, spawner, backend, log });
+const killer = createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) });
+const relief = createRelief({
+  settings: () => loadMonitor.settings(),
+  listSessions: () => fleet.localSessions({ force: true }),
+  readUse: (sessions) => readProcessUse({ run, sessions }),
+  // As Deactivate does (api `sleep`): `fleet sleep`, and an iTerm session's tab closes.
+  sleepSession: async (s) => {
+    await cli.sleep({ target: s.session_id });
+    if (s.backend === 'iterm') await killer.closeTab?.(s).catch(() => {});
+    fleet.invalidate?.();
+  },
+  residents: async () => new Set((await cli.jobs()).filter((j) => j?.on?.slack).map((j) => j.name)),
+  isOperator: (s) => operator.isOperator(s),
+  log,
+});
 // One transcript reader: the chat and the review threads (their replies) share its cache.
 const transcripts = createTranscriptReader();
 // Files each session worked on: file links resolve against them, the diff reviewer finds the checkouts it edits.
@@ -415,7 +445,7 @@ const handleApi = createApi({
           setTimeout(() => shutdown('restart'), 300).unref?.();
         }
       : null,
-  killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
+  killer,
   cli,
   autoNamer,
   spawnNamer,

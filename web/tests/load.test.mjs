@@ -305,7 +305,11 @@ test('API: /api/hosts/<self>/load — view, PUT settings through config set (liv
   assert.equal(monitor.settings().load.hot, 4, 'applied live');
   assert.equal(sets[0].key, 'resources');
   assert.deepEqual(sets[0].value, { enabled: true, load: { hot: 4 } }, 'only what differs from the defaults is stored');
-  for (const body of [{ enabled: 'yes' }, { load: { hot: -1 } }, { load: { hot: 5, critical: 4 } }, { exitSeconds: 99999 }, []]) {
+  const cap = await call('PUT', '/api/hosts/laptop/load', { maxBusy: 0, relief: false, reliefBusySeconds: 600 });
+  assert.equal(cap.status, 200);
+  assert.deepEqual(sets.at(-1).value, { enabled: true, load: { hot: 4 }, maxBusy: 0, relief: false, reliefBusySeconds: 600 });
+  assert.equal(monitor.settings().maxBusy, 0);
+  for (const body of [{ enabled: 'yes' }, { load: { hot: -1 } }, { load: { hot: 5, critical: 4 } }, { exitSeconds: 99999 }, { maxBusy: -1 }, { maxBusy: 2.5 }, { relief: 'no' }, { reliefBusySeconds: 99999 }, []]) {
     assert.equal((await call('PUT', '/api/hosts/laptop/load', body)).status, 400, JSON.stringify(body));
   }
 
@@ -320,4 +324,72 @@ test('API: /api/hosts/<self>/load — view, PUT settings through config set (liv
   assert.equal(restarted, 1);
   assert.equal((await call('DELETE', '/api/hosts/laptop/load')).status, 405);
   assert.equal((await call('GET', '/api/hosts/nowhere/load')).status, 404);
+});
+
+test('loadSettings: the cap and relief, 0 turns them off', () => {
+  const d = loadSettings({ enabled: true });
+  assert.equal(d.maxBusy, 10);
+  assert.equal(d.relief, true);
+  assert.equal(d.reliefBusySeconds, 180);
+  const s = loadSettings({ maxBusy: 0, relief: false, reliefBusySeconds: 0 });
+  assert.deepEqual([s.maxBusy, s.relief, s.reliefBusySeconds], [0, false, 0]);
+  assert.equal(loadSettings({ maxBusy: -2 }).maxBusy, 10);
+  assert.equal(loadSettings({ maxBusy: 2.5 }).maxBusy, 10);
+});
+
+test('monitor: the cap holds new sessions once maxBusy are working (fresh spawns count); the file says so; override lifts it', async () => {
+  const dir = await tmp();
+  const file = path.join(dir, 'load.json');
+  let t = 0;
+  let rows = [{ status: 'busy' }, { status: 'busy' }, { status: 'idle' }];
+  const m = createLoadMonitor({ settings: { ...S, maxBusy: 3 }, self: 'workstation', file, now: () => t, sessions: async () => rows, sample: async () => ({ pressure: 'normal', perCore: 0.5 }) });
+  await m.tick();
+  assert.equal(m.busy(), null, '2 of 3');
+  assert.deepEqual(m.current().working, { count: 2, max: 3 });
+  m.noteSpawn();
+  assert.equal(m.busy(), 'workstation is under heavy load (3 sessions working (cap 3)) — new sessions wait until it recovers');
+  t = 31 * 1000;
+  assert.equal(m.busy(), null, 'a spawn counts only until the registry shows it');
+  rows = [...rows, { status: 'busy' }];
+  await m.tick();
+  assert.equal(m.current().state, 'ok', 'the cap is not a load level');
+  assert.equal(JSON.parse(await fsp.readFile(file, 'utf8')).cap.reason, '3 sessions working (cap 3)');
+  await m.override(30);
+  assert.equal(m.busy(), null);
+  assert.equal(m.current().cap, undefined);
+  await m.override(0);
+  await m.configure({ ...S, maxBusy: 0 });
+  assert.equal(m.busy(), null, '0: no cap');
+  m.stop();
+});
+
+test('monitor: hands each verdict to relief and reports what it deactivated', async () => {
+  const seen = [];
+  const m = createLoadMonitor({
+    settings: { ...S, criticalEnterSeconds: 0 },
+    self: 'workstation',
+    now: () => 0,
+    sample: async () => ({ pressure: 'critical', perCore: 1 }),
+    relief: { check: async (v) => seen.push(v.state), recent: () => [{ at: 0, id: 'a', name: 'a', status: 'idle', rssMb: 900, cpu: 0 }] },
+  });
+  await m.tick();
+  assert.deepEqual(seen, ['critical']);
+  assert.equal(m.current().relief[0].name, 'a');
+});
+
+test('alerts: one DM for what relief deactivated, then not again', async () => {
+  const dir = await tmp();
+  const sent = [];
+  const t = Date.now();
+  const st = { state: 'critical', reasons: ['3% memory free'], since: t, updatedAt: t, relief: [{ at: t - 1000, id: 'a', name: 'tests', status: 'busy', rssMb: 2048, cpu: 90 }, { at: t, id: 'b', name: 'docs', status: 'idle', rssMb: 300, cpu: 0 }] };
+  const a = createLoadAlerts({ hosts: () => ['workstation'], fetchLoad: async () => st, notify: async (x) => sent.push(x), file: path.join(dir, 'a.json'), now: () => t });
+  await a.tick();
+  await a.tick();
+  assert.equal(sent.length, 2, 'relief + critical, once each');
+  assert.match(sent[0], /deactivated 2 sessions on \*workstation\*.*tests \(2\.0 GB, was working\), docs \(300 MB\)/);
+  assert.match(sent[1], /critically loaded/);
+  st.relief = [...st.relief, { at: t + 5, id: 'c', name: 'more', status: 'idle', rssMb: 100, cpu: 0 }];
+  await a.tick();
+  assert.equal(sent.length, 3);
+  assert.match(sent[2], /a session on \*workstation\*.*more/);
 });

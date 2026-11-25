@@ -2785,7 +2785,7 @@ export function createApi({
       if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > max) throw new HttpError(`${name} must be a number above 0 and at most ${max}`, 400);
       return v;
     };
-    for (const k of ['enabled', 'alerts']) {
+    for (const k of ['enabled', 'alerts', 'relief']) {
       if (!(k in body)) continue;
       if (typeof body[k] !== 'boolean') throw new HttpError(`${k} must be true or false`, 400);
       next[k] = body[k];
@@ -2801,6 +2801,12 @@ export function createApi({
     // Free memory: critical is the lower share.
     if (next.memory.critical > next.memory.hot) throw new HttpError('memory.critical must be at most memory.hot', 400);
     for (const k of ['enterSeconds', 'criticalEnterSeconds', 'exitSeconds']) if (k in body) next[k] = pos(body[k], k, 3600);
+    // 0 turns them off: no cap, never a busy session.
+    for (const [k, max] of [['maxBusy', 200], ['reliefBusySeconds', 3600]]) {
+      if (!(k in body)) continue;
+      if (!Number.isInteger(body[k]) || body[k] < 0 || body[k] > max) throw new HttpError(`${k} must be a whole number from 0 to ${max}`, 400);
+      next[k] = body[k];
+    }
     const stored = { enabled: next.enabled };
     for (const [k, v] of Object.entries(next)) {
       if (k === 'enabled') continue;

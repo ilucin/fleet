@@ -173,6 +173,19 @@ function HostCard({ host, loaded, onView }: { host: string; loaded: Loaded | und
       </div>
 
       {held && l?.reasons.length ? <div className="text-sm text-status-waiting">{l.reasons.join(', ')} — new sessions wait.</div> : null}
+      {v.enabled && !held && l?.cap ? <div className="text-sm text-status-waiting">{l.cap.reason} — new sessions wait.</div> : null}
+      {l?.relief?.length ? (
+        <div className="text-sm">
+          Deactivated to bring it back from critical:{' '}
+          {l.relief.map((d, i) => (
+            <span key={d.id}>
+              {i ? ', ' : ''}
+              {d.name} <span className="text-dimmer">({gbOf(d.rssMb)}, {relTime(d.at)})</span>
+            </span>
+          ))}
+          . <span className="text-dimmer">Resume them from Inactive.</span>
+        </div>
+      ) : null}
       {overridden ? (
         <div className="text-sm">
           New sessions allowed whatever the load until {new Date(l!.override!.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -193,6 +206,7 @@ function HostCard({ host, loaded, onView }: { host: string; loaded: Loaded | und
           {s.swapUsedMb != null ? <Metric label="Swap used" value={`${(s.swapUsedMb / 1024).toFixed(1)} GB`} /> : null}
           {s.psi ? <Metric label="Memory stalls" value={`${s.psi.some ?? 0}% some · ${s.psi.full ?? 0}% full`} warn={(s.psi.some ?? 0) >= v.settings.psi.hot} /> : null}
           {l?.level && l.level !== l.state ? <Metric label="Right now" value={l.level} hint={l.latest.join(', ')} /> : null}
+          {l?.working ? <Metric label="Working sessions" value={l.working.max > 0 ? `${l.working.count} / ${l.working.max}` : String(l.working.count)} warn={!!l.cap} /> : null}
         </div>
       ) : l?.error ? (
         <div className="text-xs text-dimmer">Cannot read this machine's load ({l.error}) — it counts as ok.</div>
@@ -246,6 +260,8 @@ function HostCard({ host, loaded, onView }: { host: string; loaded: Loaded | und
   )
 }
 
+const gbOf = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
+
 function Metric({ label, value, hint, warn }: { label: string; value: string; hint?: string; warn?: boolean }) {
   return (
     <div title={hint}>
@@ -256,7 +272,7 @@ function Metric({ label, value, hint, warn }: { label: string; value: string; hi
 
 function ProcessList({ host, procs, busy, onDeactivate }: { host: string; procs: HostProcesses; busy: string | null; onDeactivate: (id: string, name: string) => void }) {
   const [sure, setSure] = useState<string | null>(null)
-  const gb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
+  const gb = gbOf
   return (
     <div className="space-y-2 rounded-lg border border-border/60 p-2 text-sm">
       <div className="text-xs text-dimmer">
@@ -384,6 +400,33 @@ function SettingsForm({ view, onSaved }: { view: HostLoadView; onSaved: (v: Host
         '15',
       )}
       {field('Recovers after', form.exitSeconds, (exitSeconds) => setForm({ ...form, exitSeconds }), `seconds below it (default ${view.defaults.exitSeconds})`, '15')}
+      {view.defaults.maxBusy != null
+        ? field(
+            'Working sessions cap',
+            form.maxBusy ?? view.defaults.maxBusy,
+            (maxBusy) => setForm({ ...form, maxBusy: Math.round(maxBusy) }),
+            `new sessions wait while this many work (default ${view.defaults.maxBusy}; 0: no cap)`,
+            '1',
+          )
+        : null}
+      {view.defaults.relief != null ? (
+        <label className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1">
+            Deactivate sessions while critical
+            <span className="block text-xs text-dimmer">Idle ones first, heaviest first, until it recovers; never the operator, a resident bot, a stack lead or one waiting on you. Resume them from Inactive.</span>
+          </span>
+          <Switch checked={form.relief !== false} onCheckedChange={(relief) => setForm({ ...form, relief })} />
+        </label>
+      ) : null}
+      {view.defaults.reliefBusySeconds != null && form.relief !== false
+        ? field(
+            'Working ones too after',
+            form.reliefBusySeconds ?? view.defaults.reliefBusySeconds,
+            (reliefBusySeconds) => setForm({ ...form, reliefBusySeconds: Math.round(reliefBusySeconds) }),
+            `seconds critical with no idle one left; one at a time, it loses its turn (default ${view.defaults.reliefBusySeconds}; 0: never)`,
+            '30',
+          )
+        : null}
       <label className="flex items-center gap-2 text-sm">
         <span className="min-w-0 flex-1">
           Slack DM when it goes critical
@@ -396,7 +439,7 @@ function SettingsForm({ view, onSaved }: { view: HostLoadView; onSaved: (v: Host
         <Button size="sm" disabled={saving} onClick={() => void save()}>
           {saving ? <Loader2Icon className="animate-spin" /> : null} Save on {view.host}
         </Button>
-        <Button variant="ghost" size="sm" disabled={saving} onClick={() => setForm({ ...view.defaults, enabled: form.enabled, alerts: form.alerts })}>
+        <Button variant="ghost" size="sm" disabled={saving} onClick={() => setForm({ ...view.defaults, enabled: form.enabled, alerts: form.alerts, relief: form.relief })}>
           Defaults
         </Button>
       </div>

@@ -7,6 +7,9 @@
 //! - the automatic ones (`schedule tick`, `jobs tick`) skip the tick and fire once the host has
 //!   recovered — a due entry stays due, a bot's slot is caught up (`jobs::CATCH_UP_SECS`).
 //!
+//! The same file carries `cap` while `resources.maxBusy` sessions are working: it holds new
+//! sessions the same way, whatever the load says.
+//!
 //! Fail-open: no file, a file that does not parse, or one older than `STALE_MS` (the server is
 //! off, or `resources.enabled` is not set — it removes the file then) means not busy.
 
@@ -31,11 +34,27 @@ pub struct LoadState {
     pub reasons: Vec<String>,
     #[serde(default)]
     pub updated_at: i64,
+    /// `resources.maxBusy` sessions are working: holds new sessions like `hot`.
+    #[serde(default)]
+    pub cap: Option<Cap>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Cap {
+    pub reason: String,
 }
 
 impl LoadState {
     pub fn busy(&self) -> bool {
-        self.state == "hot" || self.state == "critical"
+        self.state == "hot" || self.state == "critical" || self.cap.is_some()
+    }
+
+    /// Why it holds: the load's reasons, or the cap's.
+    fn why(&self) -> Vec<String> {
+        match &self.cap {
+            Some(c) if self.state != "hot" && self.state != "critical" => vec![c.reason.clone()],
+            _ => self.reasons.clone(),
+        }
     }
 }
 
@@ -78,10 +97,11 @@ pub fn busy() -> Option<LoadState> {
 }
 
 pub fn message(host: &str, st: &LoadState) -> String {
-    let why = if st.reasons.is_empty() {
+    let reasons = st.why();
+    let why = if reasons.is_empty() {
         String::new()
     } else {
-        format!(" ({})", st.reasons.join(", "))
+        format!(" ({})", reasons.join(", "))
     };
     format!("{host} {BUSY_MARK}{why} — new sessions wait until it recovers")
 }
@@ -123,6 +143,14 @@ mod tests {
         assert!(busy_in(&crit, at).is_some());
         assert!(busy_in("not json", at).is_none());
         assert!(busy_in(r#"{"state":"hot"}"#, at).is_none(), "no timestamp");
+        let capped = format!(
+            r#"{{"state":"ok","reasons":[],"cap":{{"reason":"10 sessions working (cap 10)"}},"updatedAt":{at}}}"#
+        );
+        let st = busy_in(&capped, at).expect("the cap holds");
+        assert_eq!(
+            message("workstation", &st),
+            "workstation is under heavy load (10 sessions working (cap 10)) — new sessions wait until it recovers"
+        );
     }
 
     #[test]
@@ -131,6 +159,7 @@ mod tests {
             state: "hot".into(),
             reasons: vec!["memory pressure warn".into(), "load 2.1× cores".into()],
             updated_at: 0,
+            cap: None,
         };
         assert_eq!(
             message("workstation", &st),
