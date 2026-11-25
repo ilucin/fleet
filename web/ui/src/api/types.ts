@@ -1141,6 +1141,8 @@ export interface Brief {
   absCwd?: string | null
   /** The git checkout root (repo or linked worktree) containing absCwd, absolute; null outside git. */
   gitRoot?: string | null
+  /** VS Code in Fleet for gitRoot (else absCwd); null / absent = off (web.code). */
+  codeUrl?: string | null
   /** `web.editor` of the server that answered: which editor `editorUrl` opens; null = hide the button. */
   editor?: 'vscode' | 'cursor' | null
   /**
@@ -1167,6 +1169,8 @@ export interface BriefWorktree {
   repo?: string | null
   /** "Open in editor" link for `path` (see Brief.editorUrl); null = no button. */
   editorUrl?: string | null
+  /** VS Code in Fleet for `path` (`/code/<host>/?folder=…`, relative to the server); null / absent = off. */
+  codeUrl?: string | null
 }
 
 /** POST …/brief/regenerate (202). */

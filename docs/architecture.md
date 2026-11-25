@@ -173,6 +173,7 @@ server. Path: `$FLEET_CONFIG`, else `${XDG_CONFIG_HOME:-~/.config}/fleet/config.
 | `web.relay` | `{ listen: "<ip>:<port>", via?: "http://host:port", allow: ["host:port", …] }`: a filtered HTTP `CONNECT` proxy (`web/lib/relay.mjs`) so a peer that cannot reach a host can go through this one. It answers `CONNECT` only, for exact `allow` targets (host case-insensitive, no wildcards): tunnelled through the upstream HTTP proxy `via` (its own `CONNECT`, which must answer 200), or dialled directly without it. A target not allowed → **403**, any other request → **405**, the upstream failing → **502** (**504** on a timeout); refusals are logged as `[relay] …`. Use: a host whose second, userspace `tailscaled` reaches another tailnet (`webProxy` + `webConnect` for those peers) relays for a host that cannot join that tailnet; the latter sets `hosts.<name>.webProxy` to `http://<this host's tailnet IP>:<port>` and the same `webConnect`. **Security:** whoever reaches `listen` can open tunnels to the `allow` targets (and nothing else), with no auth of its own: bind `listen` to a specific tailnet IP (`0.0.0.0` / `::` are refused) and allow the port only from the hosts that need it in the tailnet ACL. Read at start (restart the web server); a `listen` address that is not up yet is retried every 30 s. Unset = no relay |
 | `web.dir` | where the web app lives (repo checkout or install dir), detected by `init` |
 | `web.node` | `node` binary that runs the web app; `null` → `/opt/homebrew/bin/node`, `/usr/local/bin/node`, then `PATH` |
+| `web.code` | on unless `false` / `null`; `{ "cli": "<path>" }` names the VS Code CLI (default: the newest `~/.vscode-server/code-<commit>` Remote-SSH left, the VS Code app's, `code` on PATH). Serves [VS Code in Fleet](#vs-code-in-fleet) at `/code/<host>/` and puts `codeUrl` on briefs |
 | `web.editor` | `"vscode"` (default) \| `"cursor"` \| `null`: the scheme of the "Open in editor" link the API puts on briefs and session rows (`editorUrl`, see [Session briefs](#session-briefs)); `null` = no link (the UI hides the button) |
 | `web.editorSsh` | ssh destination other machines use for **this** host in those links (e.g. the alias in the laptop's `~/.ssh/config`); default `<user>@<the hostname the browser used>` |
 | `web.ui` | static UI directory to serve instead of the bundled one; unset → `web/ui/dist`. The old `"classic"` value (the removed vanilla UI) is ignored |
@@ -618,7 +619,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/sessions/:id/queue/pause` | `{ paused }`: a pause holds the queue for the run under way; when that run ends it clears itself and the queue is `held` until the next run ends. `paused: false` resumes at once (the next idle sends) |
 | PUT / DELETE | `/api/hosts/:host/sessions/:id/queue/:item` | `{ text }` edit / remove one |
 | POST | `/api/hosts/:host/sessions/:id/queue/:item/send` · `…/:item/move` | type it in now, whatever the session is doing / `{ to }` new index |
-| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, worktrees, editor, editorUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
+| GET | `/api/hosts/:host/sessions/:id/brief` | the session's [brief](#session-briefs): `{ host, id, exists, markdown, parsed: { summary, resources, todos, plan }, updated, editedAt, generatedAt, generatedThrough, generating, enabled, continuePrompt, absCwd, gitRoot, worktrees, editor, editorUrl, codeUrl }` — an empty skeleton (`exists: false`) before there is one; a gone session's brief is still served by its full id. `parsed.plan` is a **deprecated** alias of `parsed.todos` (the section was called Plan), kept for one release |
 | GET | `/api/hosts/:host/notes/{tree,search,file,raw}` | the notes explorer (`web.notes`): the file list, `?q=` search with snippets + match ranges, `?path=` one note (frontmatter split, encrypted blocks withheld), `?path=` an image; 501 when the host has no `web.notes.root` |
 | PUT | `/api/hosts/:host/sessions/:id/brief` | `{ markdown }` → a human edit (sets `editedAt`) → the same shape |
 | GET | `/api/hosts/:host/stacks` | `fleet --local stack list --json` → `{ host, stacks: [StackView + editorUrl] }` ([session stacks](#session-stacks); `editorUrl` for `absCwd`, built like briefs' via `lib/editor.mjs`) |
@@ -1296,7 +1297,7 @@ the diff reviewer on the worktree in `worktrees` with that branch.
 absolute, no `~`), `gitRoot` (the checkout root — repo or linked worktree — containing it, absolute;
 null outside git), `editor` (`web.editor` of the answering server) and `editorUrl`; session rows in
 `/api/fleet` carry `editorUrl` for their cwd. `worktrees` lists the git checkouts the session works
-in — `[{ path, display, branch, linked, editorUrl }]`, the cwd's first, then the checkouts of the
+in — `[{ path, display, branch, linked, editorUrl, codeUrl }]`, the cwd's first, then the checkouts of the
 directories the transcript records the session in (its entries' `cwd`, kept in the brief's `dirs`
 frontmatter key) and of the File / Spec resources; a directory's checkout is the nearest ancestor
 with a `.git`, deduped by root — each with its own `editorUrl`. The link targets `gitRoot`, else `absCwd`:
@@ -1676,3 +1677,21 @@ brought back by hand for `restore.keepClosedDays` (default 7; `0` = off), the ne
   the control operations in `core::backend`; everything above picks it up.
 - **The Claude Code skill** (`fleet skill install`) teaches an agent to use `fleet` itself —
   e.g. to hand work off to another session.
+
+## VS Code in Fleet
+
+`/code/<host>/…` (outside `/api/`, behind the same Host/Origin guard and `web.auth`, WebSockets
+included) is VS Code's own web UI for the files on `<host>`. On the server's own host it is
+`code serve-web` (config [`web.code`](#config)), started on the first request on a unix socket in an
+owner-only temp dir (`fleet-code-<uid>`; no port, no connection token), with base path
+`/code/<self>`, and kept running until the server stops; the first start downloads the VS Code
+server (about a minute), later ones take a second. For another host the request (and its WebSocket
+upgrade) is piped to that host's server at the same path with its token, so every host runs its own
+serve-web and a browser reaches all of them through the server it uses. The browser's `fleet_auth`
+cookie is never passed on, and the hop to the socket sets `Origin` to the request's `Host` (VS Code
+refuses a WebSocket whose Origin names another host).
+
+Brief bodies carry `codeUrl` (for `gitRoot`, else `absCwd`) and each worktree its own:
+`/code/<host>/?folder=<path>`, relative, so it resolves against whichever server the browser uses;
+`null` when `web.code` is off on the answering server. The UI opens it at `#/code/:host/:id[/root/:root]`:
+the iframe beside the session's chat, a checkout switcher, and the VS Code app link.

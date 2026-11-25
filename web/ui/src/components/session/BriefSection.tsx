@@ -76,6 +76,8 @@ export interface BriefSectionProps {
   onReviewRoot?: (root: string) => void
   /** A PR row's Review when no worktree has its branch: the PR's diff from this host's clone. */
   onReviewPr?: (pr: GithubPr) => void
+  /** A worktree's Code: VS Code in Fleet on that checkout, the chat beside it. Absent: no buttons. */
+  onCodeRoot?: (root: string) => void
 }
 
 /**
@@ -83,7 +85,7 @@ export interface BriefSectionProps {
  * Edit), then Summary, Todos (clickable checkboxes, "3/7"), Resources grouped by kind (files
  * open the in-app preview, URLs a new tab; Files collapsed by default). Edit = the body markdown in a textarea (⌘/Ctrl+Enter saves, Esc cancels).
  */
-export function BriefSection({ host, brief: st, fileLinks, desktop = false, cancelEditRef, onReviewRoot, onReviewPr }: BriefSectionProps) {
+export function BriefSection({ host, brief: st, fileLinks, desktop = false, cancelEditRef, onReviewRoot, onReviewPr, onCodeRoot }: BriefSectionProps) {
   const now = useNow(15_000)
   const b = st.brief
   const [draft, setDraft] = useState<string | null>(null)
@@ -238,6 +240,8 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
             )}
           </Part>
 
+          {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} onReview={onReviewRoot} onCode={onCodeRoot} /> : null}
+
           {topGroups.map((g) => (
             <Part key={g.kind} title={g.label} aside={g.items.length > 1 ? <span className="tabular-nums">{g.items.length}</span> : null}>
               <ul className="space-y-1">
@@ -275,10 +279,9 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
             </Part>
           ) : null}
 
-          {restGroups.length || worktrees.length ? (
+          {restGroups.length ? (
             <Part title="Resources">
               <div className="space-y-3">
-                {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} onReview={onReviewRoot} /> : null}
                 {restGroups.map((g) => (g.kind === 'File' ? <FilesGroup key="files" g={g} fileLinks={fileLinks} /> : <Group key={g.kind ?? 'notes'} g={g} fileLinks={fileLinks} />))}
               </div>
             </Part>
@@ -392,8 +395,8 @@ function FilesGroup({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }
   )
 }
 
-/** The checkouts the session works in, each with an "open in editor" button (hidden on touch-first screens). */
-function WorktreesGroup({ worktrees, editor, onReview }: { worktrees: BriefWorktree[]; editor: string | null | undefined; onReview?: (root: string) => void }) {
+/** The checkouts the session works in (right under the Summary): Review, Code (VS Code in Fleet) and the VS Code app button (hidden on touch-first screens). */
+function WorktreesGroup({ worktrees, editor, onReview, onCode }: { worktrees: BriefWorktree[]; editor: string | null | undefined; onReview?: (root: string) => void; onCode?: (root: string) => void }) {
   const label = editor === 'cursor' ? 'Cursor' : 'VSC'
   return (
     <div>
@@ -411,6 +414,11 @@ function WorktreesGroup({ worktrees, editor, onReview }: { worktrees: BriefWorkt
               <span className="text-muted-foreground select-all">{w.display}</span>
             </span>
             {onReview ? <ReviewButton onClick={() => onReview(w.path)} title={`Review ${w.branch ?? w.display}: the diff of this checkout only`} /> : null}
+            {onCode && w.codeUrl ? (
+              <Button variant="outline" size="xs" title={`Code: ${w.display} in VS Code inside Fleet, the chat beside it`} onClick={() => onCode(w.path)}>
+                Code
+              </Button>
+            ) : null}
             {w.editorUrl ? (
               <Button asChild variant="outline" size="xs" className="pointer-coarse:hidden">
                 <a href={w.editorUrl} title={`Open ${w.display} in ${editor === 'cursor' ? 'Cursor' : 'VS Code'}`}>

@@ -45,6 +45,20 @@ function dialTarget(target) {
   return { url, options };
 }
 
+/**
+ * How to open a raw http(s).request to a peer url (a streamed or upgraded request, lib/code.mjs):
+ * → { protocol, options (hostname, port, path, servername), headers (Host, the peer's token), agent }.
+ */
+export function peerDial(target) {
+  const { url, options } = dialTarget(target);
+  return {
+    protocol: target.protocol,
+    options: { hostname: url.hostname.replace(/^\[|\]$/g, ''), port: url.port || (target.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, ...(options.servername ? { servername: options.servername } : {}) },
+    headers: withAuth(target, { host: target.host }),
+    agent: proxyAgentFor(target),
+  };
+}
+
 function proxyAgentFor(target) {
   const proxy = peerProxies[target.origin];
   if (!proxy) return undefined;

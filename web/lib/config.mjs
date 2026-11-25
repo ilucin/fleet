@@ -79,6 +79,15 @@ export function briefsDir(env = process.env, home = os.homedir()) {
   return path.join(fleetStateDir(env, home), 'briefs');
 }
 
+/** The user id, for a per-user dir name (0 where there is none). */
+function safeUid() {
+  try {
+    return os.userInfo().uid;
+  } catch {
+    return 0;
+  }
+}
+
 /** fleet's per-machine state: `${XDG_STATE_HOME:-~/.local/state}/fleet`. */
 export function fleetStateDir(env = process.env, home = os.homedir()) {
   const base = env.XDG_STATE_HOME ? expandHome(env.XDG_STATE_HOME, home) : path.join(home, '.local', 'state');
@@ -626,6 +635,16 @@ export function normalizeConfig(
   // web.editorSsh: the ssh destination other machines use for this one in editor links.
   const editorSsh = typeof web.editorSsh === 'string' && web.editorSsh.trim() ? web.editorSsh.trim() : null;
 
+  // web.code: VS Code's web UI at /code/<host>/ (lib/code.mjs). On unless `false`/null;
+  // `{ "cli": "<path>" }` names the VS Code CLI (default: Remote-SSH's, the app's, PATH).
+  if (web.code !== undefined && web.code !== null && web.code !== false && web.code !== true && !isObject(web.code)) throw new Error('config.web.code must be true, false or { cli }');
+  const codeCli = isObject(web.code) && typeof web.code.cli === 'string' && web.code.cli.trim() ? expandHome(web.code.cli.trim(), home) : null;
+  const code = {
+    enabled: web.code !== false && web.code !== null && !(isObject(web.code) && web.code.enabled === false),
+    cli: codeCli,
+    socketDir: path.join(env.TMPDIR && env.TMPDIR.length < 60 ? env.TMPDIR : '/tmp', `fleet-code-${safeUid()}`),
+  };
+
   const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
   const uiDir = resolveUiDir(uiRaw, { webRoot, home });
 
@@ -1025,6 +1044,7 @@ export function normalizeConfig(
     hostAddrs,
     editor,
     editorSsh,
+    code,
     hosts: [self.trim(), ...Object.keys(peers)],
     sharedHosts,
     fleetBin: resolveFleetBin(raw, { env, home, fsImpl }),

@@ -57,6 +57,7 @@ import { tailAnchor } from '@/lib/outbox'
 import { findSession, sessionDone, statusMeta } from '@/lib/sessions'
 import { isBack } from '@/lib/snooze'
 import { prReviewHref, reviewHref } from '@/lib/review'
+import { codeHref } from '@/lib/code'
 import { stacksKnown } from '@/lib/stacks'
 import { isUndoBackspace } from '@/lib/shortcuts'
 import { conversation, replyToSpeak } from '@/lib/operator'
@@ -548,9 +549,11 @@ export function SessionScreen({
     host,
     id,
     session,
-    brief: { host, brief, fileLinks, onReviewRoot: session?.cwd && !embedded ? (root: string) => navigate(reviewHref(host, id, root)) : undefined, onReviewPr: !embedded ? (pr) => navigate(prReviewHref(host, pr, { host, id })) : undefined },
+    brief: { host, brief, fileLinks, onReviewRoot: session?.cwd && !embedded ? (root: string) => navigate(reviewHref(host, id, root)) : undefined, onCodeRoot: !embedded ? (root: string) => navigate(codeHref(host, id, root)) : undefined, onReviewPr: !embedded ? (pr) => navigate(prReviewHref(host, pr, { host, id })) : undefined },
     onNewFromHere: session ? newFromHere : undefined,
     onReview: session?.cwd && !embedded ? () => navigate(reviewHref(host, id)) : undefined,
+    onCode: !embedded && (brief.brief?.codeUrl || brief.brief?.worktrees?.some((w) => w.codeUrl)) ? () => navigate(codeHref(host, id)) : undefined,
+    editorUrl: embedded ? null : (brief.brief?.editorUrl ?? session?.editorUrl ?? null),
     stack: embedded ? null : stackMenu,
     onSnoozed: pane ? undefined : () => (onBack ? onBack() : navigate('/', { replace: true })),
     onClosed: () => {

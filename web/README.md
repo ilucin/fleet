@@ -78,6 +78,11 @@ ARCHITECTURE.md → HTTP API / Session stacks.
 link on briefs, stacks and session rows (`editorUrl`): a local folder for sessions on this server's host,
 Remote-SSH through `hosts.<host>.ssh` for the others (no ssh alias → no link).
 
+`web.code` (on by default, `false` to turn it off, `{ "cli": "<path>" }` to name the VS Code CLI)
+serves VS Code's web UI at `/code/<host>/` (`code serve-web`, using the CLI VS Code Remote-SSH
+already put on the host): the session's **Code** button opens its worktree in it, beside the chat.
+ARCHITECTURE.md → VS Code in Fleet.
+
 ## Another UI
 
 The API is independent of both bundled UIs. Point `web.ui` (or `FLEET_WEB_UI`) at a directory

@@ -34,3 +34,4 @@ import './slack.test.mjs';
 import './github.test.mjs';
 import './peers.test.mjs';
 import './harness-defaults.test.mjs';
+import './code.test.mjs';

@@ -37,6 +37,16 @@ export function editorUrl(config, host, absPath, { line = null } = {}) {
   return `${editor}://vscode-remote/ssh-remote+${alias}${encodePath(absPath)}${at}`;
 }
 
+/**
+ * → the in-Fleet VS Code url for `absPath` on `host` (lib/code.mjs): `/code/<host>/?folder=<path>`,
+ * relative so it works on whichever server the browser uses; null when web.code is off here.
+ */
+export function codeUrl(config, host, absPath) {
+  if (!config?.code?.enabled || typeof host !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(host)) return null;
+  if (typeof absPath !== 'string' || !absPath.startsWith('/')) return null;
+  return `/code/${host}/?folder=${encodeURIComponent(absPath)}`;
+}
+
 const LOOPBACK_RE = /^(?:127\.\d+\.\d+\.\d+|::1)$/;
 
 /**
@@ -99,8 +109,8 @@ export function withBriefEditor(body, host, config) {
     const cwd = parseFrontmatter(body.markdown).meta.cwd;
     if (typeof cwd === 'string' && cwd.startsWith('/')) target = cwd;
   }
-  const out = { ...body, editor: config.editor ?? null, editorUrl: editorUrl(config, host, target) };
-  if (Array.isArray(body.worktrees)) out.worktrees = body.worktrees.map((w) => ({ ...w, editorUrl: editorUrl(config, host, w?.path ?? null) }));
+  const out = { ...body, editor: config.editor ?? null, editorUrl: editorUrl(config, host, target), codeUrl: codeUrl(config, host, target) };
+  if (Array.isArray(body.worktrees)) out.worktrees = body.worktrees.map((w) => ({ ...w, editorUrl: editorUrl(config, host, w?.path ?? null), codeUrl: codeUrl(config, host, w?.path ?? null) }));
   return out;
 }
 

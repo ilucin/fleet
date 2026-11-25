@@ -55,6 +55,7 @@ import { createUsageAlerts } from './lib/usage.mjs';
 import { createMemos } from './lib/memos.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
+import { createCodeProxy } from './lib/code.mjs';
 import { createRequestGuard, listenAddresses, loopbackFor, machineNames } from './lib/guard.mjs';
 import { createAuth, createSecret, MIN_PASSWORD_LENGTH, MIN_TOKEN_LENGTH } from './lib/auth.mjs';
 
@@ -534,7 +535,9 @@ async function loadPeerTokens() {
   if (entries.some(([, t]) => !t)) setTimeout(loadPeerTokens, 30 * 1000).unref();
 }
 if (peerTokenSources.length) loadPeerTokens().catch((err) => logError(err, 'peer tokens'));
-const servers = addresses.map(() => createHttpServer({ handleApi, uiDir: config.uiDir, guard, auth, log, logError }));
+// VS Code's web UI at /code/<host>/ (lib/code.mjs): this host's serve-web, or a peer's through it.
+const code = createCodeProxy({ config, log, logError });
+const servers = addresses.map(() => createHttpServer({ handleApi, uiDir: config.uiDir, guard, auth, code, log, logError }));
 for (const s of servers) {
   s.on('error', (err) => {
     // A tailnet address that is not up yet (EADDRNOTAVAIL): exit, launchd starts us again.
@@ -718,6 +721,7 @@ function shutdown(signal) {
   uploader.stop();
   handleApi.stop();
   relay?.close();
+  code.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();
   let open = servers.length;

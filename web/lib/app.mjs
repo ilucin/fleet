@@ -54,7 +54,7 @@ function pipeResult(res, { status, headers = {}, stream }, logError, context) {
   });
 }
 
-export function createHttpServer({ handleApi, uiDir, guard = null, auth = null, log = () => {}, logError = () => {} }) {
+export function createHttpServer({ handleApi, uiDir, guard = null, auth = null, code = null, log = () => {}, logError = () => {} }) {
   async function serveStatic(req, res, url) {
     if (!uiDir) {
       sendJson(res, 404, { error: 'not found' });
@@ -127,6 +127,8 @@ export function createHttpServer({ handleApi, uiDir, guard = null, auth = null, 
     }
 
     const finish = (status) => {
+      // VS Code loads hundreds of files: log only its failures.
+      if (status < 400 && req.url?.startsWith('/code/')) return;
       const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
       log(`${req.method} ${req.url} ${status} ${ms.toFixed(1)}ms`);
     };
@@ -173,6 +175,8 @@ export function createHttpServer({ handleApi, uiDir, guard = null, auth = null, 
           return;
         }
       }
+      // VS Code's web UI for a host's files (lib/code.mjs, web.code).
+      if (code && url.pathname.startsWith('/code/') && (await code.handle(req, res, url))) return;
       if (url.pathname.startsWith('/api/')) {
         const result = await handleApi(req, url);
         if (result?.stream) await pipeResult(res, result, logError, `${req.method} ${req.url}`);
@@ -191,6 +195,31 @@ export function createHttpServer({ handleApi, uiDir, guard = null, auth = null, 
       const extra = err instanceof HttpError && err.body && typeof err.body === 'object' ? err.body : {};
       if (!res.headersSent) sendJson(res, status, { ...extra, error: err?.message ?? 'internal error' });
       else res.destroy();
+    });
+  });
+
+  // WebSockets: only VS Code's (`/code/…`), behind the same guard and auth as a request.
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => socket.destroy());
+    (async () => {
+      let url;
+      try {
+        url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+      } catch {
+        url = null;
+      }
+      const refuse = (status, text) => socket.end(`HTTP/1.1 ${status} ${text}\r\nconnection: close\r\n\r\n`);
+      if (!url || !code || !url.pathname.startsWith('/code/')) return refuse(404, 'Not Found');
+      const denied = guard?.(req);
+      if (denied) {
+        log(`[guard] refused upgrade ${req.url}: ${denied.error}`);
+        return refuse(denied.status, 'Forbidden');
+      }
+      if (auth?.enabled && (await auth.check(req, url))) return refuse(401, 'Unauthorized');
+      if (!(await code.upgrade(req, socket, head, url))) refuse(404, 'Not Found');
+    })().catch((err) => {
+      logError(err, `upgrade ${req.url}`);
+      socket.destroy();
     });
   });
 

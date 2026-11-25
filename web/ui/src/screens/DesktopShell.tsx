@@ -89,6 +89,8 @@ import { NotesScreen } from '@/screens/NotesScreen'
 import { PrsScreen } from '@/screens/PrsScreen'
 import { TasksScreen } from '@/screens/TasksScreen'
 import { ReviewScreen } from '@/screens/ReviewScreen'
+import { CodeScreen } from '@/screens/CodeScreen'
+import { codeHref, parseCodeLocation } from '@/lib/code'
 import { isPrsLocation, prHref } from '@/lib/prs'
 import { isTasksLocation } from '@/lib/tasks'
 import { parsePrReviewLocation, parseReviewLocation, reviewHref } from '@/lib/review'
@@ -133,7 +135,9 @@ export function DesktopShell() {
   const reviewLoc = parseReviewLocation(location)
   // `#/review/pr/:host/:owner/:repo/:n`: the same over a PR, with no session.
   const prReviewLoc = parsePrReviewLocation(location)
-  const reviewOpen = reviewLoc !== null || prReviewLoc !== null
+  // `#/code/:host/:id`: VS Code on the session's checkout, the session beside it (the whole window too).
+  const codeOpen = parseCodeLocation(location) !== null
+  const reviewOpen = reviewLoc !== null || prReviewLoc !== null || codeOpen
   const notesHosts = useNotesHosts()
   const selected = match ? { host: params.host, id: params.id } : null
   const selectedKey = selected ? `${selected.host}/${selected.id}` : null
@@ -299,7 +303,14 @@ export function DesktopShell() {
         setNewOpen(true)
         return true
       case 'back':
-        // Esc in the diff reviewer: back to its session.
+        // Esc in the diff reviewer or the code view: back to its session.
+        {
+          const codeLoc = parseCodeLocation(location)
+          if (codeLoc) {
+            navigate(sessionHref({ host: codeLoc.host, session_id: codeLoc.id }))
+            return true
+          }
+        }
         if (reviewLoc) {
           navigate(sessionHref({ host: reviewLoc.host, session_id: reviewLoc.id }))
           return true
@@ -495,6 +506,13 @@ export function DesktopShell() {
                       keywords: ['diff', 'review', 'changes', 'files', 'git', 'pr'],
                       run: () => navigate(reviewHref(selected.host, selected.id)),
                     },
+                    {
+                      id: 'code',
+                      label: 'Code (VS Code in Fleet)',
+                      icon: <CodeXmlIcon />,
+                      keywords: ['vscode', 'code', 'editor', 'files', 'browse', 'worktree'],
+                      run: () => navigate(codeHref(selected.host, selected.id)),
+                    },
                   ]
                 : []),
             ]
@@ -669,7 +687,7 @@ export function DesktopShell() {
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {reviewOpen ? (
         <main className="flex min-h-0 min-w-0 flex-1">
-          <ReviewScreen layout="pane" />
+          {codeOpen ? <CodeScreen layout="pane" /> : <ReviewScreen layout="pane" />}
         </main>
       ) : (
         <>

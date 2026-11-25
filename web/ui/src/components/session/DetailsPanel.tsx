@@ -1,16 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import {
-  AlarmClockIcon,
-  FileDiffIcon,
-  GitForkIcon,
-  LayersIcon,
-  Link2Icon,
-  Loader2Icon,
-  MoonIcon,
-  PowerIcon,
-  RefreshCwIcon,
-  SquareTerminalIcon,
-} from 'lucide-react'
+import { AlarmClockIcon, AppWindowIcon, CodeXmlIcon, FileDiffIcon, GitForkIcon, LayersIcon, Link2Icon, Loader2Icon, MoonIcon, PowerIcon, RefreshCwIcon, SquareTerminalIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, sessionErrorMessage } from '@/api/client'
@@ -47,6 +36,10 @@ export interface DetailsPanelProps {
   onNewFromHere?: () => void
   /** "Review changes": the diff reviewer (the action row, desktop column and mobile drawer). */
   onReview?: () => void
+  /** "Code": VS Code in Fleet on the session's checkout, the chat beside it. */
+  onCode?: () => void
+  /** "VS Code": the session's checkout in the VS Code app (a vscode:// link). */
+  editorUrl?: string | null
   /** Session stacks: the label and the StackBrief sheet (when in one), and "Link…" (put another live session in it). */
   stack?: { label: string | null; onOpen?: () => void; onLink: () => void } | null
 }
@@ -277,12 +270,26 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
           ) : null}
 
           {/* Actions first: Review, New (from here), Link (to a stack), Attach. Standard small outline buttons, left-aligned; they wrap when the pane is narrow. */}
-          {p.onReview || p.onNewFromHere || p.stack || attachCmd ? (
+          {p.onReview || p.onCode || p.editorUrl || p.onNewFromHere || p.stack || attachCmd ? (
             <div className="flex flex-wrap items-center gap-1.5 pt-1 pb-2">
               {p.onReview ? (
                 <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Review changes" title="Review changes (diff)" onClick={p.onReview}>
                   <FileDiffIcon />
                   Review
+                </Button>
+              ) : null}
+              {p.onCode ? (
+                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Code" title="Code: VS Code in Fleet on this session's checkout, the chat beside it" onClick={p.onCode}>
+                  <CodeXmlIcon />
+                  Code
+                </Button>
+              ) : null}
+              {p.editorUrl ? (
+                <Button asChild variant="outline" size={panel ? 'xs' : 'sm'} className="pointer-coarse:hidden">
+                  <a href={p.editorUrl} aria-label="Open in VS Code" title={`Open this session's checkout in the ${/^cursor:/.test(p.editorUrl) ? 'Cursor' : 'VS Code'} app`}>
+                    <AppWindowIcon />
+                    {/^cursor:/.test(p.editorUrl) ? 'Cursor' : 'VSC'}
+                  </a>
                 </Button>
               ) : null}
               {p.onNewFromHere ? (

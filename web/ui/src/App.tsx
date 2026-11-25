@@ -31,6 +31,7 @@ import { NotesScreen } from '@/screens/NotesScreen'
 import { OperatorScreen } from '@/screens/OperatorScreen'
 import { PrsScreen } from '@/screens/PrsScreen'
 import { ReviewScreen } from '@/screens/ReviewScreen'
+import { CodeScreen } from '@/screens/CodeScreen'
 import { SessionScreen } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 import { TasksScreen } from '@/screens/TasksScreen'
@@ -114,6 +115,9 @@ function FleetApp() {
                   </Route>
                   <Route path="/review/:host/:id/root/:root">
                     <ReviewScreen />
+                  </Route>
+                  <Route path={/^\/code\/[^/]+\/[^/]+(?:\/root\/[^/]+)?\/?$/}>
+                    <CodeScreen />
                   </Route>
                   <Route path="/s/:host/:id">
                     {(p) => <SessionScreen key={`${p.host}/${p.id}`} host={p.host} id={p.id} />}
