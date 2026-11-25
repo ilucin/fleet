@@ -88,6 +88,19 @@ export function createCodeProxy({ config, log = () => {}, logError = () => {}, s
   let child = null;
   let starting = null;
   const socketPath = code.socketDir ? path.join(code.socketDir, 'vscode.sock') : null;
+  // serve-web runs VS Code's server as a child that outlives it: both run in their own process
+  // group, which stop() ends whole. The group id is kept in a file, so a start after a crash ends
+  // the group a killed server left behind.
+  const pidFile = code.socketDir ? path.join(code.socketDir, 'vscode.pgid') : null;
+
+  function killGroup(pgid) {
+    if (!Number.isInteger(pgid) || pgid <= 1) return;
+    try {
+      process.kill(-pgid, 'SIGTERM');
+    } catch {
+      /* already gone */
+    }
+  }
 
   function waitForSocket(ms) {
     return new Promise((resolve, reject) => {
@@ -113,10 +126,16 @@ export function createCodeProxy({ config, log = () => {}, logError = () => {}, s
     fs.mkdirSync(code.socketDir, { recursive: true, mode: 0o700 });
     if (fs.statSync(code.socketDir).uid !== process.getuid?.()) return Promise.reject(Object.assign(new Error(`${code.socketDir} belongs to another user`), { status: 503 }));
     fs.chmodSync(code.socketDir, 0o700);
+    try {
+      killGroup(Number(fs.readFileSync(pidFile, 'utf8').trim()));
+    } catch {
+      /* no leftover */
+    }
     fs.rmSync(socketPath, { force: true });
     const args = ['serve-web', '--socket-path', socketPath, '--without-connection-token', '--accept-server-license-terms', '--server-base-path', `/code/${config.self}`, '--disable-telemetry'];
     log(`[code] starting ${path.basename(cli)} serve-web on ${socketPath}`);
-    child = spawnFn(cli, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: false });
+    child = spawnFn(cli, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    if (Number.isInteger(child.pid)) fs.writeFileSync(pidFile, String(child.pid), { mode: 0o600 });
     const tail = (b) => {
       const s = String(b).trim();
       if (s && /error|fail/i.test(s)) log(`[code] ${s.split('\n').slice(-1)[0]}`);
@@ -250,7 +269,17 @@ export function createCodeProxy({ config, log = () => {}, logError = () => {}, s
   }
 
   function stop() {
-    if (child && child.exitCode == null) child.kill('SIGTERM');
+    let pgid = Number.isInteger(child?.pid) ? child.pid : null;
+    if (pgid == null && pidFile) {
+      try {
+        pgid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      } catch {
+        pgid = null;
+      }
+    }
+    if (pgid) killGroup(pgid);
+    else if (child && child.exitCode == null) child.kill('SIGTERM');
+    if (pidFile) fs.rmSync(pidFile, { force: true });
   }
 
   return { handle, upgrade, stop };
