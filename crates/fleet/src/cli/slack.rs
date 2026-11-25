@@ -10,7 +10,7 @@ use std::time::Duration;
 use colored::Colorize;
 use serde_json::{Value, json};
 
-use crate::cli::brief::local_web_base;
+use crate::cli::brief::{WebAuthHeader, local_web_base};
 use crate::core::{discovery, hosts};
 use crate::error::{Error, Result};
 
@@ -46,6 +46,10 @@ pub(crate) fn request_within(
             "--data-binary",
             "@-",
         ]);
+    }
+    let auth = WebAuthHeader::new();
+    if let Some(a) = &auth {
+        a.apply(&mut c);
     }
     c.arg(&url);
     if hosts::dry_run() {

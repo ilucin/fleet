@@ -188,7 +188,7 @@ addressed to it get an 👀 reaction. A linked session that waits on you (a perm
 question in the terminal) for over 30 s says so in the thread — only the kind of prompt, never its
 details — and DMs you (`slack.owner`; with several `slack.owners`, the owner who started it from Slack, if one did) a link to it in Fleet's web UI; messages for it meanwhile get
 ⏳, and once it moves on both posts are edited to say so. When the link ends, delivery stops and, if the session ever spoke there, the thread is
-told it left. The commands talk to this machine's web server, which proxies to `slack.host` (or, for a host listed in `slack.bridges`, to that host's own bridge).
+told it left. The commands talk to this machine's web server, which proxies to `slack.host` (or, for a host listed in `slack.bridges`, to that host's own bridge). They reach it at `web.bind` when that names one address (else `hosts.<self>.web`, else loopback), with the Bearer token from `web.auth` when the server asks for one.
 Sessions on any host can be linked: the bridge lists and types into them through their host's
 web server, and checks a reply's pane on the host it came from. A session asked to join a thread
 links itself (`fleet slack link <url> --for 2h`).

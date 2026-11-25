@@ -452,14 +452,93 @@ pub fn open(t: &Target, target: &str) -> Result<()> {
 
 // ------------------------------------------------------------------ regenerate
 
-/// This machine's web server: `hosts.<self>.web`, else `http://127.0.0.1:<web.port>`.
+/// This machine's web server, as its own CLI reaches it: `web.bind` when it names one address
+/// (the server answers only there), else `hosts.<self>.web`, else `http://127.0.0.1:<web.port>`.
+/// `hosts.<self>.web` is the address peers use, and it need not answer from the machine itself:
+/// a userspace `tailscaled` takes inbound tailnet traffic but gives the machine no route to its
+/// own tailnet address.
 pub fn local_web_base() -> String {
     let cfg = config::get();
-    cfg.host(&cfg.self_name())
-        .and_then(|h| h.web)
-        .map(|w| w.trim().trim_end_matches('/').to_string())
+    let own = cfg.host(&cfg.self_name()).and_then(|h| h.web);
+    web_base(cfg.web.bind.as_deref(), own.as_deref(), cfg.web_port())
+}
+
+fn web_base(bind: Option<&str>, own: Option<&str>, port: u16) -> String {
+    if let Some(bind) = bind
+        .map(str::trim)
+        .filter(|b| !b.is_empty() && !matches!(*b, "0.0.0.0" | "::" | "[::]"))
+    {
+        let host = if bind.contains(':') && !bind.starts_with('[') {
+            format!("[{bind}]")
+        } else {
+            bind.to_string()
+        };
+        return format!("http://{host}:{port}");
+    }
+    own.map(|w| w.trim().trim_end_matches('/').to_string())
         .filter(|w| !w.is_empty())
-        .unwrap_or_else(|| format!("http://127.0.0.1:{}", cfg.web_port()))
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"))
+}
+
+/// The token this machine's own web server asks for (`web.auth`), read the way the server reads
+/// it (`web/lib/auth.mjs`): `tokenFile` wins over `keychain`. `None` → auth is off, or the token
+/// cannot be read (the server's 401 then says so).
+pub fn local_web_token() -> Option<String> {
+    let cfg = config::get();
+    let auth = &cfg.web.auth;
+    let from_file = auth["tokenFile"]
+        .as_str()
+        .filter(|f| !f.trim().is_empty())
+        .and_then(|f| std::fs::read_to_string(expand_tilde(f.trim())).ok());
+    from_file
+        .or_else(|| {
+            auth["keychain"]
+                .as_str()
+                .filter(|k| !k.trim().is_empty())
+                .and_then(|k| crate::core::tasks::keychain_token(k.trim()))
+        })
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// A curl header file (`-H @<path>`) with the Bearer token for this machine's web server:
+/// owner-only and removed on drop, so the token never shows in the process list.
+pub struct WebAuthHeader(PathBuf);
+
+impl WebAuthHeader {
+    /// `None` when the server asks for no token (see [`local_web_token`]).
+    pub fn new() -> Option<Self> {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let token = local_web_token()?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path =
+            std::env::temp_dir().join(format!("fleet-web-auth-{}-{nanos}", std::process::id()));
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .ok()?;
+        let me = WebAuthHeader(path);
+        f.write_all(format!("Authorization: Bearer {token}\n").as_bytes())
+            .ok()?;
+        Some(me)
+    }
+
+    /// Adds `-H @<file>` to a curl command.
+    pub fn apply(&self, c: &mut std::process::Command) {
+        c.arg("-H").arg(format!("@{}", self.0.display()));
+    }
+}
+
+impl Drop for WebAuthHeader {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 pub fn path_segment(s: &str) -> String {
@@ -511,7 +590,11 @@ pub fn regenerate(target: &str, json: bool) -> Result<()> {
     }
     let base = local_web_base();
     let me = config::get().self_name();
-    let c = regenerate_command(&base, &me, &src.id);
+    let mut c = regenerate_command(&base, &me, &src.id);
+    let auth = WebAuthHeader::new();
+    if let Some(a) = &auth {
+        a.apply(&mut c);
+    }
     if hosts::dry_run() {
         println!("{}", hosts::display_command(&c));
         return Ok(());
@@ -572,5 +655,26 @@ or set hosts.{me}.web)"
             "the web server at {base} has no brief API — update it (fleet install / restart it)"
         ))),
         s => Err(Error::Other(format!("web server answered {s}: {err}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_base;
+
+    #[test]
+    fn web_base_prefers_a_specific_bind_address() {
+        let own = Some("http://100.x.y.z:7777/");
+        assert_eq!(
+            web_base(Some("127.0.0.1"), own, 7777),
+            "http://127.0.0.1:7777"
+        );
+        assert_eq!(web_base(Some("::1"), own, 7000), "http://[::1]:7000");
+        assert_eq!(
+            web_base(Some("0.0.0.0"), own, 7777),
+            "http://100.x.y.z:7777"
+        );
+        assert_eq!(web_base(None, own, 7777), "http://100.x.y.z:7777");
+        assert_eq!(web_base(Some("::"), None, 7777), "http://127.0.0.1:7777");
     }
 }

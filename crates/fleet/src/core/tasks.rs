@@ -177,7 +177,7 @@ impl Settings {
 
 /// `security find-generic-password -s <service> -w`: the item's secret, from the default
 /// keychain search list. `None` when there is no such item (or no `security`).
-fn keychain_token(service: &str) -> Option<String> {
+pub(crate) fn keychain_token(service: &str) -> Option<String> {
     let o = Command::new("security")
         .args(["find-generic-password", "-s", service, "-w"])
         .stdin(Stdio::null())

@@ -96,6 +96,10 @@ pub struct WebConfig {
     /// Kept loose so a bad value never breaks loading the config.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub editor: Option<Value>,
+    /// `web.auth` — the server's token auth (`web/lib/auth.mjs`). Raw JSON: the CLI only reads the
+    /// token from it (`keychain` / `tokenFile`) to call its own server.
+    #[serde(skip_serializing_if = "Value::is_null")]
+    pub auth: Value,
 }
 
 impl WebConfig {
