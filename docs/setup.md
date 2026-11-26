@@ -237,6 +237,15 @@ changes), builds the CLI into `~/.local/bin/fleet`, runs `fleet web build`, rest
 `fleet.web` launchd agent (else the `fleet-web` systemd user unit on Linux, else the `fleet-web` tmux
 session) and waits for `/api/health`.
 
+**macOS privacy prompts** ("fleet would like to access files in…"): macOS ties these grants to the
+binary's code signature, and a cargo build is ad-hoc signed with an identity that changes on every
+build, so each deploy asks again. Create a self-signed code-signing certificate named
+`local-codesign` in the keychain (Keychain Access → Certificate Assistant → Create a Certificate,
+type Code Signing; another name via `FLEET_CODESIGN_IDENTITY`) and `deploy.sh` signs the binary
+with it under the fixed identifier `dev.fleet.cli`. Then grant `~/.local/bin/fleet` **Full Disk
+Access** once (System Settings → Privacy & Security; ⌘⇧G to type the path); the grant survives
+redeploys. Over ssh the key must sit in a keychain that is unlocked there.
+
 ## 7. Phone
 
 1. Install the **Tailscale** app, log in to the same tailnet, turn the VPN on.

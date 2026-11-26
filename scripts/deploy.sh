@@ -13,6 +13,11 @@
 # session `fleet-web`, else it only tells you to restart the server yourself. A Claude Code skill
 # installed earlier (`fleet skill install`, ~/.claude/skills/fleet/SKILL.md) is refreshed to the new
 # binary's; a machine without one is left without one.
+#
+# macOS: if the keychain holds a code-signing identity named $FLEET_CODESIGN_IDENTITY (default
+# `local-codesign`, a self-signed cert is enough), the binary is signed with it under a fixed
+# identifier. cargo's ad-hoc signature changes on every build, so macOS treats each deploy as a new
+# app and forgets its privacy grants (Files & Folders, Full Disk Access); a stable signature keeps them.
 set -eu
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -36,6 +41,11 @@ cargo build --release --locked -q -p fleet
 mkdir -p "$HOME/.local/bin"
 # Copy then rename: overwriting a running binary in place can get it killed on macOS.
 cp target/release/fleet "$HOME/.local/bin/.fleet.new"
+sign_id=${FLEET_CODESIGN_IDENTITY:-local-codesign}
+if [ "$(uname -s)" = Darwin ] && security find-identity -p codesigning 2>/dev/null | grep -qF "\"$sign_id\""; then
+  codesign --force --sign "$sign_id" --identifier dev.fleet.cli "$HOME/.local/bin/.fleet.new"
+  say "signed as $sign_id"
+fi
 mv -f "$HOME/.local/bin/.fleet.new" "$HOME/.local/bin/fleet"
 say "installed $("$HOME/.local/bin/fleet" --version)"
 
