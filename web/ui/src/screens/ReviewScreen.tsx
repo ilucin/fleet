@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import { useLocation } from 'wouter'
 
 import { HostBadge } from '@/components/HostBadge'
+import { ChatPanel } from '@/components/review/ChatPanel'
 import { DiffStat, FileDiff, type DiffView } from '@/components/review/FileDiff'
 import { FileTree } from '@/components/review/FileTree'
 import { PrDescription, PrDescriptionRow } from '@/components/review/PrDescription'
@@ -988,9 +989,7 @@ function ReviewView({ layout, source }: { layout: Layout; source: ReviewSource }
         </div>
       </div>
       {showChat && source.chat ? (
-        <aside aria-label="Session" className="flex w-[28rem] shrink-0 border-l xl:w-[32rem]">
-          {source.chat}
-        </aside>
+        <ChatPanel>{source.chat}</ChatPanel>
       ) : null}
       {dialog}
       {fullDialog}
