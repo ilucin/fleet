@@ -103,7 +103,7 @@ describe('groupResources', () => {
       ['Issue', 'Issues', ['i1']],
       ['Artifact', 'Artifacts', ['a1']],
       ['Spec', 'Specs', ['s1']],
-      ['Link', 'Links', ['l1']],
+      ['Link', 'References', ['l1']],
       ['File', 'Files', ['f1', 'f2']],
       ['Future', 'Future', ['x']],
       [null, 'Notes', ['note']],

@@ -157,7 +157,7 @@ export function buildPrompt({ brief, delta, host, cwd, branch, todosFromSession,
     'Update the brief: keep what is still true, fix what changed, add what is new. Do not rewrite it from scratch — unless the session has clearly moved on to a different task, then write the Summary for that task.',
     'Answer with ONLY the following markdown, nothing before or after it:',
     [
-      '## Summary\n<at most 3 sentences, under 80 words: lead with what the session is working on NOW and why, then where it stands and what comes next; earlier work only if it still matters; name the repo, branch or host only where it adds something beyond the location above>',
+      '## Summary\n<at most 2 sentences, under 50 words: lead with what the session is working on NOW and why, then where it stands and what comes next; earlier work only if it still matters; name the repo, branch or host only where it adds something beyond the location above>',
       todosFromSession
         ? null
         : '## Todos\n- [x] <done todo>\n- [ ] <open todo>\n(3–8 short todos in order; keep existing todos and their wording while accurate, tick finished ones, add what comes next)',

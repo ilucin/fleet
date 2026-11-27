@@ -553,7 +553,6 @@ export function SessionScreen({
     onNewFromHere: session ? newFromHere : undefined,
     onReview: session?.cwd && !embedded ? () => navigate(reviewHref(host, id)) : undefined,
     onCode: !embedded && (brief.brief?.codeUrl || brief.brief?.worktrees?.some((w) => w.codeUrl)) ? () => navigate(codeHref(host, id)) : undefined,
-    editorUrl: embedded ? null : (brief.brief?.editorUrl ?? session?.editorUrl ?? null),
     stack: embedded ? null : stackMenu,
     onSnoozed: pane ? undefined : () => (onBack ? onBack() : navigate('/', { replace: true })),
     onClosed: () => {

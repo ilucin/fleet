@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  AppWindowIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CircleDotIcon,
@@ -63,6 +64,9 @@ const TOP_KINDS = new Set(['Origin', 'PR'])
 const FILE_KINDS = new Set(['File', 'Spec'])
 /** The Files group is collapsed until the viewer opens it (remembered per viewer). */
 const FILES_OPEN_KEY = 'fleet.briefFilesOpen'
+/** The Todos too: collapsed to their progress until opened (remembered per viewer). */
+const TODOS_OPEN_KEY = 'fleet.briefTodosOpen'
+const openParse = (r: string) => (r === '1' || r === '0' ? r : undefined)
 
 export interface BriefSectionProps {
   host: string
@@ -82,15 +86,18 @@ export interface BriefSectionProps {
 }
 
 /**
- * The session brief, the top of the Details panel: a toolbar (updated / edited, Regenerate,
- * Edit), then Summary, Todos (clickable checkboxes, "3/7"), Resources grouped by kind (files
- * open the in-app preview, URLs a new tab; Files collapsed by default). Edit = the body markdown in a textarea (⌘/Ctrl+Enter saves, Esc cancels).
+ * The session brief in the Details panel: a toolbar (updated / edited, Regenerate, Edit), then the
+ * Summary (clamped to a few lines, "More" opens it), Origin and Pull requests, Todos (collapsed to
+ * "3/7" until opened; clickable checkboxes), Worktrees, and Resources grouped by kind (files open the
+ * in-app preview, URLs a new tab; Files collapsed by default). Edit = the body markdown in a textarea (⌘/Ctrl+Enter saves, Esc cancels).
  */
 export function BriefSection({ host, brief: st, fileLinks, desktop = false, cancelEditRef, onReviewRoot, onReviewPr, onCodeRoot }: BriefSectionProps) {
   const now = useNow(15_000)
   const b = st.brief
   const [draft, setDraft] = useState<string | null>(null)
   const editing = draft !== null
+  const [todosOpenRaw, setTodosOpenRaw] = usePersistentState<string>(TODOS_OPEN_KEY, '0', openParse)
+  const todosOpen = todosOpenRaw === '1'
   const textRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -229,7 +236,7 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
         <div className="space-y-5 pb-2">
           <Part title="Summary">
             {summary ? (
-              <Markdown text={summary} className="text-sm leading-relaxed" />
+              <ClampedText text={summary} />
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-dimmer">
@@ -240,8 +247,6 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
               </div>
             )}
           </Part>
-
-          {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} onReview={onReviewRoot} onCode={onCodeRoot} /> : null}
 
           {topGroups.map((g) => (
             <Part key={g.kind} title={g.label} aside={g.items.length > 1 ? <span className="tabular-nums">{g.items.length}</span> : null}>
@@ -254,31 +259,48 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
           ))}
 
           {todos.length ? (
-            <Part title="Todos" aside={progress ? <span className="tabular-nums">{`${progress.done}/${progress.total}`}</span> : null}>
+            <Part
+              title={
+                <button
+                  type="button"
+                  aria-expanded={todosOpen}
+                  onClick={() => setTodosOpenRaw(todosOpen ? '0' : '1')}
+                  className="-ml-1 flex min-h-7 items-center gap-1 rounded-md pr-2 pl-1 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <ChevronRightIcon className={cn('size-3.5 transition-transform', todosOpen && 'rotate-90')} />
+                  Todos
+                </button>
+              }
+              aside={progress ? <span className="tabular-nums">{`${progress.done}/${progress.total}`}</span> : null}
+            >
               {progress ? (
                 <div className="mb-2 h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
                   <div className="h-full rounded-full bg-primary/70 transition-[width]" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
                 </div>
               ) : null}
-              <ul className="space-y-0.5">
-                {todos.map((item, i) => (
-                  <li key={i} className="flex items-start gap-1">
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={item.done}
-                      aria-label={item.done ? `Mark not done: ${item.text}` : `Mark done: ${item.text}`}
-                      onClick={() => void st.toggleTodo(i)}
-                      className="-ml-1.5 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-muted"
-                    >
-                      {item.done ? <SquareCheckBigIcon className="size-[1.125rem] text-primary" /> : <SquareIcon className="size-[1.125rem]" />}
-                    </button>
-                    <Markdown text={item.text} className={cn('min-w-0 flex-1 pt-1.5 text-sm', item.done && 'text-muted-foreground')} />
-                  </li>
-                ))}
-              </ul>
+              {todosOpen ? (
+                <ul className="space-y-0.5">
+                  {todos.map((item, i) => (
+                    <li key={i} className="flex items-start gap-1">
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={item.done}
+                        aria-label={item.done ? `Mark not done: ${item.text}` : `Mark done: ${item.text}`}
+                        onClick={() => void st.toggleTodo(i)}
+                        className="-ml-1.5 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-muted"
+                      >
+                        {item.done ? <SquareCheckBigIcon className="size-[1.125rem] text-primary" /> : <SquareIcon className="size-[1.125rem]" />}
+                      </button>
+                      <Markdown text={item.text} className={cn('min-w-0 flex-1 pt-1.5 text-sm', item.done && 'text-muted-foreground')} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </Part>
           ) : null}
+
+          {worktrees.length ? <WorktreesGroup worktrees={worktrees} editor={b.editor} onReview={onReviewRoot} onCode={onCodeRoot} /> : null}
 
           {restGroups.length ? (
             <Part title="Resources">
@@ -316,11 +338,11 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
               title="Regenerate (asks the model)"
               disabled={busy || !b}
               onClick={() => void st.regenerate()}
-              className="size-9 shrink-0 rounded-lg"
+              className="size-7 shrink-0 rounded-md text-muted-foreground"
             >
               {busy ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
             </Button>
-            <Button variant="ghost" size="icon" aria-label="Edit brief" title="Edit" disabled={!b} onClick={startEdit} className="size-9 shrink-0 rounded-lg">
+            <Button variant="ghost" size="icon" aria-label="Edit brief" title="Edit" disabled={!b} onClick={startEdit} className="size-7 shrink-0 rounded-md text-muted-foreground">
               <PencilIcon />
             </Button>
           </>
@@ -331,10 +353,10 @@ export function BriefSection({ host, brief: st, fileLinks, desktop = false, canc
   )
 }
 
-function Part({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+function Part({ title, aside, children }: { title: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
     <section>
-      <h4 className="flex items-baseline justify-between gap-2 pb-1.5 text-xs font-semibold text-muted-foreground">
+      <h4 className="flex items-center justify-between gap-2 pb-1.5 text-xs font-semibold text-muted-foreground">
         {title}
         {aside ? <span className="text-xs font-medium text-dimmer">{aside}</span> : null}
       </h4>
@@ -369,7 +391,7 @@ function Group({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }) {
 
 /** Files: often long, so collapsed by default; the open state is remembered per viewer. */
 function FilesGroup({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }) {
-  const [openRaw, setOpenRaw] = usePersistentState<string>(FILES_OPEN_KEY, '0', (r) => (r === '1' || r === '0' ? r : undefined))
+  const [openRaw, setOpenRaw] = usePersistentState<string>(FILES_OPEN_KEY, '0', openParse)
   const open = openRaw === '1'
   return (
     <div>
@@ -398,7 +420,7 @@ function FilesGroup({ g, fileLinks }: { g: ResourceGroup; fileLinks: FileStats }
 
 /** The checkouts the session works in (right under the Summary): Review, Code (VS Code in Fleet) and the VS Code app button (hidden on touch-first screens). */
 function WorktreesGroup({ worktrees, editor, onReview, onCode }: { worktrees: BriefWorktree[]; editor: string | null | undefined; onReview?: (root: string) => void; onCode?: (root: string) => void }) {
-  const label = editor === 'cursor' ? 'Cursor' : 'VSC'
+  const app = editor === 'cursor' ? 'Cursor' : 'VS Code'
   return (
     <div>
       <h5 className="pb-1 text-xs font-medium text-muted-foreground">
@@ -416,14 +438,14 @@ function WorktreesGroup({ worktrees, editor, onReview, onCode }: { worktrees: Br
             </span>
             {onReview ? <ReviewButton onClick={() => onReview(w.path)} title={`Review ${w.branch ?? w.display}: the diff of this checkout only`} /> : null}
             {onCode && w.codeUrl ? (
-              <Button variant="outline" size="icon-xs" className="shrink-0" aria-label="Code" title={`Code: ${w.display} in VS Code inside Fleet, the chat beside it`} onClick={() => onCode(w.path)}>
+              <Button variant="outline" size="icon-xs" className="shrink-0" aria-label="VS Code in Fleet" title={`VSC: ${w.display} in VS Code inside Fleet, the chat beside it`} onClick={() => onCode(w.path)}>
                 <CodeXmlIcon />
               </Button>
             ) : null}
             {w.editorUrl ? (
-              <Button asChild variant="outline" size="xs" className="pointer-coarse:hidden">
-                <a href={w.editorUrl} title={`Open ${w.display} in ${editor === 'cursor' ? 'Cursor' : 'VS Code'}`}>
-                  {label}
+              <Button asChild variant="outline" size="icon-xs" className="pointer-coarse:hidden">
+                <a href={w.editorUrl} aria-label={`Open in the ${app} app`} title={`Open ${w.display} in the ${app} app`}>
+                  <AppWindowIcon />
                 </a>
               </Button>
             ) : null}
@@ -513,3 +535,36 @@ function ResourceRow({ r, fileLinks, review }: { r: BriefResource; fileLinks: Fi
     </li>
   )
 }
+
+/** The Summary, clamped to four lines with a fade; "More" / "Less" when it is longer. */
+function ClampedText({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [long, setLong] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setLong(el.scrollHeight > CLAMP_PX + 2)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [text])
+  const clamped = long && !open
+  return (
+    <div>
+      <div ref={ref} className="overflow-hidden" style={clamped ? { maxHeight: CLAMP_PX, maskImage: FADE, WebkitMaskImage: FADE } : undefined}>
+        <Markdown text={text} className="text-sm leading-relaxed" />
+      </div>
+      {long ? (
+        <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="pt-0.5 text-xs font-medium text-dimmer outline-none hover:text-foreground focus-visible:underline">
+          {open ? 'Less' : 'More'}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+/** Four lines of text-sm leading-relaxed (14px × 1.625 ≈ 23px). */
+const CLAMP_PX = 92
+const FADE = 'linear-gradient(to bottom, black 60%, transparent)'

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlarmClockIcon, AppWindowIcon, CodeXmlIcon, FileDiffIcon, GitForkIcon, LayersIcon, Link2Icon, Loader2Icon, MoonIcon, PowerIcon, RefreshCwIcon, SquareTerminalIcon } from 'lucide-react'
+import { AlarmClockIcon, CodeXmlIcon, FileDiffIcon, GitForkIcon, LayersIcon, Loader2Icon, MoonIcon, PlusIcon, PowerIcon, RefreshCwIcon, SquareTerminalIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, sessionErrorMessage } from '@/api/client'
@@ -36,24 +36,10 @@ export interface DetailsPanelProps {
   onNewFromHere?: () => void
   /** "Review changes": the diff reviewer (the action row, desktop column and mobile drawer). */
   onReview?: () => void
-  /** "Code": VS Code in Fleet on the session's checkout, the chat beside it. */
+  /** "VSC": VS Code in Fleet on the session's checkout, the chat beside it. */
   onCode?: () => void
-  /** "VS Code": the session's checkout in the VS Code app (a vscode:// link). */
-  editorUrl?: string | null
-  /** Session stacks: the label and the StackBrief sheet (when in one), and "Link…" (put another live session in it). */
+  /** Session stacks: the label and the StackBrief sheet (when in one), and "Add session" (put another live session in it). */
   stack?: { label: string | null; onOpen?: () => void; onLink: () => void } | null
-}
-
-function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="flex min-h-12 items-center justify-between gap-3 py-1.5">
-      <div className="min-w-0">
-        <div className="text-sm">{label}</div>
-        {hint ? <div className="truncate text-xs text-dimmer">{hint}</div> : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">{children}</div>
-    </div>
-  )
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -86,10 +72,11 @@ export function DetailsDrawer(p: DetailsPanelProps) {
 }
 
 /**
- * Details: header (name + regenerate, host · cwd, context), the Brief (summary,
- * todos, resources), Session (stack, ids). `drawer` = inside the mobile drawer; `panel` = the desktop
- * details column (click-to-confirm wording, no drawer chrome). Close (⏻) sits top right; the
- * actions (Review, New from here, Link, Attach) sit above the brief.
+ * Details, most used first: header (name + regenerate, host · cwd, context; snooze and close top
+ * right), the actions (Review, VSC, New, Attach), managing the session (its Stack, its Connections
+ * to Slack / GitHub / Productive / Veranda), then the Brief (summary, PRs, todos collapsed,
+ * worktrees, resources) and the ids. `drawer` = inside the mobile drawer; `panel` = the desktop
+ * details column (click-to-confirm wording, no drawer chrome). Every button here is one size.
  */
 export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel'; cancelEditRef?: React.RefObject<(() => void) | null> }) {
   const panel = p.variant === 'panel'
@@ -173,6 +160,7 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
   const { title } = useSessionTitle(s, `${p.host}/${p.id}`)
   const attachCmd = sessionAttachCommand(s)
   const attachLink = canAttachInApp() ? sessionAttachLink(s) : null
+  const btn = panel ? 'xs' : 'sm'
   const Header = panel ? 'div' : DrawerHeader
   const Title = panel ? 'h2' : DrawerTitle
   const Description = panel ? 'p' : DrawerDescription
@@ -269,49 +257,36 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
             </div>
           ) : null}
 
-          {/* Actions first: Review, New (from here), Link (to a stack), Attach. Standard small outline buttons, left-aligned; they wrap when the pane is narrow. */}
-          {p.onReview || p.onCode || p.editorUrl || p.onNewFromHere || p.stack || attachCmd ? (
+          {/* Actions first: Review, VSC (VS Code in Fleet), New (from here), Attach. One size, icon + word, left-aligned; they wrap when the pane is narrow. */}
+          {p.onReview || p.onCode || p.onNewFromHere || attachCmd ? (
             <div className="flex flex-wrap items-center gap-1.5 pt-1 pb-2">
               {p.onReview ? (
-                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Review changes" title="Review changes (diff)" onClick={p.onReview}>
+                <Button variant="outline" size={btn} aria-label="Review changes" title="Review changes (diff)" onClick={p.onReview}>
                   <FileDiffIcon />
                   Review
                 </Button>
               ) : null}
               {p.onCode ? (
-                <Button variant="outline" size={panel ? 'icon-xs' : 'icon-sm'} aria-label="Code" title="Code: VS Code in Fleet on this session's checkout, the chat beside it" onClick={p.onCode}>
+                <Button variant="outline" size={btn} aria-label="VS Code in Fleet" title="VS Code in Fleet on this session's checkout, the chat beside it" onClick={p.onCode}>
                   <CodeXmlIcon />
-                </Button>
-              ) : null}
-              {p.editorUrl ? (
-                <Button asChild variant="outline" size={panel ? 'xs' : 'sm'} className="pointer-coarse:hidden">
-                  <a href={p.editorUrl} aria-label="Open in VS Code" title={`Open this session's checkout in the ${/^cursor:/.test(p.editorUrl) ? 'Cursor' : 'VS Code'} app`}>
-                    <AppWindowIcon />
-                    {/^cursor:/.test(p.editorUrl) ? 'Cursor' : 'VSC'}
-                  </a>
+                  VSC
                 </Button>
               ) : null}
               {p.onNewFromHere ? (
-                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="New session from here" title="New session from here… (hand off / sibling)" onClick={p.onNewFromHere}>
+                <Button variant="outline" size={btn} aria-label="New session from here" title="New session from here… (hand off / sibling)" onClick={p.onNewFromHere}>
                   <GitForkIcon />
                   New
                 </Button>
               ) : null}
-              {p.stack ? (
-                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Link to a stack" title="Link to a stack: put another live session in this stack (or start one)" onClick={p.stack.onLink}>
-                  <Link2Icon />
-                  Link
-                </Button>
-              ) : null}
               {attachLink ? (
-                <Button asChild variant="outline" size={panel ? 'xs' : 'sm'}>
+                <Button asChild variant="outline" size={btn}>
                   <a href={attachLink} aria-label="Attach in iTerm" title={`Attach in iTerm: ${attachCmd}`}>
                     <SquareTerminalIcon />
                     Attach
                   </a>
                 </Button>
               ) : attachCmd ? (
-                <Button variant="outline" size={panel ? 'xs' : 'sm'} aria-label="Copy attach command" title={`Copy attach command: ${attachCmd}`} onClick={() => void copyWithToast(attachCmd)}>
+                <Button variant="outline" size={btn} aria-label="Copy attach command" title={`Copy attach command: ${attachCmd}`} onClick={() => void copyWithToast(attachCmd)}>
                   <SquareTerminalIcon />
                   Attach
                 </Button>
@@ -319,23 +294,35 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
             </div>
           ) : null}
 
-          <BeadsSection host={p.host} session={s} />
+          {/* Managing the session: its stack, then who can talk to it (Connections). */}
+          {p.stack ? (
+            <section className="py-1">
+              <div className="flex items-center justify-between gap-2 pt-2 pb-1">
+                <h3 className="text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">Stack</h3>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {p.stack.onOpen ? (
+                    <Button variant="outline" size={btn} title="StackBrief: the stack's shared brief and its sessions" onClick={p.stack.onOpen}>
+                      <LayersIcon />
+                      StackBrief
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" size={btn} aria-label="Add a session to the stack" title="Add a session to the stack: put another live session in it (or start one)" onClick={p.stack.onLink}>
+                    <PlusIcon />
+                    Add session
+                  </Button>
+                </div>
+              </div>
+              <p className={cn('truncate py-1 text-sm', !p.stack.label && 'text-xs text-dimmer')}>{p.stack.label ?? 'Not in a stack'}</p>
+            </section>
+          ) : null}
+
+          <LinksSection host={p.host} session={s} size={btn} />
 
           <BriefSection {...p.brief} desktop={panel} cancelEditRef={p.cancelEditRef} />
 
-          <LinksSection host={p.host} session={s} />
+          <BeadsSection host={p.host} session={s} />
 
           <Section title="Session">
-            {p.stack ? (
-              <Row label="Session stack" hint={p.stack.label ?? 'Not in a stack'}>
-                {p.stack.onOpen ? (
-                  <Button variant="outline" size="lg" onClick={p.stack.onOpen}>
-                    <LayersIcon />
-                    StackBrief
-                  </Button>
-                ) : null}
-              </Row>
-            ) : null}
             {s ? (
               <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 py-3 text-xs">
                 {(

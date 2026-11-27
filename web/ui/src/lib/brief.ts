@@ -65,7 +65,7 @@ const GROUP_LABEL: Record<string, string> = {
   File: 'Files',
   Branch: 'Branch',
   Worktree: 'Worktree',
-  Link: 'Links',
+  Link: 'References',
 }
 
 export interface ResourceGroup {

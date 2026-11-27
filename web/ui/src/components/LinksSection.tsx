@@ -55,7 +55,7 @@ const VERANDA_STATE = { busy: 'working', idle: 'idle', waiting: 'waiting on you'
 
 const END_LABEL: Record<string, string> = {
   expired: 'expired',
-  unlinked: 'unlinked',
+  unlinked: 'disconnected',
   'room-closed': 'room closed',
   'session-gone': 'session ended',
   closed: 'closed',
@@ -95,14 +95,17 @@ const freshDraft = (): Draft => ({
   keep: '1d',
 })
 
+/** Button size: the Details panel's one size (xs on desktop, sm in the mobile drawer). */
+type Size = 'xs' | 'sm'
+
 /**
- * Details → Links: every link of the session in one place — Slack threads, a Veranda room, GitHub
- * PRs and Productive tasks it follows — with what each allows (Unlink, +1h, Edit), the ones it had
- * before ("Link again"), and "Add link": paste a Slack link or @person, a PR, a task or a room name,
+ * Details → Connections: every link of the session in one place — Slack threads, a Veranda room, GitHub
+ * PRs and Productive tasks it follows — with what each allows (Disconnect, +1h, Edit), the ones it had
+ * before ("Reconnect"), and "Connect": paste a Slack link or @person, a PR, a task or a room name,
  * and the form shows that kind's settings. A kind this fleet has no bridge for is not offered; each
  * bridge reaches sessions on the other hosts through their web servers.
  */
-export function LinksSection({ host, session: s }: { host: string; session: Session | null }) {
+export function LinksSection({ host, session: s, size = 'sm' }: { host: string; session: Session | null; size?: Size }) {
   const slack = useSlack()
   const veranda = useVeranda()
   const github = useGithub()
@@ -171,26 +174,26 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
   }
 
   const unlink = (kind: LinkKind, id: string, room?: string, bridge?: string) =>
-    void act(id, 'Unlink', async () => {
+    void act(id, 'Disconnect', async () => {
       if (kind === 'slack') await api.slackUnlink(id).then(refreshSlack)
       else if (kind === 'veranda') await api.verandaUnlink(room!).then(refreshVeranda)
       else if (kind === 'github') await api.githubUnlink(id, bridge).then(refreshGithub)
       else await api.productiveUnlink(id, bridge).then(refreshProductive)
-      toast.success(`Unlinked from ${LINK_LABEL[kind]}`)
+      toast.success(`Disconnected from ${LINK_LABEL[kind]}`)
     })
 
   const linkVeranda = async (body: { room: string; minutes: number; title?: string; note?: string }) => {
     const l = await api.verandaLink({ host, session: sid, ...body })
     shown.set(key, { room: l.room, passphrase: l.passphrase, url: l.url })
     setTick((n) => n + 1)
-    toast.success('Linked to Veranda', { description: `room ${l.room} until ${clock(l.until)} — pass the passphrase on to the guests` })
+    toast.success('Connected to Veranda', { description: `room ${l.room} until ${clock(l.until)} — pass the passphrase on to the guests` })
     await refreshVeranda()
   }
 
   const follow = async (kind: 'github' | 'productive', body: { url: string; task?: string; keep?: string | null }) => {
     const l = kind === 'github' ? await api.githubLink({ host, session: sid, ...body }) : await api.productiveLink({ host, session: sid, ...body })
     const what = kind === 'github' ? `${(l as GithubLink).repo}#${l.number}` : `task #${l.number ?? (l as ProductiveLink).taskId}`
-    toast.success(l.renewed ? `${LINK_LABEL[kind]} link updated` : `Linked to ${LINK_LABEL[kind]}`, { description: [what, l.title].filter(Boolean).join(' · ') })
+    toast.success(l.renewed ? `${LINK_LABEL[kind]} connection updated` : `Connected to ${LINK_LABEL[kind]}`, { description: [what, l.title].filter(Boolean).join(' · ') })
     await (kind === 'github' ? refreshGithub() : refreshProductive())
   }
 
@@ -199,10 +202,10 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
     const d = draft
     const url = d.url.trim()
     const note = d.note.trim()
-    const ok = await act('link', d.editing ? 'Save' : `Link to ${LINK_LABEL[d.kind!]}`, async () => {
+    const ok = await act('link', d.editing ? 'Save' : `Connect to ${LINK_LABEL[d.kind!]}`, async () => {
       if (d.kind === 'slack') {
         const l = await api.slackLink({ host, session: sid, url, minutes: d.slackMinutes, mode: d.mode, ...(note ? { task: note } : {}) })
-        toast.success(l.renewed ? 'Slack link renewed' : 'Linked to Slack', { description: slackUntil(l.until) })
+        toast.success(l.renewed ? 'Slack connection renewed' : 'Connected to Slack', { description: slackUntil(l.until) })
         await refreshSlack()
       } else if (d.kind === 'veranda') {
         await linkVeranda({ room: url, minutes: d.minutes, ...(d.title.trim() ? { title: d.title.trim() } : {}), ...(note ? { note } : {}) })
@@ -236,13 +239,21 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
 
   return (
     <section className="py-1">
-      <h3 className="pt-2 pb-1 text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">Links</h3>
+      <div className="flex items-center justify-between gap-2 pt-2 pb-1">
+        <h3 className="text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">Connections</h3>
+        {!draft && addable.length ? (
+          <Button variant="outline" size={size} title={`Let people talk to this session from ${joinOr(addable.map((k) => LINK_LABEL[k]))}`} onClick={() => setDraft(freshDraft())}>
+            <PlusIcon />
+            Connect
+          </Button>
+        ) : null}
+      </div>
       <div className="divide-y divide-border/60">
         {secret ? (
           <LinkRow kind="veranda" icon={KeyRoundIcon} title={<code className="font-mono select-all">{secret.passphrase}</code>} sub={`Passphrase of room ${secret.room} — shown only now; pass it on to the guests`}>
             <Button
               variant="outline"
-              size="lg"
+              size={size}
               onClick={() => void copyText(secret.url ? `${secret.url}\nRoom: ${secret.room}\nPassphrase: ${secret.passphrase}` : secret.passphrase).then((ok) => ok && toast.success('Copied'))}
             >
               <CopyIcon />
@@ -250,7 +261,7 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
             </Button>
             <Button
               variant="ghost"
-              size="lg"
+              size={size === 'xs' ? 'icon-xs' : 'icon-sm'}
               aria-label="Hide the passphrase"
               onClick={() => {
                 shown.delete(key)
@@ -270,21 +281,21 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
             title={`${slackPlaceName(l)} · ${l.until == null ? 'no end' : `${slackLeft(l.until, now)} left`}`}
             sub={[l.mode === 'proactive' ? 'Proactive' : 'When mentioned', l.task || 'the work of this session', `${l.delivered} in · ${l.replies} out`, l.pending ? `${l.pending} waiting` : null]}
           >
-            <UnlinkButton busy={busy === l.id} disabled={busy != null} onClick={() => unlink('slack', l.id)} />
+            <UnlinkButton size={size} busy={busy === l.id} disabled={busy != null} onClick={() => unlink('slack', l.id)} />
           </LinkRow>
         ))}
 
         {ghLinks.map((l) => (
           <LinkRow key={l.id} kind="github" href={l.url} title={`${l.repo}#${l.number}${l.title ? ` · ${l.title}` : ''}`} sub={followSub(l, `@${l.login}`)}>
-            <EditButton disabled={busy != null} onClick={() => edit('github', l)} />
-            <UnlinkButton busy={busy === l.id} disabled={busy != null} onClick={() => unlink('github', l.id, undefined, l.bridge)} />
+            <EditButton size={size} disabled={busy != null} onClick={() => edit('github', l)} />
+            <UnlinkButton size={size} busy={busy === l.id} disabled={busy != null} onClick={() => unlink('github', l.id, undefined, l.bridge)} />
           </LinkRow>
         ))}
 
         {ptLinks.map((l) => (
           <LinkRow key={l.id} kind="productive" href={l.url} title={`#${l.number ?? l.taskId}${l.title ? ` · ${l.title}` : ''}`} sub={followSub(l, l.me?.name ?? null)}>
-            <EditButton disabled={busy != null} onClick={() => edit('productive', l)} />
-            <UnlinkButton busy={busy === l.id} disabled={busy != null} onClick={() => unlink('productive', l.id, undefined, l.bridge)} />
+            <EditButton size={size} disabled={busy != null} onClick={() => edit('productive', l)} />
+            <UnlinkButton size={size} busy={busy === l.id} disabled={busy != null} onClick={() => unlink('productive', l.id, undefined, l.bridge)} />
           </LinkRow>
         ))}
 
@@ -303,7 +314,7 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
           >
             <Button
               variant="outline"
-              size="lg"
+              size={size}
               disabled={busy != null}
               onClick={() =>
                 void act('extend', 'Extend', async () => {
@@ -316,20 +327,21 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
               {busy === 'extend' ? <Loader2Icon className="animate-spin" /> : <ClockPlusIcon />}
               +1h
             </Button>
-            <UnlinkButton busy={busy === verandaLink.id} disabled={busy != null} onClick={() => unlink('veranda', verandaLink.id, verandaLink.room)} />
+            <UnlinkButton size={size} busy={busy === verandaLink.id} disabled={busy != null} onClick={() => unlink('veranda', verandaLink.id, verandaLink.room)} />
           </LinkRow>
         ) : null}
 
         {pastSlack.map((l) => (
-          <LinkRow key={l.id} kind="slack" muted href={l.permalink} title={`${slackPlaceName(l)} · ${l.endReason === 'expired' ? 'expired' : 'unlinked'}`} sub={[l.mode === 'proactive' ? 'Proactive' : 'When mentioned', l.task || 'the work of this session']}>
+          <LinkRow key={l.id} kind="slack" muted href={l.permalink} title={`${slackPlaceName(l)} · ${l.endReason === 'expired' ? 'expired' : 'disconnected'}`} sub={[l.mode === 'proactive' ? 'Proactive' : 'When mentioned', l.task || 'the work of this session']}>
             <AgainButton
+              size={size}
               busy={busy === l.id}
               disabled={busy != null}
-              label={`Link again · ${slackDuration(l.minutes)}`}
+              label={`Reconnect · ${slackDuration(l.minutes)}`}
               onClick={() =>
-                void act(l.id, 'Link again', async () => {
+                void act(l.id, 'Reconnect', async () => {
                   const n = await api.slackRelink(l.id)
-                  toast.success('Linked to Slack again', { description: slackUntil(n.until) })
+                  toast.success('Reconnected to Slack', { description: slackUntil(n.until) })
                   await refreshSlack()
                 })
               }
@@ -339,23 +351,24 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
 
         {pastGithub.map((l) => (
           <LinkRow key={l.id} kind="github" muted href={l.url} title={`${l.repo}#${l.number} · ${endLabel(l.endReason)}`} sub={[l.title, l.task || 'the work of this session']}>
-            <AgainButton busy={busy === l.id} disabled={busy != null} onClick={() => void act(l.id, 'Link again', () => follow('github', { url: l.url, task: l.task, keep: keepValue(l.keep) }))} />
+            <AgainButton size={size} busy={busy === l.id} disabled={busy != null} onClick={() => void act(l.id, 'Reconnect', () => follow('github', { url: l.url, task: l.task, keep: keepValue(l.keep) }))} />
           </LinkRow>
         ))}
 
         {pastProductive.map((l) => (
           <LinkRow key={l.id} kind="productive" muted href={l.url} title={`#${l.number ?? l.taskId} · ${endLabel(l.endReason)}`} sub={[l.title, l.task || 'the work of this session']}>
-            <AgainButton busy={busy === l.id} disabled={busy != null} onClick={() => void act(l.id, 'Link again', () => follow('productive', { url: l.url, task: l.task, keep: keepValue(l.keep) }))} />
+            <AgainButton size={size} busy={busy === l.id} disabled={busy != null} onClick={() => void act(l.id, 'Reconnect', () => follow('productive', { url: l.url, task: l.task, keep: keepValue(l.keep) }))} />
           </LinkRow>
         ))}
 
         {pastVeranda.map((l) => (
           <LinkRow key={l.id} kind="veranda" muted title={`Room ${l.room} · ${endLabel(l.endReason)}`} sub={[l.title, l.note || 'no instructions']}>
             <AgainButton
+              size={size}
               busy={busy === l.id}
               disabled={busy != null}
-              label={`Link again · ${slackDuration(l.minutes)}`}
-              onClick={() => void act(l.id, 'Link to Veranda', () => linkVeranda({ room: l.room, minutes: l.minutes, ...(l.title ? { title: l.title } : {}), ...(l.note ? { note: l.note } : {}) }))}
+              label={`Reconnect · ${slackDuration(l.minutes)}`}
+              onClick={() => void act(l.id, 'Connect to Veranda', () => linkVeranda({ room: l.room, minutes: l.minutes, ...(l.title ? { title: l.title } : {}), ...(l.note ? { note: l.note } : {}) }))}
             />
           </LinkRow>
         ))}
@@ -461,26 +474,17 @@ export function LinksSection({ host, session: s }: { host: string; session: Sess
             <p className="text-xs text-dimmer">{hint(draft, kind, url, valid, addable, account(kind, host, github, productive))}</p>
 
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="lg" onClick={() => setDraft(null)}>
+              <Button variant="ghost" size={size} onClick={() => setDraft(null)}>
                 Cancel
               </Button>
-              <Button size="lg" disabled={!kind || !valid || busy != null} onClick={() => void submit()}>
-                {busy === 'link' ? <Loader2Icon className="animate-spin" /> : draft.editing ? <PencilIcon /> : <Link2Icon />}
-                {draft.editing ? 'Save' : 'Link'}
+              <Button size={size} disabled={!kind || !valid || busy != null} onClick={() => void submit()}>
+                {busy === 'link' ? <Loader2Icon className="animate-spin" /> : draft.editing ? <PencilIcon /> : <PlusIcon />}
+                {draft.editing ? 'Save' : 'Connect'}
               </Button>
             </div>
           </div>
-        ) : addable.length ? (
-          <div className="flex min-h-12 items-center justify-between gap-3 py-1.5">
-            <div className="min-w-0">
-              <div className="text-sm">{slackLinks.length || ghLinks.length || ptLinks.length || verandaLink ? 'Another link' : 'Not linked'}</div>
-              <div className="truncate text-xs text-dimmer">Let people talk to this session from {joinOr(addable.map((k) => LINK_LABEL[k]))}</div>
-            </div>
-            <Button variant="outline" size="lg" onClick={() => setDraft(freshDraft())}>
-              <PlusIcon />
-              Add link
-            </Button>
-          </div>
+        ) : !slackLinks.length && !ghLinks.length && !ptLinks.length && !verandaLink && !secret && addable.length ? (
+          <p className="py-1 text-xs text-dimmer">None: connect {joinOr(addable.map((k) => LINK_LABEL[k]))} to let people talk to this session</p>
         ) : null}
       </div>
     </section>
@@ -515,7 +519,7 @@ function LinkRow({
   )
   const cls = `inline-flex max-w-full min-w-0 items-center gap-1 text-sm ${muted ? 'text-muted-foreground' : ''}`
   return (
-    <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5">
+    <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1">
       <div className="min-w-0 flex-1">
         {href ? (
           <a href={href} target="_blank" rel="noreferrer" className={`${cls} hover:underline`}>
@@ -526,31 +530,31 @@ function LinkRow({
         )}
         {subText ? <div className="truncate text-xs text-dimmer">{subText}</div> : null}
       </div>
-      <div className="flex shrink-0 gap-2">{children}</div>
+      <div className="flex shrink-0 gap-1.5">{children}</div>
     </div>
   )
 }
 
-function UnlinkButton({ busy, disabled, onClick }: { busy: boolean; disabled: boolean; onClick: () => void }) {
+function UnlinkButton({ busy, disabled, onClick, size }: { busy: boolean; disabled: boolean; onClick: () => void; size: Size }) {
   return (
-    <Button variant="outline" size="lg" disabled={disabled} onClick={onClick}>
+    <Button variant="outline" size={size} disabled={disabled} onClick={onClick}>
       {busy ? <Loader2Icon className="animate-spin" /> : <UnlinkIcon />}
-      Unlink
+      Disconnect
     </Button>
   )
 }
 
-function EditButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+function EditButton({ disabled, onClick, size }: { disabled: boolean; onClick: () => void; size: Size }) {
   return (
-    <Button variant="outline" size="lg" aria-label="Edit the link" disabled={disabled} onClick={onClick}>
+    <Button variant="outline" size={size === 'xs' ? 'icon-xs' : 'icon-sm'} aria-label="Edit the connection" title="Edit" disabled={disabled} onClick={onClick}>
       <PencilIcon />
     </Button>
   )
 }
 
-function AgainButton({ busy, disabled, onClick, label = 'Link again' }: { busy: boolean; disabled: boolean; onClick: () => void; label?: string }) {
+function AgainButton({ busy, disabled, onClick, label = 'Reconnect', size }: { busy: boolean; disabled: boolean; onClick: () => void; label?: string; size: Size }) {
   return (
-    <Button variant="outline" size="lg" disabled={disabled} onClick={onClick}>
+    <Button variant="outline" size={size} disabled={disabled} onClick={onClick}>
       {busy ? <Loader2Icon className="animate-spin" /> : <Link2Icon />}
       {label}
     </Button>
@@ -590,12 +594,12 @@ function hint(d: Draft, kind: LinkKind | null, url: string, valid: boolean, adda
   if (kind === 'veranda') return 'Opens the room with a new passphrase (shown here once). Guests with a Veranda account and the passphrase talk to this session until the link ends.'
   const who = kind === 'github' ? 'review requests, mentions and replies in its threads on the PR' : 'comments and changes on the task'
   const ends = kind === 'github' ? 'the PR is merged or closed' : 'the task is closed'
-  return `${d.editing ? 'New instructions and sleep for this link. ' : ''}It gets the ${who} (throttled) and answers there as ${account ?? "the bridge's account"}, until ${ends} or you unlink it.`
+  return `${d.editing ? 'New instructions and sleep for this connection. ' : ''}It gets the ${who} (throttled) and answers there as ${account ?? "the bridge's account"}, until ${ends} or you disconnect it.`
 }
 
 const slackPlaceName = (l: SlackLink) => (l.dm ? `DM with ${l.dm.name}` : l.threadTs ? 'Thread' : 'Conversation')
 
-const slackUntil = (until: number | null) => (until == null ? 'until you unlink it' : `until ${clock(until)}`)
+const slackUntil = (until: number | null) => (until == null ? 'until you disconnect it' : `until ${clock(until)}`)
 
 const endLabel = (r: string | null | undefined) => END_LABEL[r ?? ''] ?? r ?? 'ended'
 
