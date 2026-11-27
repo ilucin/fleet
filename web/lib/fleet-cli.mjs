@@ -321,10 +321,20 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return prCommand('seen', ref, t);
   }
 
-  async function prCommand(sub, ref, t) {
+  /** Approve it on GitHub: `fleet --local pr approve <ref> [--body …] --json` → `{ pr, cached, column }`. */
+  async function prApprove(ref, { body = '', timeoutMs: t = 90 * 1000 } = {}) {
+    return prCommand('approve', ref, t, body ? ['--body', body] : []);
+  }
+
+  /** Fetch just that PR into the cached list: `fleet --local pr sync <ref> --json` → `{ pr, cached, column }`. */
+  async function prSync(ref, { timeoutMs: t = 90 * 1000 } = {}) {
+    return prCommand('sync', ref, t);
+  }
+
+  async function prCommand(sub, ref, t, extra = []) {
     let stdout;
     try {
-      ({ stdout } = await run(bin, ['--local', 'pr', sub, '--json', '--', String(ref)], { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+      ({ stdout } = await run(bin, ['--local', 'pr', sub, '--json', ...extra, '--', String(ref)], { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
     } catch (err) {
       const e = wrap(err, `fleet pr ${sub}`, t);
       const why = String(err?.stderr ?? '')
@@ -695,6 +705,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     prs,
     prCheckout,
     prSeen,
+    prApprove,
+    prSync,
     tasks,
     taskShow,
     taskStatus,

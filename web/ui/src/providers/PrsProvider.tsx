@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { ApiError, api, isAbortError } from '@/api/client'
-import type { PrsResponse, PullRequest } from '@/api/types'
+import type { PrColumnId, PrsResponse, PullRequest } from '@/api/types'
 import { useFleet } from '@/hooks/useFleet'
 import { usePoller } from '@/hooks/usePoller'
 import { PrsContext, type PrsState } from '@/hooks/usePrs'
@@ -68,10 +68,61 @@ export function PrsProvider({ children }: { children: ReactNode }) {
     [host, reload],
   )
 
+  /** Put the answer's PR where the CLI's cache has it now (null: gone), without waiting for a read. */
+  const place = useCallback(
+    (p: PullRequest, column: PrColumnId | null) => {
+      if (!host) return
+      setAnswers((a) => {
+        const r = a[host]
+        if (!r) return a
+        const prs = column ? r.prs.map((x) => (x.url === p.url ? { ...x, column } : x)) : r.prs.filter((x) => x.url !== p.url)
+        return { ...a, [host]: { ...r, prs } }
+      })
+    },
+    [host],
+  )
+
+  const approve = useCallback(
+    async (p: PullRequest, body = '') => {
+      if (!host) return
+      const r = await api.prApprove(host, prRef(p), body)
+      place(p, r.column)
+      reload()
+    },
+    [host, place, reload],
+  )
+
+  // PRs opened on GitHub from Fleet: when Fleet has the focus again, fetch just those (an
+  // approval, a merge there takes them off the board without a full refresh).
+  const watched = useRef(new Map<string, PullRequest>())
+  const watch = useCallback((p: PullRequest) => {
+    watched.current.set(p.url, p)
+  }, [])
+  useEffect(() => {
+    if (!host) return
+    const onBack = () => {
+      if (document.visibilityState !== 'visible' || !watched.current.size) return
+      const prs = [...watched.current.values()]
+      watched.current.clear()
+      void Promise.allSettled(
+        prs.map(async (p) => {
+          const r = await api.prSync(host, prRef(p))
+          place(p, r.column)
+        }),
+      ).then(() => reload())
+    }
+    window.addEventListener('focus', onBack)
+    document.addEventListener('visibilitychange', onBack)
+    return () => {
+      window.removeEventListener('focus', onBack)
+      document.removeEventListener('visibilitychange', onBack)
+    }
+  }, [host, place, reload])
+
   const links = useMemo(() => linkSessions(data?.prs ?? [], data ? host : null, allSessions(fleet)), [data, host, fleet])
   const value = useMemo<PrsState>(
-    () => ({ host, data, error, loading, refresh, refreshing, reload, markSeen, links }),
-    [host, data, error, loading, refresh, refreshing, reload, markSeen, links],
+    () => ({ host, data, error, loading, refresh, refreshing, reload, markSeen, approve, watch, links }),
+    [host, data, error, loading, refresh, refreshing, reload, markSeen, approve, watch, links],
   )
   return <PrsContext.Provider value={value}>{children}</PrsContext.Provider>
 }

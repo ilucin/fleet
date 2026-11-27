@@ -1685,6 +1685,16 @@ export interface PrWorktree {
 }
 
 /** POST /api/hosts/:host/prs/spawn */
+/** POST prs/approve · prs/sync: where the PR is in that host's cached list now. */
+export interface PrUpdateResponse {
+  host: string
+  pr: string
+  /** It was in the cached list. */
+  cached: boolean
+  /** Its column now; null: no longer listed. */
+  column: PrColumnId | null
+}
+
 export interface PrSpawnResponse {
   host: string
   worktree: PrWorktree

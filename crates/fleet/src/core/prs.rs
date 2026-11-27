@@ -907,6 +907,230 @@ fn get_snapshot(s: &Settings, mode: Mode, now_ms: i64) -> Result<View> {
     }
 }
 
+// ---------- one PR, without a full fetch ----------
+
+/// Where one PR belongs now, from a fresh GraphQL node of it (the `pr` fragment plus `state`):
+/// the column a full fetch would give it, or `None` when it would not be listed (closed or
+/// merged, approved by you, no longer asked of you). A cached @mention is kept: [`get`] still
+/// resolves it against what you answered or marked seen.
+pub fn reclassify(n: &Value, me: &str, cached: Option<&Pr>) -> Option<Pr> {
+    if n["state"].as_str().is_some_and(|s| s != "OPEN") {
+        return None;
+    }
+    let probe = parse_node(n, Column::WaitingOnMe, me)?;
+    let mine = probe.author.eq_ignore_ascii_case(me);
+    let asked = probe
+        .requested_reviewers
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(me));
+    let reviewed = !mine && probe.my_review.is_some();
+    let one = std::slice::from_ref(n);
+    let none: &[Value] = &[];
+    let mut out = classify(
+        me,
+        if mine { one } else { none },
+        if asked { one } else { none },
+        if reviewed { one } else { none },
+        none,
+    );
+    let mention = cached.and_then(|c| c.mention.clone());
+    match out.pop() {
+        Some(mut pr) => {
+            pr.mention = mention;
+            Some(pr)
+        }
+        // Only a mention kept it listed.
+        None => mention.map(|m| Pr {
+            column: Column::UnseenMentions,
+            mention: Some(m),
+            ..probe
+        }),
+    }
+}
+
+/// Swap the cached entry for `url` with `now` (gone when `None`). → whether it was cached.
+pub fn replace_cached(snap: &mut Snapshot, url: &str, now: Option<Pr>) -> bool {
+    let Some(i) = snap.prs.iter().position(|p| p.url == url) else {
+        return false;
+    };
+    match now {
+        Some(pr) => snap.prs[i] = pr,
+        None => {
+            snap.prs.remove(i);
+        }
+    }
+    sort(&mut snap.prs);
+    true
+}
+
+fn gh_err(e: std::io::Error) -> Error {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        Error::exit(
+            1,
+            "gh not found: install the GitHub CLI and run `gh auth login`",
+        )
+    } else {
+        Error::Other(format!("gh: {e}"))
+    }
+}
+
+/// One PR, fresh from GitHub → (viewer login, its node with the `pr` fragment and `state`).
+pub fn fetch_one(owner: &str, repo: &str, number: u64) -> Result<(String, Value)> {
+    let query = format!(
+        "query($owner: String!, $name: String!, $number: Int!) {{
+  viewer {{ login }}
+  repository(owner: $owner, name: $name) {{ pullRequest(number: $number) {{ state ...pr }} }}
+}}{FIELDS}"
+    );
+    let mut c = Command::new(gh_bin());
+    c.args(["api", "graphql", "-f"])
+        .arg(format!("query={query}"))
+        .arg("-f")
+        .arg(format!("owner={owner}"))
+        .arg("-f")
+        .arg(format!("name={repo}"))
+        .arg("-F")
+        .arg(format!("number={number}"))
+        .env("PATH", tools::search_path())
+        .env("GH_PROMPT_DISABLED", "1")
+        .stdin(std::process::Stdio::null());
+    let o = repos::output_with_timeout(c, GH_TIMEOUT).map_err(gh_err)?;
+    if !o.status.success() {
+        let err = String::from_utf8_lossy(&o.stderr);
+        let line = err.lines().map(str::trim).find(|l| !l.is_empty());
+        return Err(Error::Other(format!(
+            "gh api graphql failed: {}",
+            line.unwrap_or("no output")
+        )));
+    }
+    let v: Value = serde_json::from_slice(&o.stdout)?;
+    if let Some(e) = v["errors"].as_array().and_then(|a| a.first()) {
+        return Err(Error::Other(format!(
+            "GitHub: {}",
+            e["message"].as_str().unwrap_or("query failed")
+        )));
+    }
+    let node = v["data"]["repository"]["pullRequest"].clone();
+    if node.is_null() {
+        return Err(Error::exit(
+            1,
+            format!("{owner}/{repo}#{number}: not found"),
+        ));
+    }
+    let login = v["data"]["viewer"]["login"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    Ok((login, node))
+}
+
+/// What [`sync`] did to the cached list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Synced {
+    /// `owner/repo#12`.
+    pub pr: String,
+    /// It was in the cache (a PR that was not is left out of it).
+    pub cached: bool,
+    /// Its column now; `None`: no longer listed.
+    pub column: Option<Column>,
+}
+
+/// Fetch one PR and put it where a full fetch would (or drop it), in the cache only: the rest
+/// of the list is not fetched again. `dry`: report, write nothing.
+pub fn sync(r: &PrRef, dry: bool) -> Result<Synced> {
+    let owner = owner_of(r)?;
+    let (me, node) = fetch_one(&owner, &r.repo, r.number)?;
+    let path = cache_path();
+    let mut snap = load_cache(&path).unwrap_or_default();
+    let me = if snap.user.is_empty() {
+        me
+    } else {
+        snap.user.clone()
+    };
+    let url = node["url"].as_str().unwrap_or("").to_string();
+    let cached_pr = snap.prs.iter().find(|p| p.url == url).cloned();
+    let now = reclassify(&node, &me, cached_pr.as_ref());
+    let column = now.as_ref().map(|p| p.column);
+    let cached = replace_cached(&mut snap, &url, now);
+    if cached && !dry {
+        save_cache(&path, &snap)?;
+    }
+    Ok(Synced {
+        pr: seen_key(&owner, &r.repo, r.number),
+        cached,
+        column,
+    })
+}
+
+/// Approve the PR on GitHub (`gh pr review --approve`, as `gh`'s login), mark its mentions
+/// seen, then [`sync`] it: it leaves your columns without a full fetch.
+pub fn approve(r: &PrRef, body: Option<&str>, now_ms: i64, dry: bool) -> Result<Synced> {
+    let owner = owner_of(r)?;
+    let key = seen_key(&owner, &r.repo, r.number);
+    if dry {
+        return Ok(Synced {
+            pr: key,
+            cached: false,
+            column: None,
+        });
+    }
+    let mut c = Command::new(gh_bin());
+    c.args([
+        "pr",
+        "review",
+        &r.number.to_string(),
+        "--repo",
+        &format!("{owner}/{}", r.repo),
+        "--approve",
+    ]);
+    if let Some(b) = body.filter(|b| !b.trim().is_empty()) {
+        c.args(["--body", b]);
+    }
+    c.env("PATH", tools::search_path())
+        .env("GH_PROMPT_DISABLED", "1")
+        .stdin(std::process::Stdio::null());
+    let o = repos::output_with_timeout(c, GH_TIMEOUT).map_err(gh_err)?;
+    if !o.status.success() {
+        let err = String::from_utf8_lossy(&o.stderr);
+        let line = err.lines().map(str::trim).rfind(|l| !l.is_empty());
+        return Err(Error::exit(
+            1,
+            format!("{key}: {}", line.unwrap_or("gh pr review failed")),
+        ));
+    }
+    mark_seen(&seen_path(), &key, now_ms)?;
+    sync(r, false).or_else(|_| {
+        // Approved, but the re-read failed: it is out of your queue all the same.
+        let path = cache_path();
+        let mut snap = load_cache(&path).unwrap_or_default();
+        let url = format!("https://github.com/{owner}/{}/pull/{}", r.repo, r.number);
+        let cached = snap
+            .prs
+            .iter()
+            .find(|p| p.url.eq_ignore_ascii_case(&url))
+            .map(|p| p.url.clone());
+        let mut column = None;
+        if let Some(u) = &cached {
+            let p = snap.prs.iter().find(|p| &p.url == u).unwrap();
+            if matches!(
+                p.column,
+                Column::WaitingOnMe | Column::WaitingOnAuthor | Column::UnseenMentions
+            ) {
+                replace_cached(&mut snap, u, None);
+                save_cache(&path, &snap)?;
+            } else {
+                column = Some(p.column);
+            }
+        }
+        Ok(Synced {
+            pr: key.clone(),
+            cached: cached.is_some(),
+            column,
+        })
+    })
+}
+
 // ---------- seen mentions ----------
 
 /// How long a mark is kept: past this, the PR is long merged or the mention long answered.
@@ -1659,6 +1883,92 @@ mod tests {
             }
         }
         n
+    }
+
+    #[test]
+    fn reclassify_drops_an_approved_or_closed_pr_and_keeps_the_rest() {
+        let me = "me";
+        let asked = json!({ "state": "OPEN", "reviewRequests": { "nodes": [ { "requestedReviewer": { "login": "Me" } } ] } });
+        assert_eq!(
+            reclassify(&node("api", 1, asked), me, None).map(|p| p.column),
+            Some(Column::WaitingOnMe)
+        );
+        // Approved: the request is gone, the review is an approval.
+        let approved = json!({ "state": "OPEN", "latestReviews": { "nodes": [
+            { "author": { "login": "me" }, "state": "APPROVED", "submittedAt": "2026-10-03T10:00:00Z", "commit": { "oid": "head1" } }
+        ] } });
+        assert!(reclassify(&node("api", 1, approved), me, None).is_none());
+        let changes = json!({ "state": "OPEN", "latestReviews": { "nodes": [
+            { "author": { "login": "me" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-10-03T10:00:00Z", "commit": { "oid": "head1" } }
+        ] } });
+        assert_eq!(
+            reclassify(&node("api", 1, changes), me, None).map(|p| p.column),
+            Some(Column::WaitingOnAuthor)
+        );
+        assert!(
+            reclassify(
+                &node(
+                    "api",
+                    1,
+                    json!({ "state": "MERGED", "author": { "login": "me" } })
+                ),
+                me,
+                None
+            )
+            .is_none()
+        );
+        assert_eq!(
+            reclassify(&node("api", 1, json!({ "state": "OPEN", "author": { "login": "me" }, "reviewDecision": "APPROVED" })), me, None)
+                .map(|p| p.column),
+            Some(Column::ReadyToMergeMine)
+        );
+        // Listed only for a mention: it stays, the mention kept (resolved at read time).
+        let mut cached = reclassify(
+            &node(
+                "api",
+                1,
+                json!({ "state": "OPEN", "author": { "login": "me" } }),
+            ),
+            me,
+            None,
+        )
+        .unwrap();
+        cached.mention = Some(Mention {
+            at: 5,
+            author: "x".into(),
+            url: String::new(),
+            excerpt: String::new(),
+            answered: false,
+            seen: false,
+        });
+        let p = reclassify(
+            &node("api", 1, json!({ "state": "OPEN" })),
+            me,
+            Some(&cached),
+        )
+        .unwrap();
+        assert_eq!(p.column, Column::UnseenMentions);
+        assert!(p.mention.is_some());
+    }
+
+    #[test]
+    fn replace_cached_swaps_or_drops_one_entry() {
+        let me = "me";
+        let reqd = json!({ "reviewRequests": { "nodes": [ { "requestedReviewer": { "login": "me" } } ] } });
+        let mut snap = Snapshot {
+            prs: classify(
+                me,
+                &[],
+                &[node("api", 1, reqd.clone()), node("api", 2, reqd)],
+                &[],
+                &[],
+            ),
+            ..Default::default()
+        };
+        let url = snap.prs[0].url.clone();
+        assert!(replace_cached(&mut snap, &url, None));
+        assert_eq!(snap.prs.len(), 1);
+        assert!(!replace_cached(&mut snap, &url, None));
     }
 
     #[test]

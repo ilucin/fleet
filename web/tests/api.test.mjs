@@ -82,6 +82,15 @@ function fakeHost(self, sessions) {
     calls.push(['prSeen', ref]);
     return { pr: ref, seenAt: 1000, applied: true };
   };
+  cli.prApprove = async (ref, o) => {
+    calls.push(['prApprove', ref, o?.body ?? '']);
+    if (ref === 'acme/own#1') throw new Error('acme/own#1: Can not approve your own pull request');
+    return { pr: ref, cached: true, column: null, applied: true };
+  };
+  cli.prSync = async (ref) => {
+    calls.push(['prSync', ref]);
+    return { pr: ref, cached: true, column: 'waitingOnMe', applied: true };
+  };
   cli.tasks = async ({ refresh }) => {
     calls.push(['tasks', refresh]);
     if (self === 'broken') throw new Error('no Productive API token: set tasks.token in config or $PRODUCTIVE_API_TOKEN');
@@ -625,6 +634,23 @@ test('prs/seen marks a PR seen on the host it was fetched on', async (t) => {
   assert.equal(lap.calls.filter((c) => c[0] === 'prSeen').length, 0);
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/seen`, { pr: 'app#30' })).status, 400);
   assert.equal(lap.calls.filter((c) => c[0] === 'prCheckout').length, 0);
+});
+
+test('prs/approve and prs/sync run on the PR host and answer where it is now', async (t) => {
+  const { urls, lap, remote } = await startPair(t);
+  let r = await post(`${urls.laptop}/api/hosts/workstation/prs/approve`, { pr: 'acme/app#30', body: 'LGTM' });
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.body.host, r.body.pr, r.body.cached, r.body.column], ['workstation', 'acme/app#30', true, null]);
+  assert.deepEqual(remote.calls.filter((c) => c[0] === 'prApprove'), [['prApprove', 'acme/app#30', 'LGTM']]);
+  assert.equal(lap.calls.filter((c) => c[0] === 'prApprove').length, 0);
+  r = await post(`${urls.laptop}/api/hosts/laptop/prs/sync`, { pr: 'acme/app#31' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.column, 'waitingOnMe');
+  r = await post(`${urls.laptop}/api/hosts/laptop/prs/approve`, { pr: 'acme/own#1' });
+  assert.equal(r.status, 502);
+  assert.match(r.body.error, /your own pull request/);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/approve`, { pr: 'app#1' })).status, 400);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/approve`, { pr: 'acme/app#1', body: 'x'.repeat(8001) })).status, 400);
 });
 
 test('prs: a CLI failure is a 502 with its reason', async () => {

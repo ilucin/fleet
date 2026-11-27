@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { PullRequest, Session } from '@/api/types'
 
-import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, prHref, promptChips, prRef, reviewLabel, waitingSince } from './prs'
+import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, prHref, prRef, reviewLabel, waitingSince } from './prs'
 
 const pr = (o: Partial<PullRequest>): PullRequest => ({
   column: 'waitingOnMe',
@@ -104,11 +104,8 @@ describe('rotting', () => {
 })
 
 describe('actions', () => {
-  it('refs and prompt chips', () => {
+  it('refs', () => {
     expect(prRef(pr({ number: 12 }))).toBe('acme/app#12')
-    expect(promptChips(pr({})).map((c) => c.label)).toEqual(['Review', 'Fix CI'])
-    expect(promptChips(pr({ column: 'draftMine' })).map((c) => c.label)).toEqual(['Continue', 'Address review', 'Fix CI'])
-    expect(promptChips(pr({ column: 'draftMine', checks: 'failure' }))[0].label).toBe('Fix CI')
   })
 })
 

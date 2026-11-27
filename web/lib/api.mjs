@@ -133,7 +133,7 @@ const JOBS_ROUTE = /^\/api\/hosts\/([^/]+)\/jobs(?:\/([^/]+)(?:\/(run|enabled|re
 const JOB_RUN_PROXY_MS = 90 * 1000;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
 const USAGE_SUB_ROUTE = /^\/api\/hosts\/([^/]+)\/usage\/(check|settings|override)$/;
-const PRS_ROUTE = /^\/api\/hosts\/([^/]+)\/prs(?:\/(checkout|spawn|seen))?$/;
+const PRS_ROUTE = /^\/api\/hosts\/([^/]+)\/prs(?:\/(checkout|spawn|seen|approve|sync))?$/;
 /** A PR in the diff reviewer without a session: …/prs/:owner/:repo/:n/diff | files | ask | notes[/:note[/post]] | notes/handoff. */
 const PR_REVIEW_ROUTE = /^\/api\/hosts\/([^/]+)\/prs\/([^/]+)\/([^/]+)\/(\d{1,9})\/(diff|files|ask|notes)(?:\/([^/]+)(?:\/(post))?)?$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -2358,6 +2358,7 @@ export function createApi({
     const ref = typeof body?.pr === 'string' ? body.pr.trim() : '';
     if (!PR_REF_RE.test(ref)) throw new HttpError('pr must look like owner/repo#123', 400);
     if (action === 'seen') return localPrSeen(ref);
+    if (action === 'approve' || action === 'sync') return localPrUpdate(action, ref, body);
     let check = null;
     if (action === 'spawn') {
       refuseSpawn();
@@ -2390,6 +2391,25 @@ export function createApi({
     refreshFleet();
     if (!nameGiven && spawnNamer && check.harness === 'claude') spawnNamer.schedule(result.tmuxSession).catch(() => {});
     return { status: 200, body: { host: config.self, worktree, spawn: { ok: true, host: config.self, ...result } } };
+  }
+
+  /**
+   * POST prs/approve `{ pr, body? }`: approve it on GitHub (this host's gh login); POST prs/sync
+   * `{ pr }`: fetch just that PR. Either → `{ host, pr, cached, column }`: the cached list has it
+   * where a full fetch would (`column: null`: no longer listed), no full fetch.
+   */
+  async function localPrUpdate(action, ref, body) {
+    const fn = action === 'approve' ? cli?.prApprove : cli?.prSync;
+    if (typeof fn !== 'function') throw new HttpError('pull requests are not available on this server', 501);
+    const text = typeof body?.body === 'string' ? body.body : '';
+    if (text.length > 8000) throw new HttpError('body too long (max 8000 chars)', 400);
+    try {
+      const r = action === 'approve' ? await fn(ref, { body: text }) : await fn(ref);
+      return { status: 200, body: { host: config.self, pr: r?.pr ?? ref, cached: r?.cached === true, column: r?.column ?? null } };
+    } catch (err) {
+      if (err?.missing) throw new HttpError(`this host’s fleet CLI has no \`pr ${action}\` command — update it`, 501);
+      throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+    }
   }
 
   /** POST prs/seen `{ pr }` → `{ host, pr, seenAt }`: its @mentions of you so far are seen. */

@@ -16,6 +16,10 @@ export interface PrsState {
   reload: () => void
   /** Its @mentions of you so far are seen (on `host`), then read again. */
   markSeen: (p: PullRequest) => Promise<void>
+  /** Approve it on GitHub (as `host`'s gh login); it leaves the board at once. */
+  approve: (p: PullRequest, body?: string) => Promise<void>
+  /** It was opened on GitHub: fetch just it when Fleet has the focus again. */
+  watch: (p: PullRequest) => void
   links: PrLinks
 }
 
@@ -28,6 +32,8 @@ const EMPTY: PrsState = {
   refreshing: false,
   reload: () => {},
   markSeen: async () => {},
+  approve: async () => {},
+  watch: () => {},
   links: { bySession: new Map(), byPr: new Map() },
 }
 

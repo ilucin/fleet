@@ -41,6 +41,7 @@ import type {
   OperatorStatus,
   PeekResponse,
   PrSpawnResponse,
+  PrUpdateResponse,
   PrWorktree,
   PromptQueue,
   PrsResponse,
@@ -478,7 +479,11 @@ export const api = {
   /** Mark its @mentions of you so far seen (out of the Unseen mentions column). */
   prSeen: (host: string, pr: string, o: Opts = {}) =>
     request<{ host: string; pr: string; seenAt: number | null }>(`${hostPath(host)}/prs/seen`, { ...o, method: 'POST', body: { pr } }),
-  /** Check it out, then start a session in the worktree whose first prompt says what the PR is. */
+  /** Approve it on GitHub (that host's gh login); its cached list drops it (`column: null`) without a full fetch. */
+  prApprove: (host: string, pr: string, body = '', o: Opts = {}) =>
+    request<PrUpdateResponse>(`${hostPath(host)}/prs/approve`, { ...o, method: 'POST', body: { pr, ...(body ? { body } : {}) } }),
+  /** Fetch just this PR into that host's cached list (approved / merged elsewhere: it leaves). */
+  prSync: (host: string, pr: string, o: Opts = {}) => request<PrUpdateResponse>(`${hostPath(host)}/prs/sync`, { ...o, method: 'POST', body: { pr } }),
   /** The diff reviewer over a PR without a session: the diff from the host's clone (`refetch`: fetch now). */
   prDiff: (host: string, pr: PrKey, since: string | null, refetch = false, o: Opts = {}) =>
     request<PrDiffResponse>(`${prPath(host, pr)}/diff?${new URLSearchParams({ ...(since ? { since } : {}), ...(refetch ? { refetch: '1' } : {}) })}`, o),

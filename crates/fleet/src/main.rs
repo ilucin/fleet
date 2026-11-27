@@ -1251,6 +1251,23 @@ enum PrCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Approve the PR on GitHub (as gh's login); it leaves your columns without a full fetch
+    Approve {
+        /// owner/repo#123, repo#123 (from your cached PRs) or the PR's URL
+        pr: String,
+        /// A review comment to go with the approval
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch just this PR and move it in the cached list (or drop it: approved, merged, closed)
+    Sync {
+        /// owner/repo#123, repo#123 (from your cached PRs) or the PR's URL
+        pr: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove the worktrees under prs.worktrees whose PR merged or closed (lists them without --apply)
     CleanupWorktrees {
         /// Remove them (default: only list what would go and why the rest stays)
@@ -2262,6 +2279,8 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
         Commands::Pr { cmd } => match cmd {
             PrCmd::CleanupWorktrees { apply, json } => prs_cmd::cleanup_worktrees(apply, json)?,
             PrCmd::Seen { pr, json } => prs_cmd::seen(&pr, json)?,
+            PrCmd::Approve { pr, body, json } => prs_cmd::approve(&pr, body.as_deref(), json)?,
+            PrCmd::Sync { pr, json } => prs_cmd::sync(&pr, json)?,
             PrCmd::Checkout { pr, json } => {
                 prs_cmd::checkout(&pr, json)?;
             }

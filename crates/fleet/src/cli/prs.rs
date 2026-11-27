@@ -234,6 +234,41 @@ pub fn seen(r: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_synced(verb: &str, s: &prs::Synced, json: bool, dry: bool) -> Result<()> {
+    if json {
+        let mut v = serde_json::to_value(s)?;
+        v["applied"] = serde_json::Value::Bool(!dry);
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else if dry {
+        println!("dry-run: would {verb} {}", s.pr);
+    } else {
+        let now = match (s.cached, s.column) {
+            (false, _) => "not in your cached PRs".to_string(),
+            (true, None) => "no longer listed".to_string(),
+            (true, Some(c)) => format!("now in {}", c.title()),
+        };
+        println!("{} {} · {now}", verb.green(), s.pr);
+    }
+    Ok(())
+}
+
+/// `fleet pr approve <ref>`: approve it on GitHub; it leaves your columns.
+pub fn approve(r: &str, body: Option<&str>, json: bool) -> Result<()> {
+    let pr_ref = parse_ref(r)?;
+    let dry = crate::core::hosts::dry_run();
+    let now = chrono::Utc::now().timestamp_millis();
+    let s = prs::approve(&pr_ref, body, now, dry)?;
+    print_synced("approved", &s, json, dry)
+}
+
+/// `fleet pr sync <ref>`: fetch just this PR and move it in the cached list.
+pub fn sync(r: &str, json: bool) -> Result<()> {
+    let pr_ref = parse_ref(r)?;
+    let dry = crate::core::hosts::dry_run();
+    let s = prs::sync(&pr_ref, dry)?;
+    print_synced("synced", &s, json, dry)
+}
+
 fn parse_ref(r: &str) -> Result<prs::PrRef> {
     prs::PrRef::parse(r).ok_or_else(|| {
         Error::exit(
