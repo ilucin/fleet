@@ -445,6 +445,9 @@ export const api = {
   /** Put an existing session into a stack (`host` = the stack's home). */
   addToStack: (host: string, stackId: string, body: StackLinkRequest, o: Opts = {}) =>
     request<StackLinkResponse>(`${hostPath(host)}/stacks/${enc(stackId)}/add`, { ...o, method: 'POST', body }),
+  /** Take a member out of a stack (`host` = the stack's home): the first half of a move. */
+  removeFromStack: (host: string, stackId: string, session: string, o: Opts = {}) =>
+    request<StackView>(`${hostPath(host)}/stacks/${enc(stackId)}/remove`, { ...o, method: 'POST', body: { session } }),
   syncStacks: (host: string, o: Opts = {}) =>
     request<{ host?: string; changed: string[]; stacks: StackView[] }>(`${hostPath(host)}/stacks/sync`, { ...o, method: 'POST', body: {} }),
   /** That host's focus session; `setFocus` starts (its default length, or `minutes`) or stops one. */

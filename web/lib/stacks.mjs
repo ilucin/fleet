@@ -365,6 +365,8 @@ export function createStacks({
         known.delete(id);
         return r;
       }),
+    /** Drop a member (`fleet stack remove`): the StackView without it. */
+    removeMember: (id, session) => call('fleet stack remove', async () => remember(await cli.stackRemoveMember(id, session))),
     rename: (id, label) => call('fleet stack rename', async () => remember(await cli.stackRename(id, label))),
     lead: (id, session, opts) => call('fleet stack lead', async () => remember(await cli.stackLead(id, session, opts))),
     /** Settings → Session stacks: the lead / report prompts (`fleet stack list --json` → `settings`). */

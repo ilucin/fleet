@@ -123,7 +123,7 @@ const NOTES_ROUTE = /^\/api\/hosts\/([^/]+)\/notes\/(tree|search|file|raw)$/;
 const SPAWN_DIRS_ROUTE = /^\/api\/hosts\/([^/]+)\/spawn-dirs$/;
 const STACKS_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks(\/sync|\/settings)?$/;
 const LOAD_ROUTE = /^\/api\/hosts\/([^/]+)\/load(\/sample|\/override|\/processes|\/restart)?$/;
-const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn|\/rename|\/add|\/lead)?$/;
+const STACK_ROUTE = /^\/api\/hosts\/([^/]+)\/stacks\/([^/]+)(\/spawn|\/rename|\/add|\/remove|\/lead)?$/;
 const SESSION_STACK_SPAWN_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/stack\/(spawn|link)$/;
 /** A sibling spawn may create a stack first (`stack ensure` → one model call, ≤ 150 s). */
 const STACK_SPAWN_PROXY_MS = 180 * 1000;
@@ -2042,7 +2042,7 @@ export function createApi({
       const id = decodeURIComponent(rawId);
       if (!STACK_ID_RE.test(id)) throw new HttpError(`invalid stack id: ${id}`, 400);
       const host = decodeURIComponent(rawHost);
-      const action = spawn ? 'spawn' : sub === '/rename' ? 'rename' : sub === '/add' ? 'add' : sub === '/lead' ? 'lead' : req.method;
+      const action = spawn ? 'spawn' : sub === '/rename' ? 'rename' : sub === '/add' ? 'add' : sub === '/remove' ? 'remove' : sub === '/lead' ? 'lead' : req.method;
       const r = await forHost({
         req,
         url,
@@ -2679,6 +2679,14 @@ export function createApi({
       const out = await stacks.lead(id, session, { quiet: body?.quiet === true });
       refreshFleet(); // the lead goes first in its stack's group
       return { status: 200, body: out };
+    }
+    if (action === 'remove') {
+      // `{ session }`: drop that member (a full session id) — the first half of a move to another stack.
+      const session = (await readJsonBody(req))?.session;
+      if (typeof session !== 'string' || !SESSION_ID_RE.test(session)) throw new HttpError('session must be a session id', 400);
+      const body = await stacks.removeMember(id, session);
+      refreshFleet(); // the stack leaves the session's row
+      return { status: 200, body };
     }
     if (action === 'rename') {
       const label = validateStackLabel((await readJsonBody(req))?.label);

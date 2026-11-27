@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import {
+  ArrowRightLeftIcon,
   BotIcon,
   CircleDotIcon,
   CodeXmlIcon,
@@ -535,6 +536,17 @@ export function DesktopShell() {
                 keywords: ['stack', 'link', 'group', 'join', 'sibling', 'together'],
                 run: () => openStackLink(selected.host, selected.id),
               },
+              ...(selectedSession.stack?.id
+                ? [
+                    {
+                      id: 'stack-move',
+                      label: 'Move this session to another stack…',
+                      icon: <ArrowRightLeftIcon />,
+                      keywords: ['stack', 'move', 'leave', 'remove'],
+                      run: () => openStackLink(selected.host, selected.id, 'move'),
+                    },
+                  ]
+                : []),
             ]
           : []),
         ...(attachLink

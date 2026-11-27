@@ -21,11 +21,14 @@ export interface SiblingTarget {
   creates: boolean
 }
 
+/** `add`: put a session in a stack ("Add a session" / "+ Stack"); `move`: a session in a stack moves out of it. */
+export type StackPickMode = 'add' | 'move'
+
 interface State {
   sheet: { host: string; id: string } | null
   sibling: SiblingTarget | null
-  /** The stack picker ("Add a session" / "Add to a stack"): the session it is for (by host + id). */
-  link: { host: string; id: string } | null
+  /** The stack picker: the session it is for (by host + id); `move`: take it out of its stack (into another, a new one, or none). */
+  link: { host: string; id: string; mode?: StackPickMode } | null
 }
 
 let state: State = { sheet: null, sibling: null, link: null }
@@ -62,10 +65,10 @@ export function closeSiblingSpawn() {
   if (state.sibling) update({ sibling: null })
 }
 
-/** Open the picker that puts `session` and another live one into one stack. */
-export function openStackLink(host: string, id: string) {
+/** Open the stack picker for `session`: put it (or another live one) in a stack, or — `move` — move it out of its stack. */
+export function openStackLink(host: string, id: string, mode: StackPickMode = 'add') {
   clearTimeout(pendingSibling)
-  update({ link: { host, id }, sheet: null, sibling: null })
+  update({ link: { host, id, mode }, sheet: null, sibling: null })
 }
 
 export function closeStackLink() {

@@ -540,6 +540,7 @@ export function SessionScreen({
           label: stackRef ? stackRef.label : null,
           onOpen: stackRef ? () => fromMenu(() => openStackSheet(stackHome, stackRef.id)) : undefined,
           onLink: () => fromMenu(() => openStackLink(host, id)),
+          onMove: stackRef ? () => fromMenu(() => openStackLink(host, id, 'move')) : undefined,
         }
       : null
 

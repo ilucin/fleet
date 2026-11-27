@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlarmClockIcon, CodeXmlIcon, FileDiffIcon, GitForkIcon, LayersIcon, Loader2Icon, MoonIcon, PlusIcon, PowerIcon, RefreshCwIcon, SquareTerminalIcon } from 'lucide-react'
+import { AlarmClockIcon, ArrowRightLeftIcon, CodeXmlIcon, FileDiffIcon, GitForkIcon, LayersIcon, Loader2Icon, MoonIcon, PlusIcon, PowerIcon, RefreshCwIcon, SquareTerminalIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, sessionErrorMessage } from '@/api/client'
@@ -38,8 +38,8 @@ export interface DetailsPanelProps {
   onReview?: () => void
   /** "VSC": VS Code in Fleet on the session's checkout, the chat beside it. */
   onCode?: () => void
-  /** Session stacks: the label and the StackBrief sheet (when in one), and the picker: "Add a session" (to this stack) or "Add to a stack" (this one joins or starts one). */
-  stack?: { label: string | null; onOpen?: () => void; onLink: () => void } | null
+  /** Session stacks: the label and the StackBrief sheet (when in one), and the picker: "Add a session" (to this stack), "Move" (this one out of it) or "+ Stack" (this one joins or starts one). */
+  stack?: { label: string | null; onOpen?: () => void; onLink: () => void; onMove?: () => void } | null
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -299,27 +299,36 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
             <section className="py-1">
               <div className="flex items-center justify-between gap-2 pt-2 pb-1">
                 <h3 className="text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">Stack</h3>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {p.stack.onOpen ? (
+                {!p.stack.onOpen ? (
+                  <Button variant="outline" size={btn} title="Put this session in a stack: join an existing stack, or start a new one with another session" onClick={p.stack.onLink}>
+                    <PlusIcon />
+                    Stack
+                  </Button>
+                ) : null}
+              </div>
+              {p.stack.onOpen ? (
+                <>
+                  <p className="truncate py-1 text-sm">{p.stack.label}</p>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5 pb-1">
                     <Button variant="outline" size={btn} title="StackBrief: the stack's shared brief and its sessions" onClick={p.stack.onOpen}>
                       <LayersIcon />
                       StackBrief
                     </Button>
-                  ) : null}
-                  {p.stack.onOpen ? (
-                    <Button variant="outline" size={btn} title={`Add a session to ${p.stack.label || "this stack"}: the session you pick joins it`} onClick={p.stack.onLink}>
+                    <Button variant="outline" size={btn} title={`Add a session to ${p.stack.label || 'this stack'}: the session you pick joins it`} onClick={p.stack.onLink}>
                       <PlusIcon />
                       Add a session
                     </Button>
-                  ) : (
-                    <Button variant="outline" size={btn} title="Add this session to a stack: join an existing stack, or start a new one with another session" onClick={p.stack.onLink}>
-                      <PlusIcon />
-                      Add to a stack
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <p className={cn('truncate py-1 text-sm', !p.stack.label && 'text-xs text-dimmer')}>{p.stack.label ?? 'Not in a stack'}</p>
+                    {p.stack.onMove ? (
+                      <Button variant="outline" size={btn} title={`Move this session out of ${p.stack.label || 'this stack'}: to another stack, a new one, or none`} onClick={p.stack.onMove}>
+                        <ArrowRightLeftIcon />
+                        Move
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="py-1 text-xs text-dimmer">Not in a stack</p>
+              )}
             </section>
           ) : null}
 

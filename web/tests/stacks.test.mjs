@@ -110,6 +110,9 @@ function fakeHost(self, { dir }) {
         if (on >= 0) assert.equal(rest.at(-1), '-', 'a member on another host comes with --input -');
         return out({ ...view, members: [...view.members, { session: rest[1], host, closed: null, live: true }] });
       }
+      case 'remove':
+        known(rest[0]);
+        return out({ ...view, members: view.members.filter((m) => m.session !== rest[1]) });
       case 'sync':
         return out({ host: self, changed: [], stacks: [view] });
       default:
@@ -183,6 +186,7 @@ test('fleet CLI stack calls: `fleet --local stack <sub> … --json`, markdown on
   await cli.stackSet(STACK_ID, '# md', UPDATED);
   await cli.stackSet(STACK_ID, '# md');
   await cli.stackRemove(STACK_ID);
+  await cli.stackRemoveMember(STACK_ID, SRC_ID);
   await cli.stackEnsure(SRC_ID, { label: '-odd label' });
   await cli.stackAdd(STACK_ID, SRC_ID);
   await cli.stackSync();
@@ -194,6 +198,7 @@ test('fleet CLI stack calls: `fleet --local stack <sub> … --json`, markdown on
     ['--local', 'stack', 'set', STACK_ID, `--expect-updated=${UPDATED}`, '--json'],
     ['--local', 'stack', 'set', STACK_ID, '--json'],
     ['--local', 'stack', 'rm', STACK_ID, '-f', '--json'],
+    ['--local', 'stack', 'remove', STACK_ID, SRC_ID, '--json'],
     ['--local', 'stack', 'ensure', SRC_ID, '--label=-odd label', '--json'],
     ['--local', 'stack', 'add', STACK_ID, SRC_ID, '--json'],
     ['--local', 'stack', 'sync', '--json'],
@@ -201,10 +206,10 @@ test('fleet CLI stack calls: `fleet --local stack <sub> … --json`, markdown on
     ['--local', 'stack', 'sync', '--input', '-', '--json'],
   ]);
   assert.equal(calls[2].opts.input, '# md');
-  assert.equal(calls[8].opts.input, '{"hosts":[]}');
   assert.equal(calls[9].opts.input, '{"hosts":[]}');
-  assert.equal(calls[7].opts.input, undefined);
-  assert.equal(calls[5].opts.timeout, 150 * 1000);
+  assert.equal(calls[10].opts.input, '{"hosts":[]}');
+  assert.equal(calls[8].opts.input, undefined);
+  assert.equal(calls[6].opts.timeout, 150 * 1000);
   assert.equal(calls[0].opts.timeout, 20 * 1000);
   assert.equal(calls[0].opts.env.NO_COLOR, '1');
 });
@@ -562,6 +567,20 @@ test('link after the fact: …/stack/link ensures the stack and adds the other s
   assert.equal((await call('POST', `/api/hosts/laptop/sessions/${SRC_ID}/stack/link`, { session: SRC_ID })).status, 400, 'not with itself');
   assert.equal(host.stackCalls().length, before, 'a bad request never reaches ensure (no model call)');
   assert.equal((await call('GET', `/api/hosts/laptop/stacks/${STACK_ID}/add`)).status, 405);
+});
+
+test('…/stacks/:id/remove drops a member (fleet stack remove); bad body → 400, GET → 405', async (t) => {
+  const { call, host } = solo(t);
+  const other = 'bbbbbbbb-0000-0000-0000-000000000002';
+  const res = await call('POST', `/api/hosts/laptop/stacks/${STACK_ID}/remove`, { session: other });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(host.stackCalls().at(-1), ['remove', STACK_ID, other]);
+  const before = host.stackCalls().length;
+  for (const body of [{}, { session: 7 }, { session: 'a b' }]) {
+    assert.equal((await call('POST', `/api/hosts/laptop/stacks/${STACK_ID}/remove`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal(host.stackCalls().length, before, 'a bad request never reaches the CLI');
+  assert.equal((await call('GET', `/api/hosts/laptop/stacks/${STACK_ID}/remove`)).status, 405);
 });
 
 test('spawn from a stack: no ensure, dir = the stack absCwd, unknown stack → 404, missing absCwd → 400', async (t) => {

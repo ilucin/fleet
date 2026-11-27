@@ -653,6 +653,8 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
   const stackSet = (id, markdown, expectUpdated = null) =>
     stack(['set', id, ...(expectUpdated ? [`--expect-updated=${expectUpdated}`] : [])], { input: markdown });
   const stackRemove = (id) => stack(['rm', id, '-f']);
+  /** Drop one member (a session id) from a stack: the StackView without it. */
+  const stackRemoveMember = (id, session) => stack(['remove', id, session]);
   /** Rename: the label is a positional, so `--` keeps one starting with "-" out of clap's flags. */
   const stackRename = (id, label) => stack(['rename', id, '--', label]);
   /**
@@ -712,6 +714,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     stackShow,
     stackSet,
     stackRemove,
+    stackRemoveMember,
     stackRename,
     stackLead,
     stackEnsure,
