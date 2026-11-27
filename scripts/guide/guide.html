@@ -124,7 +124,7 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
   <a href="#inbox"><span>11</span>Inbox</a>
   <a href="#tasks"><span>12</span>Tasks (Productive)</a>
   <a href="#prs"><span>13</span>Pull requests</a>
-  <a href="#slack"><span>14</span>Slack linkovi</a>
+  <a href="#slack"><span>14</span>Slack veze</a>
   <a href="#bots"><span>15</span>Bots</a>
   <a href="#tipkovnica"><span>16</span>Tipkovnica i Fleet.app</a>
   <a href="#operator"><span>17</span>Glasovni operator</a>
@@ -141,7 +141,7 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
   <div class="label">Ukratko<b>Što je Fleet</b></div>
   <div class="body">
     <h2>Jedna flota, pet sučelja</h2>
-    <p class="prose">Fleet nađe svaku živu sesiju coding agenta na svakoj mašini (tmux pane ili iTerm tab), pokaže što radi i pusti te da joj pišeš, odgovaraš, preimenuješ je, otvoriš novu ili posao prebaciš drugdje. Svaka mašina vrti isti mali web server, koji spaja sesije svojih peerova, pa bilo koji URL pokazuje cijelu flotu. Oko sesija su moduli za ostatak dana: Inbox, Productive taskovi, PR-ovi, Slack linkovi, botovi, memos i notes.</p>
+    <p class="prose">Fleet nađe svaku živu sesiju coding agenta na svakoj mašini (tmux pane ili iTerm tab), pokaže što radi i pusti te da joj pišeš, odgovaraš, preimenuješ je, otvoriš novu ili posao prebaciš drugdje. Svaka mašina vrti isti mali web server, koji spaja sesije svojih peerova, pa bilo koji URL pokazuje cijelu flotu. Oko sesija su moduli za ostatak dana: Inbox, Productive taskovi, PR-ovi, Slack veze, botovi, memos i notes.</p>
     <div class="cols c3">
       <div class="cell"><span class="k">web UI · desktop</span><p>Keyboard-first od 1024 px naviše: gornja traka s modulima, lista, chat, details panel, board.</p></div>
       <div class="cell"><span class="k">PWA · mobitel</span><p>Add to Home Screen preko Tailscalea. Swipe geste, quick replyji, mic za operatora.</p></div>
@@ -231,7 +231,7 @@ footer { padding-block: 36px 64px; font-size: 13px; color: var(--muted); display
   <div class="body">
     <h2>Handover bilješka koja se piše sama</h2>
     <div class="prose">
-      <p>Details panel je uvijek pored chata. Na vrhu su akcije: <b>Review</b> (diff), <b>New</b> (nova sesija odavde: <i>Hand off</i> preda posao s briefom, <i>Sibling</i> pokrene sesiju u istom stacku), <b>Link</b> (Slack) i <b>Attach</b> (iTerm tab u Fleet.appu), a gore desno ⏻ za Close ili Deactivate.</p>
+      <p>Details panel je uvijek pored chata. Na vrhu su akcije: <b>Review</b> (diff), <b>New</b> (nova sesija odavde: <i>Hand off</i> preda posao s briefom, <i>Sibling</i> pokrene sesiju u istom stacku) i <b>Attach</b> (iTerm tab u Fleet.appu), ispod njih <b>Connections</b> (Slack, GitHub, Productive, Veranda), a gore desno ⏻ za Close ili Deactivate.</p>
       <p>Ispod je <b>brief</b>: sažetak (zašto i što je sljedeće), <b>Origin</b> (task, Slack thread ili issue odakle je posao došao), <b>Pull requests</b> sa stanjem s GitHuba (<i>Draft</i>, <i>In review</i>, <i>Merged</i>, <i>Closed</i>), todoi s napretkom (<code>3/5</code>) i ostali resursi iz transcripta (worktreeji, issueji, specovi, fileovi, linkovi). Generira ga haiku tek nakon 60 s mirovanja; ručne izmjene uvijek pobjeđuju. Hand off predaje origin, PR-ove i worktree, a zadatak ide ispod crte (CLI: <code>fleet spawn --from</code>).</p>
     </div>
     <div class="shots pair">
@@ -409,28 +409,28 @@ fleet task schedule 2090 --time 08:00  # sesija na dan početka</code></pre>
       <figure><img src="img/d-prs.webp" alt="PR board sa šest kolona" width="1600" height="1000" loading="lazy"><figcaption>Mention s excerptom i „Seen”, worktree oznaka, failed checks, stari PR-ovi crveni</figcaption></figure>
       <figure class="phone"><img src="img/m-prs.webp" alt="Mobitel: kolone PR-ova jedna ispod druge" width="640" height="1385" loading="lazy"><figcaption>Na mobitelu: ⋯ → Pull requests, kolone jedna ispod druge</figcaption></figure>
     </div>
-    <p class="prose"><b>GitHub linkovi</b> su Slack linkovi s PR-om umjesto threada: sesija <b>prati PR</b> i budi se samo na review request za tvoj account, odgovor u svom review threadu ili mention (ostali komentari dođu kao kontekst; pushevi, CI i botovi nikad). Link završi kad se PR mergea ili zatvori. S <code>github.spawn</code> review request od odabranih ljudi sam otvori sesiju na tom PR-u; ona zaspi kad je mirna, a sljedeći event je probudi. CLI: <code>fleet github link &lt;pr-url&gt;</code>, <code>fleet github</code>, <code>fleet github unlink</code>.</p>
+    <p class="prose"><b>GitHub veze</b> su Slack veze s PR-om umjesto threada: sesija <b>prati PR</b> i budi se samo na review request za tvoj account, odgovor u svom review threadu ili mention (ostali komentari dođu kao kontekst; pushevi, CI i botovi nikad). Veza završi kad se PR mergea ili zatvori. S <code>github.spawn</code> review request od odabranih ljudi sam otvori sesiju na tom PR-u; ona zaspi kad je mirna, a sljedeći event je probudi. CLI: <code>fleet github connect &lt;pr-url&gt;</code>, <code>fleet github</code>, <code>fleet github disconnect</code>.</p>
     <p class="prose">CLI: <code>fleet prs</code>, <code>fleet pr checkout</code>, <code>fleet pr spawn</code>, <code>fleet pr seen</code>, <code>fleet pr cleanup-worktrees</code> (makne worktreeje gotovih PR-ova).</p>
   </div>
 </section>
 
 <section class="row" id="slack">
-  <div class="label">14 · Slack<b>Sesija u threadu</b><code>fleet slack link</code></div>
+  <div class="label">14 · Slack<b>Sesija u threadu</b><code>fleet slack connect</code></div>
   <div class="body">
     <h2>Sesija koja neko vrijeme razgovara u Slacku</h2>
     <p class="prose">Sesiju povežeš s jednim Slack threadom, kanalom ili DM-om s osobom (<code>@ime</code>), na određeno vrijeme (30 min do tjedan dana, ili bez kraja) i s uputom što smije. Ono što ljudi tamo napišu ulazi u sesiju kad je slobodna, s imenom autora, a ona odgovara s <code>fleet slack reply</code>. Po defaultu se budi samo kad je netko spomene, piše joj u DM ili u threadu u kojem je već pisala (a tada sama procijeni je li poruka za nju); <i>proactive</i> mod vidi sve i javi se kad treba.</p>
-    <figure><img src="img/d-slack.webp" alt="Sesija povezana s #billing threadom: poruka iz Slacka i odgovor, Details → Slack s Unlink" width="1600" height="1000" loading="lazy"><figcaption>Alex pita u #billing, sesija provjeri PR i odgovori u threadu; Details → Slack: thread, koliko je ostalo, Unlink</figcaption></figure>
+    <figure><img src="img/d-slack.webp" alt="Sesija povezana s #billing threadom: poruka iz Slacka i odgovor, Details → Connections s Disconnect" width="1600" height="1000" loading="lazy"><figcaption>Alex pita u #billing, sesija provjeri PR i odgovori u threadu; Details → Connections: thread, koliko je ostalo, Disconnect</figcaption></figure>
     <div class="cols c2">
       <div class="cell"><span class="k">što Fleet jamči</span><p>Samo taj razgovor, samo do isteka, samo povezana sesija smije odgovoriti; tokeni su samo na hostu koji vrti bridge.</p></div>
-      <div class="cell"><span class="k">kako se poveže</span><p>Details → <b>Link to Slack</b>, New session → Slack, ili sesija sama kad je zamoliš („linkaj se na ovaj thread”). Istekli link se vraća s <b>Link again</b>.</p></div>
+      <div class="cell"><span class="k">kako se poveže</span><p>Details → Connections → <b>Connect</b>, New session → Slack, ili sesija sama kad je zamoliš („poveži se na ovaj thread”). Istekla veza se vraća s <b>Reconnect</b>.</p></div>
       <div class="cell"><span class="k">gdje se vidi</span><p>Slack sesije imaju svoj filter (Sessions | Bots | <b>Slack</b>) i ne miješaju se s ostalima.</p></div>
-      <div class="cell"><span class="k">CLI</span><p><code>fleet slack link &lt;url | @osoba&gt; --for 2h --task "…"</code>, <code>fleet slack</code>, <code>fleet slack unlink</code>.</p></div>
+      <div class="cell"><span class="k">CLI</span><p><code>fleet slack connect &lt;url | @osoba&gt; --for 2h --task "…"</code>, <code>fleet slack</code>, <code>fleet slack disconnect</code>.</p></div>
       <div class="cell"><span class="k">threads first</span><p>Gdje čita više ljudi, sesija odgovara u threadu poruke; nešto novo je jedan kratki headline u kanalu, detalji u njegovom threadu. Bridge odbije dulji post izvan threada. DM jedan-na-jedan je iznimka.</p></div>
       <div class="cell"><span class="k">više sesija, jedan app</span><p>Svaka piše kao „&lt;app&gt; (&lt;sesija&gt;)” i vidi postove ostalih sesija na istom mjestu; u mention modu ih budi samo u svom threadu i najviše 5 puta u 10 min, pa se dvije sesije ne mogu zavrtjeti.</p></div>
     </div>
     <h3>Mention otvara sesiju</h3>
-    <p class="prose">S <code>slack.spawn</code> spomeneš app (<code>@acme-fleet</code>) u threadu koji nijedna sesija ne prati, i on odgovori 👀 i pokrene sesiju povezanu s tim threadom, s tvojom porukom kao zadatkom: na odabranom hostu i direktoriju, s modelom i trajanjem linka. Tko smije: samo vlasnik (default), popis ljudi ili bilo tko. Postavlja se u <b>Settings → Slack</b>, po Slack appu, i vrijedi odmah, bez restarta. Za zajednički shed <code>slack.owners</code> navede više vlasnika: svaki je u threadu označen kao vlasnik i smije pokrenuti sesiju mentionom; DM kad sesija čeka ide vlasniku tog linka.</p>
-    <figure><img src="img/d-settings-slack.webp" alt="Settings → Slack: Open a session on a mention, host, direktorij, model, Linked for, Who can start one" width="1600" height="1000" loading="lazy"><figcaption>Settings → Slack: mention <code>@acme-fleet</code> otvara sesiju na workstationu, u acme-api, linkanu dan, za bilo koga</figcaption></figure>
+    <p class="prose">S <code>slack.spawn</code> spomeneš app (<code>@acme-fleet</code>) u threadu koji nijedna sesija ne prati, i on odgovori 👀 i pokrene sesiju povezanu s tim threadom, s tvojom porukom kao zadatkom: na odabranom hostu i direktoriju, s modelom i trajanjem veze. Tko smije: samo vlasnik (default), popis ljudi ili bilo tko. Postavlja se u <b>Settings → Slack</b>, po Slack appu, i vrijedi odmah, bez restarta. Za zajednički shed <code>slack.owners</code> navede više vlasnika: svaki je u threadu označen kao vlasnik i smije pokrenuti sesiju mentionom; DM kad sesija čeka ide vlasniku te veze.</p>
+    <figure><img src="img/d-settings-slack.webp" alt="Settings → Slack: Open a session on a mention, host, direktorij, model, Linked for, Who can start one" width="1600" height="1000" loading="lazy"><figcaption>Settings → Slack: mention <code>@acme-fleet</code> otvara sesiju na workstationu, u acme-api, povezanu na dan, za bilo koga</figcaption></figure>
   </div>
 </section>
 
@@ -595,8 +595,8 @@ fleet tmux stale                       # idle shellovi koje nitko ne koristi
 fleet brief invoice · fleet stack …    # briefovi i stackovi
 fleet tasks · fleet task spawn 2041     # Productive taskovi, sesija na tasku
 fleet schedule add "…" --at "tomorrow 07:30"   # sesija kasnije
-fleet slack link &lt;thread-url&gt; --for 2h  # sesija razgovara u Slack threadu
-fleet github link &lt;pr-url&gt;             # sesija prati PR
+fleet slack connect &lt;thread-url&gt; --for 2h  # sesija razgovara u Slack threadu
+fleet github connect &lt;pr-url&gt;          # sesija prati PR
 fleet list -a --shared                 # samo shared shedovi (--mine: tvoji)
 fleet done --note "…" · fleet sleep invoice     # javi gotovo · zatvori u Inactive
 fleet repos sync · fleet bots run dependency-audit

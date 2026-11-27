@@ -65,7 +65,7 @@ pub fn list(json: bool) -> Result<()> {
         let why = v["error"]
             .as_str()
             .unwrap_or("no host runs them — set github.host in the config");
-        println!("GitHub links are off: {why}");
+        println!("GitHub connections are off: {why}");
         return Ok(());
     }
     let poll = match v["error"].as_str() {
@@ -86,7 +86,7 @@ pub fn list(json: bool) -> Result<()> {
     }
     let links = v["links"].as_array().cloned().unwrap_or_default();
     if links.is_empty() {
-        println!("no active links");
+        println!("no active connections");
     }
     for l in &links {
         println!("{}", link_line(l));
@@ -121,7 +121,7 @@ pub fn link(
         None => {
             let pane = crate::core::done::own_pane_from_env(None).ok_or_else(|| {
                 Error::Other(
-                    "not inside a tmux session — name the session to link: --session <target>"
+                    "not inside a tmux session — name the session to connect: --session <target>"
                         .into(),
                 )
             })?;
@@ -137,7 +137,7 @@ pub fn link(
         let verb = if v["renewed"].as_bool() == Some(true) {
             "renewed"
         } else {
-            "linked"
+            "connected"
         };
         println!("{verb}: {}", link_line(&v));
     }
@@ -158,7 +158,7 @@ pub fn unlink(id: &str, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("unlinked {}", id.bold());
+        println!("disconnected {}", id.bold());
     }
     Ok(())
 }

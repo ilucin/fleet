@@ -90,14 +90,14 @@ pub fn status(json: bool) -> Result<()> {
         return Ok(());
     }
     if v["configured"].as_bool() == Some(false) {
-        println!("Veranda links are not set up (no veranda section in the config)");
+        println!("Veranda connections are not set up (no veranda section in the config)");
         return Ok(());
     }
     if v["enabled"].as_bool() != Some(true) {
         let why = v["error"]
             .as_str()
             .unwrap_or("no host runs them — set veranda.host in the config");
-        println!("Veranda links are off: {why}");
+        println!("Veranda connections are off: {why}");
         return Ok(());
     }
     let health = match v["error"].as_str() {
@@ -114,7 +114,7 @@ pub fn status(json: bool) -> Result<()> {
     );
     let links = v["links"].as_array().cloned().unwrap_or_default();
     if links.is_empty() {
-        println!("no active links");
+        println!("no active connections");
     }
     for l in &links {
         println!("{}", link_line(l));
@@ -154,7 +154,7 @@ pub fn link(
         None => {
             let p = pane.clone().ok_or_else(|| {
                 Error::Other(
-                    "not inside a tmux session — name the session to link: fleet veranda link <session> --room …".into(),
+                    "not inside a tmux session — name the session to connect: fleet veranda connect <session> --room …".into(),
                 )
             })?;
             body["pane"] = json!(p);
@@ -170,7 +170,7 @@ pub fn link(
         println!("{}", serde_json::to_string_pretty(&v)?);
         return Ok(());
     }
-    println!("linked: {}", link_line(&v));
+    println!("connected: {}", link_line(&v));
     if let Some(u) = v["url"].as_str() {
         println!("  url:        {u}");
     }
@@ -189,7 +189,7 @@ fn target(room: Option<&str>) -> Result<Value> {
         Some(r) => body["room"] = json!(r),
         None => {
             body["pane"] = json!(pane.clone().ok_or_else(|| {
-                Error::Other("not inside a linked session — name the room: --room <name>".into())
+                Error::Other("not inside a connected session — name the room: --room <name>".into())
             })?);
         }
     }
@@ -207,7 +207,7 @@ pub fn unlink(room: Option<&str>, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
         println!(
-            "unlinked room {} (closed)",
+            "disconnected room {} (closed)",
             v["room"].as_str().unwrap_or("?").bold()
         );
     }
@@ -231,7 +231,7 @@ pub fn extend(duration: &str, room: Option<&str>, json: bool) -> Result<()> {
 /// The body of a call a linked session makes about its own link.
 fn own_body() -> Result<Value> {
     let pane = own_pane().ok_or_else(|| {
-        Error::Other("run it inside the linked session (no $TMUX_PANE here)".into())
+        Error::Other("run it inside the connected session (no $TMUX_PANE here)".into())
     })?;
     Ok(json!({ "pane": pane }))
 }
@@ -313,7 +313,7 @@ fn message_text(m: &Value) -> String {
 }
 
 /// Why a Veranda-linked session may not ask with AskUserQuestion.
-const GUARD_REASON: &str = "This session is linked to the Veranda room <room>, where an AskUserQuestion prompt cannot be shown or answered — the session would block on it. Ask in the room instead: `fleet veranda reply \"…\"` (offer the options as a short list), then end your turn and wait for the answer.";
+const GUARD_REASON: &str = "This session is connected to the Veranda room <room>, where an AskUserQuestion prompt cannot be shown or answered — the session would block on it. Ask in the room instead: `fleet veranda reply \"…\"` (offer the options as a short list), then end your turn and wait for the answer.";
 
 /// The PreToolUse hook's answer for one tool call, given the Veranda bridge's links: a deny for
 /// AskUserQuestion in a linked session, else nothing.

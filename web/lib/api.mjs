@@ -628,7 +628,7 @@ export function createApi({
     if (typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError('slack must be { url, minutes, mode?, task? }', 400);
     const bridge = bridgeFor(config.self);
     if (!(slack && bridge === config.self)) {
-      if (!bridge || bridge === config.self) throw new HttpError('no server runs Slack links (slack.host)', 400);
+      if (!bridge || bridge === config.self) throw new HttpError('no server runs Slack connections (slack.host)', 400);
       if (!config.peers[bridge]) throw new HttpError(`Slack bridge "${bridge}" is not a peer with a web URL`, 400);
     }
     const url = typeof raw.url === 'string' ? raw.url.trim() : '';
@@ -648,7 +648,7 @@ export function createApi({
     }
     if (raw.mode != null && !MODES.includes(raw.mode)) throw new HttpError(`slack.mode must be one of: ${MODES.join(', ')}`, 400);
     if (raw.task != null && (typeof raw.task !== 'string' || raw.task.trim().length > MAX_TASK)) throw new HttpError(`slack.task must be a string of at most ${MAX_TASK} chars`, 400);
-    if (prompt.trim().length > MAX_FIRST) throw new HttpError(`the prompt is too long for a session linked to Slack (max ${MAX_FIRST} chars)`, 400);
+    if (prompt.trim().length > MAX_FIRST) throw new HttpError(`the prompt is too long for a session connected to Slack (max ${MAX_FIRST} chars)`, 400);
     if (raw.from != null && (typeof raw.from !== 'string' || !/^[UW][A-Z0-9]+$/.test(raw.from))) throw new HttpError('slack.from must be a Slack user id (U…)', 400);
     return { url, minutes, mode: raw.mode ?? undefined, task: raw.task?.trim() || undefined, ...(raw.from ? { firstFrom: raw.from } : {}) };
   }
@@ -705,7 +705,7 @@ export function createApi({
           result.slack = await linkSpawned(result.tmuxSession, link, check.prompt);
         } catch (err) {
           const why = err?.message ?? String(err);
-          throw new HttpError(`${result.name} started, but linking it to Slack failed: ${why} — its prompt was not sent`, err?.status === 400 ? 400 : 502);
+          throw new HttpError(`${result.name} started, but connecting it to Slack failed: ${why} — its prompt was not sent`, err?.status === 400 ? 400 : 502);
         }
       }
       // Name it as soon as it has answered, not at the next periodic pass. Codex titles its
@@ -871,7 +871,7 @@ export function createApi({
   /** One action on bridge `bridge`: here, or proxied once to that peer → `{ status, body }`. */
   async function atBridge(bridge, action, id, body, pathname) {
     if (bridge === config.self) {
-      if (!slack) return { status: 409, body: { error: 'Slack links are off on this server (FLEET_WEB_SLACK)' } };
+      if (!slack) return { status: 409, body: { error: 'Slack connections are off on this server (FLEET_WEB_SLACK)' } };
       try {
         return { status: 200, body: await slackHere(action, id, body) };
       } catch (err) {
@@ -898,7 +898,7 @@ export function createApi({
     const host = config.slack?.host ?? null;
     const off = (error) => ({ enabled: false, host, ...(error ? { error } : {}), links: [], ended: [] });
     const one = async (b) => {
-      if (b === config.self && !slack) return off('Slack links are off on this server (FLEET_WEB_SLACK)');
+      if (b === config.self && !slack) return off('Slack connections are off on this server (FLEET_WEB_SLACK)');
       if (b !== config.self && local) return off(null); // never chain
       const r = await atBridge(b, 'status', null, null, '/api/slack');
       return r.status === 200 ? r.body : off(r.body?.error ?? `HTTP ${r.status} from ${b}`);
@@ -930,7 +930,7 @@ export function createApi({
   async function handleSlackSpawn(req, url) {
     const body = await readJsonBody(req);
     const bridge = typeof body?.bridge === 'string' && body.bridge ? body.bridge : config.slack?.host ?? null;
-    if (!bridge) return { status: 409, body: { error: 'no server runs Slack links (slack.host)' } };
+    if (!bridge) return { status: 409, body: { error: 'no server runs Slack connections (slack.host)' } };
     if (bridge !== config.self) {
       if (url.searchParams.get('local') === '1') throw new HttpError(`this server is not the Slack bridge ${bridge}`, 400); // never chain
       if (!allBridges().includes(bridge)) throw new HttpError(`unknown Slack bridge: ${bridge}`, 404);
@@ -938,7 +938,7 @@ export function createApi({
       if (!peerUrl) return { status: 409, body: { error: `Slack bridge "${bridge}" is not a peer with a web URL` } };
       return proxyToPeer(peerUrl, { method: 'PUT', pathname: '/api/slack/spawn', body: JSON.stringify(body), timeoutMs: peerProxyTimeoutMs });
     }
-    if (!slack) return { status: 409, body: { error: 'Slack links are off on this server (FLEET_WEB_SLACK)' } };
+    if (!slack) return { status: 409, body: { error: 'Slack connections are off on this server (FLEET_WEB_SLACK)' } };
     if (!body || !('spawn' in body)) throw new HttpError('spawn is required: { host, dir, model, minutes, from } or null', 400);
     let spawn;
     try {
@@ -998,7 +998,7 @@ export function createApi({
     const off = (error) => ({ enabled: false, host: cfg?.host ?? null, ...(error ? { error } : {}), links: [], ended: [] });
     if (!all.length) {
       if (action === 'status') return { status: 200, body: off(null) };
-      return { status: 409, body: { error: `no server runs ${label} links (${label.toLowerCase()}.host)` } };
+      return { status: 409, body: { error: `no server runs ${label} connections (${label.toLowerCase()}.host)` } };
     }
     const at = async (bridge) => {
       if (bridge === config.self) return here(action, id, body);
@@ -1043,7 +1043,7 @@ export function createApi({
     const host = linkHost(body.host);
     body.host = host;
     const bridge = cfg?.bridges?.[host] ?? cfg?.host ?? null;
-    if (!bridge) throw new HttpError(`no ${label} bridge links sessions on ${host}`, 409);
+    if (!bridge) throw new HttpError(`no ${label} bridge connects sessions on ${host}`, 409);
     return at(bridge);
   }
 
@@ -1052,11 +1052,11 @@ export function createApi({
       label: 'GitHub',
       cfg: config.github,
       here: async (act, linkId, body) => {
-        if (!github) return { status: 409, body: { error: 'GitHub links are off on this server (FLEET_WEB_GITHUB)' } };
+        if (!github) return { status: 409, body: { error: 'GitHub connections are off on this server (FLEET_WEB_GITHUB)' } };
         try {
           if (act === 'status') return { status: 200, body: await github.status() };
           if (act === 'unlink') {
-            if (!validGithubLinkId(linkId)) throw new HttpError('link must look like gl-xxxxxx', 400);
+            if (!validGithubLinkId(linkId)) throw new HttpError('connection must look like gl-xxxxxx', 400);
             return { status: 200, body: await github.unlink(linkId) };
           }
           // A session on any host: the bridge lists and types into a peer's through its web server.
@@ -1076,17 +1076,17 @@ export function createApi({
       label: 'Productive',
       cfg: config.productive,
       here: async (act, linkId, body) => {
-        if (!productive) return { status: 409, body: { error: 'Productive links are off on this server (FLEET_WEB_PRODUCTIVE)' } };
+        if (!productive) return { status: 409, body: { error: 'Productive connections are off on this server (FLEET_WEB_PRODUCTIVE)' } };
         try {
           if (act === 'status') return { status: 200, body: await productive.status() };
           if (act === 'unlink') {
-            if (!validProductiveLinkId(linkId)) throw new HttpError('link must look like pl-xxxxxx', 400);
+            if (!validProductiveLinkId(linkId)) throw new HttpError('connection must look like pl-xxxxxx', 400);
             return { status: 200, body: await productive.unlink(linkId) };
           }
           const host = linkHost(body?.host);
           const { url: taskUrl, session, pane, tmuxSession, task, keep, link, body: text } = body ?? {};
           if (act === 'comment') {
-            if (link != null && !validProductiveLinkId(link)) throw new HttpError('link must look like pl-xxxxxx', 400);
+            if (link != null && !validProductiveLinkId(link)) throw new HttpError('connection must look like pl-xxxxxx', 400);
             return { status: 200, body: await productive.comment({ link, session, pane, tmuxSession, body: text, host }) };
           }
           return { status: 200, body: await productive.link({ url: taskUrl, session, pane, tmuxSession, task, keep, host }) };
@@ -1112,7 +1112,7 @@ export function createApi({
     const host = cfg.host ?? null;
     if (!cfg.configured) {
       if (action === 'status') return { status: 200, body: { configured: false, enabled: false, host: null, links: [], ended: [] } };
-      return { status: 409, body: { error: 'Veranda links are not set up (no veranda section in the config)' } };
+      return { status: 409, body: { error: 'Veranda connections are not set up (no veranda section in the config)' } };
     }
     let body = action === 'status' ? null : ((await readJsonBody(req)) ?? {});
     if (body != null && (typeof body !== 'object' || Array.isArray(body))) throw new HttpError('body must be a JSON object', 400);
@@ -1123,8 +1123,8 @@ export function createApi({
       else if (typeof body.host !== 'string' || !body.host) body.host = config.self;
     }
     if (!host) {
-      if (action === 'status') return { status: 200, body: { configured: true, enabled: false, host: null, error: 'no host runs Veranda links (veranda.host)', links: [], ended: [] } };
-      return { status: 409, body: { error: 'no host runs Veranda links (veranda.host)' } };
+      if (action === 'status') return { status: 200, body: { configured: true, enabled: false, host: null, error: 'no host runs Veranda connections (veranda.host)', links: [], ended: [] } };
+      return { status: 409, body: { error: 'no host runs Veranda connections (veranda.host)' } };
     }
     if (host !== config.self) {
       if (local) return { status: 409, body: { error: `this server is not the Veranda bridge ${host}` } };
@@ -1140,8 +1140,8 @@ export function createApi({
       return r;
     }
     if (!veranda) {
-      if (action === 'status') return { status: 200, body: { configured: true, enabled: false, host, error: 'Veranda links are off on this server (FLEET_WEB_VERANDA)', links: [], ended: [] } };
-      return { status: 409, body: { error: 'Veranda links are off on this server (FLEET_WEB_VERANDA)' } };
+      if (action === 'status') return { status: 200, body: { configured: true, enabled: false, host, error: 'Veranda connections are off on this server (FLEET_WEB_VERANDA)', links: [], ended: [] } };
+      return { status: 409, body: { error: 'Veranda connections are off on this server (FLEET_WEB_VERANDA)' } };
     }
     try {
       if (action === 'status') return { status: 200, body: { host: config.self, ...(await veranda.status()) } };
@@ -1163,9 +1163,9 @@ export function createApi({
     const local = url.searchParams.get('local') === '1';
     if (action === 'status') return slackStatus(local);
     const body = await readJsonBody(req);
-    const none = { status: 409, body: { error: 'no server runs Slack links (slack.host)' } };
+    const none = { status: 409, body: { error: 'no server runs Slack connections (slack.host)' } };
     if (action === 'unlink' || action === 'relink') {
-      if (!validLinkId(id)) throw new HttpError('link must look like sl-xxxxxx', 400);
+      if (!validLinkId(id)) throw new HttpError('connection must look like sl-xxxxxx', 400);
       // A link lives on one bridge: the first that knows it answers.
       const names = local ? (slack ? [config.self] : []) : allBridges();
       if (!names.length) return none;
@@ -1185,7 +1185,7 @@ export function createApi({
     if (bridge !== config.self && local) {
       // Proxied here by a server that routes differently: refuse rather than link one session twice.
       return slack
-        ? { status: 400, body: { error: `sessions on ${target} are linked by the bridge on ${bridge} (slack.bridges) — set slack.bridges.${target} on the server you linked from` } }
+        ? { status: 400, body: { error: `sessions on ${target} are connected by the bridge on ${bridge} (slack.bridges) — set slack.bridges.${target} on the server you connected from` } }
         : none;
     }
     const sent = fromSession ? { ...(body ?? {}), host: target } : body;

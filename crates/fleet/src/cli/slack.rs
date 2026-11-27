@@ -69,7 +69,7 @@ pub(crate) fn request_within(
     })?;
     let unreachable = || {
         Error::Other(format!(
-            "cannot reach the web server at {base} — Slack and GitHub links run in it (start it: fleet web serve)"
+            "cannot reach the web server at {base} — Slack and GitHub connections run in it (start it: fleet web serve)"
         ))
     };
     if got.code != Some(0) {
@@ -133,7 +133,7 @@ fn link_line(l: &Value) -> String {
     let until = l["until"]
         .as_i64()
         .map(clock)
-        .unwrap_or_else(|| "unlinked".into());
+        .unwrap_or_else(|| "disconnected".into());
     let task = l["task"].as_str().filter(|t| !t.is_empty());
     let place = match l["dm"]["name"].as_str() {
         Some(name) => format!("DM with {name}"),
@@ -163,7 +163,7 @@ pub fn list(json: bool) -> Result<()> {
         let why = v["error"]
             .as_str()
             .unwrap_or("no host runs them — set slack.host in the config");
-        println!("Slack links are off: {why}");
+        println!("Slack connections are off: {why}");
         return Ok(());
     }
     let socket = if v["socket"]["connected"].as_bool() == Some(true) {
@@ -181,7 +181,7 @@ pub fn list(json: bool) -> Result<()> {
     );
     let links = v["links"].as_array().cloned().unwrap_or_default();
     if links.is_empty() {
-        println!("no active links");
+        println!("no active connections");
     }
     for l in &links {
         println!("{}", link_line(l));
@@ -216,7 +216,7 @@ pub fn link(
         None => {
             let pane = crate::core::done::own_pane_from_env(None).ok_or_else(|| {
                 Error::Other(
-                    "not inside a tmux session — name the session to link: --session <target>"
+                    "not inside a tmux session — name the session to connect: --session <target>"
                         .into(),
                 )
             })?;
@@ -232,7 +232,7 @@ pub fn link(
         let verb = if v["renewed"].as_bool() == Some(true) {
             "renewed"
         } else {
-            "linked"
+            "connected"
         };
         println!("{verb}: {}", link_line(&v));
     }
@@ -253,7 +253,7 @@ pub fn unlink(id: &str, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("unlinked {}", id.bold());
+        println!("disconnected {}", id.bold());
     }
     Ok(())
 }
@@ -540,7 +540,7 @@ pub fn file(id: &str, file_id: &str, out: Option<&str>, json: bool) -> Result<()
 
 /// Why a linked session may not ask with AskUserQuestion: Slack cannot show the prompt, and the
 /// session would sit on it while the thread waits.
-const GUARD_REASON: &str = "This session is linked to Slack, where an AskUserQuestion prompt cannot be shown or answered — the session would block on it. Ask in the thread instead: `fleet slack reply <link> \"…\"` (offer the options as a short list; mention the owner if the question is for them), then end your turn and wait for the answer.";
+const GUARD_REASON: &str = "This session is connected to Slack, where an AskUserQuestion prompt cannot be shown or answered — the session would block on it. Ask in the thread instead: `fleet slack reply <connection> \"…\"` (offer the options as a short list; mention the owner if the question is for them), then end your turn and wait for the answer.";
 
 /// The active link of `session_id` in a `GET /api/slack` body, if any.
 fn active_link_of<'a>(v: &'a Value, session_id: &str, now_ms: i64) -> Option<&'a Value> {
@@ -563,7 +563,10 @@ fn guard_decision(
     let session = input["session_id"].as_str().filter(|s| !s.is_empty())?;
     let v = links()?;
     let link = active_link_of(&v, session, now_ms)?;
-    let reason = GUARD_REASON.replace("<link>", link["id"].as_str().unwrap_or("<link>"));
+    let reason = GUARD_REASON.replace(
+        "<connection>",
+        link["id"].as_str().unwrap_or("<connection>"),
+    );
     Some(json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -617,13 +620,13 @@ pub fn check_linkable() -> Result<()> {
     let me = crate::core::config::get().self_name();
     match v["host"].as_str() {
         _ if v["enabled"].as_bool() != Some(true) => Err(Error::Other(format!(
-            "Slack links are off: {}",
+            "Slack connections are off: {}",
             v["error"]
                 .as_str()
                 .unwrap_or("set slack.host in the config")
         ))),
         Some(h) if h != me => Err(Error::Other(format!(
-            "only sessions on {h} can be linked to Slack — spawn there: fleet -H {h} spawn …"
+            "only sessions on {h} can be connected to Slack — spawn there: fleet -H {h} spawn …"
         ))),
         _ => Ok(()),
     }
@@ -660,10 +663,10 @@ pub fn link_spawned(tmux: &str, link: &SpawnLink, first: &str) -> Result<()> {
         }
         ok_or_err(&status, &v).map_err(|e| {
             Error::Other(format!(
-                "{tmux} started, but linking it to Slack failed: {e} — its prompt was not sent"
+                "{tmux} started, but connecting it to Slack failed: {e} — its prompt was not sent"
             ))
         })?;
-        println!("linked: {}", link_line(&v));
+        println!("connected: {}", link_line(&v));
         return Ok(());
     }
 }

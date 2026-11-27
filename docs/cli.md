@@ -54,7 +54,7 @@ the first rung with hits wins. Two hits on the same rung is an error that lists 
 | `fleet name [<target> \| --all [--settled]] [--apply \| --adopt-tmux] [--refresh] [--no-tmux-sync]` | suggest a name from what the session is doing and store it as the session's display title (the name cache); only `--apply` sends it as `/rename` (through the same path as `rename`, tmux included). `--adopt-tmux` sends only the adopted tmux names below, never a generated one (the web's periodic pass). A title the brief generator wrote (source `brief`) is served as is, no model call, until `--refresh`. `--all` = every session with a derived (cwd+hash) name. A derived-name session alone in a tmux session somebody named (`fleet new fix-login`) adopts that name (`(tmux)`, no model call) instead of getting a generated one. `--settled` (with `--all`) skips sessions with one prompt and no brief yet — the model reads the brief's Summary and the first three prompts, and a lone first prompt is often just a link. `--refresh` ignores the cache |
 | `fleet group [-a, --all-hosts] [--json] [--apply] [--refresh] [--consolidate] [--input <file\|->] [--cached]` | sort sessions into work-stream groups (the web Board view) — see [Grouping](#grouping). Reads sessions and asks `claude -p`; never sends anything to a session |
 | `fleet group --rename <group id> --label <l>` / `--move <host/id> (--to <group id> \| --label <l>)` / `--create --label <l>` / `--delete <group id>` | edit the stored groups by hand (the Board's rename / drag'n'drop) — see [Grouping](#grouping) |
-| `fleet spawn [prompt] --dir <path> [--harness claude\|codex\|pi] [--name <n>] [--model <id>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new agent session in a new tab/pane. `--harness` picks the coding agent (default `claude`; see [Harnesses](#harnesses)). A Codex spawn in tmux answers "Trust this folder?" with "Trust and continue" (the directory was picked explicitly), as the web spawner does. `--model <id>` runs `<harness> --model '<id>'` (letters, digits and `._[]-/:` only — pi's ids are `provider/model`; blank = the harness's default). `--name` is passed as `-n` to Claude and pi; Codex has no such flag (the tmux session carries the name). Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing). `--ask-done`: the [instruction](#ask-done) goes below the prompt and the session runs in tmux. `--slack <slack-url \| @person> [--slack-for 2h] [--slack-task <instructions>] [--slack-proactive]`: start [linked to Slack](#slack-links) (tmux, any host whose web server reaches `slack.host`; checked before anything opens). The session starts with no prompt and is linked once it has registered (≤ ~45 s); the prompt goes in last in the link's intro, as the owner's request to start on — so it never works on it, or reaches Slack another way, before it knows it is linked. Max 4000 chars. If the link fails, the session stays, idle, and the prompt was not sent |
+| `fleet spawn [prompt] --dir <path> [--harness claude\|codex\|pi] [--name <n>] [--model <id>] [--backend iterm\|tmux] [--tmux-session <s>] [--window]` | start a new agent session in a new tab/pane. `--harness` picks the coding agent (default `claude`; see [Harnesses](#harnesses)). A Codex spawn in tmux answers "Trust this folder?" with "Trust and continue" (the directory was picked explicitly), as the web spawner does. `--model <id>` runs `<harness> --model '<id>'` (letters, digits and `._[]-/:` only — pi's ids are `provider/model`; blank = the harness's default). `--name` is passed as `-n` to Claude and pi; Codex has no such flag (the tmux session carries the name). Default backend: tmux inside tmux, over ssh or off macOS; else iTerm. With tmux, each spawn gets its own tmux session (one session per job) named from `--name` or the dir's basename, sanitised like `fleet new`; a taken `--name` is an error, a taken basename is uniquified (`app-2`). `--tmux-session <s>` opens a window in `s` instead (created if missing). `--ask-done`: the [instruction](#ask-done) goes below the prompt and the session runs in tmux. `--slack <slack-url \| @person> [--slack-for 2h] [--slack-task <instructions>] [--slack-proactive]`: start [connected to Slack](#slack-connections) (tmux, any host whose web server reaches `slack.host`; checked before anything opens). The session starts with no prompt and is connected once it has registered (≤ ~45 s); the prompt goes in last in the connection's intro, as the owner's request to start on — so it never works on it, or reaches Slack another way, before it knows it is connected. Max 4000 chars. If the connection fails, the session stays, idle, and the prompt was not sent |
 | `fleet harness list [--json] [--no-models]` | the [harnesses](#harnesses) on this host: id, label, launch command, `installed`, and the models each offers for a picker. `-H <host>` asks another machine |
 | `fleet spawn --from <target> [prompt] [--name <n>] [--model <id>] [--backend …]` | continue a session's work in a new one: same host (with `-H`, the host the session is on) and its cwd (`--dir` overrides), first prompt = its [brief](#briefs)'s continue prompt (summary, origin, PRs, worktree, then a `---` line), then a blank line and `prompt` — the task (default: pick up where it left off). The prompt goes through a file under `~/.claude/fleet-handoffs/`, like a handoff. Errors when the session has no brief yet. `-n` prints the launch command and the prompt and writes nothing |
 | `fleet handoff [brief] [--file <f\|->] --dir <path> [--harness <h>] [--name <n>] [--model <id>] [--tmux-session <s>] [--tab] [--no-wait]` | start a new session in another window seeded with a brief (saved under `~/.claude/fleet-handoffs/`); waits until it registers. Same tmux placement as `spawn` |
@@ -157,95 +157,95 @@ the app whose embedded Fleet panel started the session — see [Embed view](arch
 the machine's own credentials. Shim, empty config dir and note live in
 `${XDG_STATE_HOME:-~/.local/state}/fleet/gh-identities/<name>/`.
 
-### Slack links
+### Slack connections
 
 For a while, a session talks with the people in one Slack thread (or a whole channel or DM): what
 they write there is typed into it, and it answers there. You decide which session, which thread,
-for how long and what it may help with — the web UI's **Add link** (session Details → Links), or:
+for how long and what it may help with — the web UI's **Connect** (session Details → Connections), or:
 
 | Command | What |
 |---|---|
-| `fleet slack [list] [--json]` | the bridge (connected?) and the active links |
-| `fleet slack link <slack-url \| @person> --for <30m\|2h\|1w\|90\|forever> [--session <target>] [--task <instructions>] [--proactive] [--json]` | link a session (default: the one this runs in, by `$TMUX_PANE`). A message link is its thread; a channel / DM link is all of it; a person (`@name`, a name or their user id `U…` — instead of a link) is the app's DM with them, opened if new (several matches: an error with the candidates). Needs the `im:write` scope and the app's Messages tab on. `--task`: your instructions (what it may help with, tone, when to step in). `--proactive`: it sees every message and steps in when it judges it should; default: it is woken only when someone mentions the app, DMs it or writes in a thread it has posted in (then it judges itself whether the message is for it), and gets what was said in between as context. Linking the same session to the same thread again renews it (new time limit, instructions, mode). Up to a week, or `forever`: no end, until unlinked. An ended link can be relinked in one click from the web UI (Details → Links → **Link again**) |
-| `fleet slack unlink <sl-xxxxxx>` | end a link now |
-| `fleet slack reply <sl-xxxxxx> <text> [--thread <ts>]` | post in the linked thread — what the linked session runs to answer. Prints the new message's `ts` and permalink (`--json`: `{ link, channel, ts, threadTs, permalink }`), e.g. to reply in a thread it just started. Refused (exit 3) once the link has ended, and for any session but the linked one. Threads first: in a channel or group DM link, a post outside a thread must be a one-line headline (≤ 300 chars) whose details go in its thread — anything longer is refused (400); a one-on-one DM is exempt |
-| `fleet slack react <sl-xxxxxx> <ts> <emoji> [--remove] [--json]` | an emoji reaction (a Slack name like `white_check_mark`, colons optional) on a message of the linked conversation — what the linked session runs when a reaction says enough (`--json`: `{ link, channel, ts, emoji, removed }`). Each message typed in carries its `ts`. Already there / already gone is not an error. Same rules as `reply`: the linked session only, while linked (exit 3 after). Needs `reactions:write` |
-| `fleet slack history <sl-xxxxxx> [--limit 50] [--cursor <c>] [--oldest <ts>] [--latest <ts>] [--json]` | read the linked conversation, a page at a time (up to 200): a channel / DM from the newest message (the next page, `older: … --cursor`, goes back; each page printed top-down), a thread link its thread (as `thread`). Each message: who (name, id, the owner / `[you]` / `[app]`), when, its `ts`, its replies (read them with `thread`) and its files (id, name, type, size). Read-only, the linked session only, while linked (exit 3 after) |
-| `fleet slack thread <sl-xxxxxx> <ts> [--limit] [--cursor] [--json]` | one thread of the linked conversation (a thread link: only its own thread): its first message, then the latest replies, oldest first; `older: … --cursor` pages back to earlier replies |
-| `fleet slack file <sl-xxxxxx> <file-id> [-o <path>] [--json]` | download a file shared in the linked conversation (in a thread link: in its thread), up to 20 MB, to `<path>` (a file or a directory; default a temp dir) and print where. The app needs the `files:read` scope |
-| `fleet slack guard` | a Claude Code `PreToolUse` hook (matcher `AskUserQuestion`; reads the hook JSON on stdin): while the session is linked, it denies the prompt — Slack cannot show it — and tells the session to ask in the thread. Fails open (no web server or bridge: the call goes through). Install it in `~/.claude/settings.json`: `"PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "fleet slack guard", "timeout": 10 }] }]`. With a `veranda` section in the config it also covers [Veranda links](#veranda-links) |
+| `fleet slack [list] [--json]` | the bridge (connected?) and the active connections |
+| `fleet slack connect <slack-url \| @person> --for <30m\|2h\|1w\|90\|forever> [--session <target>] [--task <instructions>] [--proactive] [--json]` | connect a session (default: the one this runs in, by `$TMUX_PANE`). A message link is its thread; a channel / DM link is all of it; a person (`@name`, a name or their user id `U…` — instead of a link) is the app's DM with them, opened if new (several matches: an error with the candidates). Needs the `im:write` scope and the app's Messages tab on. `--task`: your instructions (what it may help with, tone, when to step in). `--proactive`: it sees every message and steps in when it judges it should; default: it is woken only when someone mentions the app, DMs it or writes in a thread it has posted in (then it judges itself whether the message is for it), and gets what was said in between as context. Connecting the same session to the same thread again renews it (new time limit, instructions, mode). Up to a week, or `forever`: no end, until disconnected. An ended connection can be renewed in one click from the web UI (Details → Connections → **Reconnect**). `link` / `unlink` still work as aliases of `connect` / `disconnect`, here and for `github`, `productive` and `veranda` |
+| `fleet slack disconnect <sl-xxxxxx>` | end a connection now |
+| `fleet slack reply <sl-xxxxxx> <text> [--thread <ts>]` | post in the connected thread — what the connected session runs to answer. Prints the new message's `ts` and permalink (`--json`: `{ link, channel, ts, threadTs, permalink }`), e.g. to reply in a thread it just started. Refused (exit 3) once the connection has ended, and for any session but the connected one. Threads first: in a channel or group DM connection, a post outside a thread must be a one-line headline (≤ 300 chars) whose details go in its thread — anything longer is refused (400); a one-on-one DM is exempt |
+| `fleet slack react <sl-xxxxxx> <ts> <emoji> [--remove] [--json]` | an emoji reaction (a Slack name like `white_check_mark`, colons optional) on a message of the connected conversation — what the connected session runs when a reaction says enough (`--json`: `{ link, channel, ts, emoji, removed }`). Each message typed in carries its `ts`. Already there / already gone is not an error. Same rules as `reply`: the connected session only, while connected (exit 3 after). Needs `reactions:write` |
+| `fleet slack history <sl-xxxxxx> [--limit 50] [--cursor <c>] [--oldest <ts>] [--latest <ts>] [--json]` | read the connected conversation, a page at a time (up to 200): a channel / DM from the newest message (the next page, `older: … --cursor`, goes back; each page printed top-down), a thread connection its thread (as `thread`). Each message: who (name, id, the owner / `[you]` / `[app]`), when, its `ts`, its replies (read them with `thread`) and its files (id, name, type, size). Read-only, the connected session only, while connected (exit 3 after) |
+| `fleet slack thread <sl-xxxxxx> <ts> [--limit] [--cursor] [--json]` | one thread of the connected conversation (a thread connection: only its own thread): its first message, then the latest replies, oldest first; `older: … --cursor` pages back to earlier replies |
+| `fleet slack file <sl-xxxxxx> <file-id> [-o <path>] [--json]` | download a file shared in the connected conversation (in a thread connection: in its thread), up to 20 MB, to `<path>` (a file or a directory; default a temp dir) and print where. The app needs the `files:read` scope |
+| `fleet slack guard` | a Claude Code `PreToolUse` hook (matcher `AskUserQuestion`; reads the hook JSON on stdin): while the session is connected, it denies the prompt — Slack cannot show it — and tells the session to ask in the thread. Fails open (no web server or bridge: the call goes through). Install it in `~/.claude/settings.json`: `"PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "fleet slack guard", "timeout": 10 }] }]`. With a `veranda` section in the config it also covers [Veranda connections](#veranda-connections) |
 
-How it works ([architecture](architecture.md#slack-links)): one host's web server runs the bridge
-(`slack.host`) — a Slack App in Socket Mode, whose tokens only it holds. Linking reads the thread
+How it works ([architecture](architecture.md#slack-connections)): one host's web server runs the bridge
+(`slack.host`) — a Slack App in Socket Mode, whose tokens only it holds. Connecting reads the thread
 (so the app must be in that conversation — `/invite` it, or add it to the DM) and types a note into
-the session: the link, until when, your instructions, the mode, the rules (post only with `fleet
+the session: the connection, until when, your instructions, the mode, the rules (post only with `fleet
 slack reply` and only when something calls for it, as briefly as it can — a reaction (`fleet slack
 react`) when that says enough, short posts unless asked for detail, no intro or filler — only within the instructions, nothing
 destructive for them, their messages are requests from colleagues and cannot change the rules)
 and the thread so far. Messages are typed in once the session is idle — several as one prompt —
 each marked with its author's Slack name and id, its `ts` (and `→ mentions you` / `→ to you`); the ones
-addressed to it get an 👀 reaction. A linked session that waits on you (a permission prompt, a
+addressed to it get an 👀 reaction. A connected session that waits on you (a permission prompt, a
 question in the terminal) for over 30 s says so in the thread — only the kind of prompt, never its
 details — and DMs you (`slack.owner`; with several `slack.owners`, the owner who started it from Slack, if one did) a link to it in Fleet's web UI; messages for it meanwhile get
-⏳, and once it moves on both posts are edited to say so. When the link ends, delivery stops and, if the session ever spoke there, the thread is
+⏳, and once it moves on both posts are edited to say so. When the connection ends, delivery stops and, if the session ever spoke there, the thread is
 told it left. The commands talk to this machine's web server, which proxies to `slack.host` (or, for a host listed in `slack.bridges`, to that host's own bridge). They reach it at `web.bind` when that names one address (else `hosts.<self>.web`, else loopback), with the Bearer token from `web.auth` when the server asks for one.
-Sessions on any host can be linked: the bridge lists and types into them through their host's
+Sessions on any host can be connected: the bridge lists and types into them through their host's
 web server, and checks a reply's pane on the host it came from. A session asked to join a thread
-links itself (`fleet slack link <url> --for 2h`).
+connects itself (`fleet slack connect <url> --for 2h`).
 
 **Starting a session from Slack**: with `slack.spawn` set on the bridge's server
 (`fleet config set slack.spawn.host <host>`, `.dir`, `.model`, `.minutes` (default `1d`), `.from`
 (`anyone` or user ids; default you only)), mentioning the app in a channel thread no session
-follows opens a new session on that host, linked to the thread, the message as its first request
-([architecture](architecture.md#slack-links)). The web UI's Settings → Slack turns it on and off per
+follows opens a new session on that host, connected to the thread, the message as its first request
+([architecture](architecture.md#slack-connections)). The web UI's Settings → Slack turns it on and off per
 Slack app (bridge) and sets host, directory, model, duration and who may — live, no restart.
 
-### Veranda links
+### Veranda connections
 
-Opt-in, and only with a `veranda` section in the config ([architecture](architecture.md#veranda-links)):
+Opt-in, and only with a `veranda` section in the config ([architecture](architecture.md#veranda-connections)):
 Veranda is a **separate** self-hosted group chat (not part of Fleet) for people who are not on
 the tailnet. For a while, a session talks with the guests in one Veranda room: what they write
 there is typed into it, and it answers there. Without the section, nothing runs, polls or shows.
 
 | Command | What |
 |---|---|
-| `fleet veranda [status] [--json]` | the bridge and the active links |
-| `fleet veranda link [<session>] --room <name> [--for <2h\|1d\|90>] [--title <text>] [--note <instructions>] [--json]` | open (or reopen) the room with a new passphrase and link a session to it (default: the one this runs in, by `$TMUX_PANE`). Prints the passphrase **once**, with Veranda's URL (`veranda.url`), for you to pass on to the guests; it is never stored. `--room`: lowercase letters, digits and dashes (1–48). `--for`: up to 30 days (default `veranda.defaultMinutes`, 2 h). `--title`: the room's title in Veranda. `--note`: your instructions — what the session may help the guests with. One session per room and one room per session: a room linked to another session is refused (409) |
-| `fleet veranda unlink [--room <name>]` | close the room and end the link (default: this session's). The session is told once it is idle |
-| `fleet veranda extend --for <duration> [--room <name>]` | the link and the room last that much longer (from the current end; at most 30 days from now). Refused (403) from inside a linked session — a guest could ask it to |
-| `fleet veranda reply <markdown>` | post in this session's room (at most 20000 chars) — what the linked session runs to answer. Only from the linked session's pane (another pane: 403); refused (exit 3) once the link has ended or Veranda closed the room |
-| `fleet veranda history [--limit 50] [--after <id>] [--json]` | read this session's room since the link started (guests, `[you]`, `[system]`), a page at a time; read-only, the linked session only |
-| `fleet veranda guard` | the same hook as `fleet slack guard`, which also covers Veranda links when the config has a `veranda` section: AskUserQuestion is denied in a linked session and it is told to ask in the room |
+| `fleet veranda [status] [--json]` | the bridge and the active connections |
+| `fleet veranda connect [<session>] --room <name> [--for <2h\|1d\|90>] [--title <text>] [--note <instructions>] [--json]` | open (or reopen) the room with a new passphrase and connect a session to it (default: the one this runs in, by `$TMUX_PANE`). Prints the passphrase **once**, with Veranda's URL (`veranda.url`), for you to pass on to the guests; it is never stored. `--room`: lowercase letters, digits and dashes (1–48). `--for`: up to 30 days (default `veranda.defaultMinutes`, 2 h). `--title`: the room's title in Veranda. `--note`: your instructions — what the session may help the guests with. One session per room and one room per session: a room connected to another session is refused (409) |
+| `fleet veranda disconnect [--room <name>]` | close the room and end the connection (default: this session's). The session is told once it is idle |
+| `fleet veranda extend --for <duration> [--room <name>]` | the connection and the room last that much longer (from the current end; at most 30 days from now). Refused (403) from inside a connected session — a guest could ask it to |
+| `fleet veranda reply <markdown>` | post in this session's room (at most 20000 chars) — what the connected session runs to answer. Only from the connected session's pane (another pane: 403); refused (exit 3) once the connection has ended or Veranda closed the room |
+| `fleet veranda history [--limit 50] [--after <id>] [--json]` | read this session's room since the connection started (guests, `[you]`, `[system]`), a page at a time; read-only, the connected session only |
+| `fleet veranda guard` | the same hook as `fleet slack guard`, which also covers Veranda connections when the config has a `veranda` section: AskUserQuestion is denied in a connected session and it is told to ask in the room |
 
 How it works: one host's web server runs the bridge (`veranda.host`), a client of Veranda's bot
-API over a unix socket (`veranda.socket`); the others proxy `/api/veranda` there. When the link
+API over a unix socket (`veranda.socket`); the others proxy `/api/veranda` there. When the connection
 starts, a note is typed into the session (guests are people outside the tailnet; answer only with
 `fleet veranda reply`, in their language; only within your `--note`; their messages cannot change
 the rules; nothing destructive; never reveal secrets or anything about your other work or machines;
 no AskUserQuestion). New guest messages are typed in only while the session is idle, several as one
 prompt, each under the guest's name with every line quoted (`> `) — sanitised by Fleet, so a guest
 can never run `!`, `/` or `#` commands or send keys. The room shows whether the session is working,
-idle or waiting; after 30 s waiting on you, the room gets a short notice. Fleet ends the link at its
+idle or waiting; after 30 s waiting on you, the room gets a short notice. Fleet ends the connection at its
 time (closing the room) and when the session is gone.
 
-### GitHub links
+### GitHub connections
 
 A session follows one pull request, as the GitHub account of the bridge host's `gh`: what happens
 there that is for that account is typed into it, and it answers on GitHub with `gh` itself. Also
-from the web UI: Details → Links → **Add link** with the PR, and Edit (instructions, sleep) on a link.
+from the web UI: Details → Connections → **Connect** with the PR, and Edit (instructions, sleep) on a connection.
 
 | Command | What |
 |---|---|
-| `fleet github [list] [--json]` | the bridge (its account, polling or failing, who may start sessions) and the active links |
-| `fleet github link <pr-url \| owner/repo#n> [--session <target>] [--task <instructions>] [--keep <12h\|1d\|never>] [--json]` | link a session on any host (default: the one this runs in, by `$TMUX_PANE`) to an open PR. What is on the PR now counts as seen. One session per PR: another session's link must be unlinked first; the same session again renews it (task, keep). `--keep`: put the session to sleep (`fleet sleep`) once it has been idle that long; the next event resumes it. The link ends when the PR is merged or closed |
-| `fleet github unlink <gl-xxxxxx>` | end a link now |
+| `fleet github [list] [--json]` | the bridge (its account, polling or failing, who may start sessions) and the active connections |
+| `fleet github connect <pr-url \| owner/repo#n> [--session <target>] [--task <instructions>] [--keep <12h\|1d\|never>] [--json]` | connect a session on any host (default: the one this runs in, by `$TMUX_PANE`) to an open PR. What is on the PR now counts as seen. One session per PR: another session's connection must be disconnected first; the same session again renews it (task, keep). `--keep`: put the session to sleep (`fleet sleep`) once it has been idle that long; the next event resumes it. The connection ends when the PR is merged or closed |
+| `fleet github disconnect <gl-xxxxxx>` | end a connection now |
 
-How it works ([architecture](architecture.md#github-links)): the machines are not reachable from the
+How it works ([architecture](architecture.md#github-connections)): the machines are not reachable from the
 internet, so there are no webhooks. One host's web server (`github.host`) polls its `gh` account's
 notifications (`participating=true`, with `If-Modified-Since`, so an unchanged list costs no rate
-limit; at most every `X-Poll-Interval`, 60 s). A notification only names a PR. For a linked PR,
-or a review request on an unlinked one, the bridge reads the PR (one GraphQL query) and compares it
-with what the link has seen. Only these wake the session: a review requested (or re-requested) from
+limit; at most every `X-Poll-Interval`, 60 s). A notification only names a PR. For a connected PR,
+or a review request on an unconnected one, the bridge reads the PR (one GraphQL query) and compares it
+with what the connection has seen. Only these wake the session: a review requested (or re-requested) from
 the account, a reply in a review thread the account commented in, and a comment or review that
 mentions `@account`. Other people's comments go along as context with the next wake. Pushes, CI,
 labels, bots and the account's own comments never do, and notifications about other PRs are left
@@ -253,34 +253,34 @@ alone. What wakes it gets an 👀 reaction once typed in. A re-request says how 
 since the session last reviewed.
 
 **Starting a session from GitHub**: with `github.spawn` set, a review requested from the account on
-a PR no session follows opens a new session on `github.host`, linked to the PR, the request as its
+a PR no session follows opens a new session on `github.host`, connected to the PR, the request as its
 first prompt — only when the person who requested it is in `github.spawn.from` (GitHub logins, or
 `"anyone"`; none = nobody), and only for requests made after the bridge first ran.
 `fleet config set github '{"host":"<host>","spawn":{"dir":"~/work","model":"opus","keep":"1d","from":["<login>"]}}'`
 (`keep`, default `1d`: such sessions sleep after that long idle; the next event resumes them, and if
-that fails a new session takes the link over and reads the PR's history first). Once its PR is
+that fails a new session takes the connection over and reads the PR's history first). Once its PR is
 merged or closed, such a session is put to sleep as soon as it is idle (after a 10-minute grace);
-an ended link shows `retired: true` then. Sessions linked by hand are left alone. `github.spawn`
+an ended connection shows `retired: true` then. Sessions connected by hand are left alone. `github.spawn`
 applies within a few seconds; `github.host` needs a restart of the web server.
 
-### Productive links
+### Productive connections
 
 A session follows one Productive task, as the Productive account (a person in the organization)
 whose API token the bridge host holds: comments and changes on the task are typed into it, and it
 answers with `fleet productive reply`, which posts a comment as that account. Also from the web
-UI: Details → Links → **Add link** with the task URL, and Edit (instructions, sleep) on a link.
+UI: Details → Connections → **Connect** with the task URL, and Edit (instructions, sleep) on a connection.
 
 | Command | What |
 |---|---|
-| `fleet productive [list] [--json]` | the bridge (its account, polling or failing, who may start sessions) and the active links |
-| `fleet productive link <task-url \| id> [--session <target>] [--task <instructions>] [--keep <12h\|1d\|never>] [--json]` | link a session on any host (default: the one this runs in, by `$TMUX_PANE`) to an open task. What is on the task now counts as seen. One session per task; the same session again renews it (task, keep). `--keep`: sleep after that long idle; the next event resumes it. The link ends when the task is closed |
-| `fleet productive reply <text \| -> [--file <path>] [--link <pl-xxxxxx>] [--session <target>] [--json]` | post a comment on the linked task (default: this session's link) as the account. Text with a little Markdown: paragraphs, `- ` lists, `**bold**`, `` `code` ``, links; `@[Person:<id>:<Name>]` mentions someone. `-` or no text: read stdin |
-| `fleet productive unlink <pl-xxxxxx>` | end a link now |
+| `fleet productive [list] [--json]` | the bridge (its account, polling or failing, who may start sessions) and the active connections |
+| `fleet productive connect <task-url \| id> [--session <target>] [--task <instructions>] [--keep <12h\|1d\|never>] [--json]` | connect a session on any host (default: the one this runs in, by `$TMUX_PANE`) to an open task. What is on the task now counts as seen. One session per task; the same session again renews it (task, keep). `--keep`: sleep after that long idle; the next event resumes it. The connection ends when the task is closed |
+| `fleet productive reply <text \| -> [--file <path>] [--link <pl-xxxxxx>] [--session <target>] [--json]` | post a comment on the connected task (default: this session's connection) as the account. Text with a little Markdown: paragraphs, `- ` lists, `**bold**`, `` `code` ``, links; `@[Person:<id>:<Name>]` mentions someone. `-` or no text: read stdin |
+| `fleet productive disconnect <pl-xxxxxx>` | end a connection now |
 
-How it works ([architecture](architecture.md#productive-links)): one host's web server
+How it works ([architecture](architecture.md#productive-connections)): one host's web server
 (`productive.host`) polls its account's notifications every minute. A notification only names a
 task; the bridge then reads the task's activity feed (comments and changes) and compares it with
-the newest activity the link has seen. Linked tasks are also re-read every 3 minutes. What wakes
+the newest activity the connection has seen. Connected tasks are also re-read every 3 minutes. What wakes
 the session: a comment that mentions the account, any comment by someone in `productive.spawn.from`,
 and any change on the task (status, assignee, todos…). Comments by others go along as context; the
 account's own activity never comes back. **Throttled**: a burst goes in as one prompt once the task
@@ -288,7 +288,7 @@ has been quiet for a while (20 s after a mention, 45 s otherwise), at least 30 s
 (comments) or 10 min (changes only) after the last delivery, and only into an idle session.
 
 **Starting a session from Productive**: with `productive.spawn` set, a mention of the account on a
-task no session follows opens a new session on `productive.host` (named `task-<number>`), linked to
+task no session follows opens a new session on `productive.host` (named `task-<number>`), connected to
 the task, with the task, its description, its recent comments and the mention as its first prompt —
 only when the comment's author is in `productive.spawn.from` (Productive person ids or emails, or
 `"anyone"`; none = nobody), and only for mentions made after the bridge first ran.
@@ -877,8 +877,8 @@ of GitHub: `FLEET_GH_WATCH_FIXTURE` = a JSON file `{ "<owner/repo>": [{ "name", 
 ## Resident bots (Slack)
 
 A bot can live in a Slack channel instead of running now and then: with `on.slack` in place of
-`schedule`, Fleet keeps **exactly one** session of it live, linked to that channel for good
-(`fleet slack link --for forever`). A channel that people talk to (a CI channel, a review
+`schedule`, Fleet keeps **exactly one** session of it live, connected to that channel for good
+(`fleet slack connect --for forever`). A channel that people talk to (a CI channel, a review
 channel) gets one standing session that follows it, while the work itself runs in other bots.
 
 ```json
@@ -900,27 +900,27 @@ channel) gets one standing session that follows it, while the work itself runs i
 | --- | --- |
 | `on.slack.channel` | the channel's link (`…/archives/C…`); a whole channel, not a thread |
 | `on.slack.mode` | `mention` (default: woken when mentioned, or in a thread it posted in) or `proactive` (every message) |
-| `on.slack.task` | the link's instructions (`--task`, at most 1000 characters); default: follow the prompt |
+| `on.slack.task` | the connection's instructions (`--task`, at most 1000 characters); default: follow the prompt |
 | `sessionName` | the session's name; default the bot's name |
-| `prompt` / `promptFile` | goes in with the link's intro (as `fleet spawn --slack`), so the session never starts on it before it knows it is in Slack |
+| `prompt` / `promptFile` | goes in with the connection's intro (as `fleet spawn --slack`), so the session never starts on it before it knows it is in Slack |
 
 Everything else (`dir`, `pull`, `command`, `harness`, `model`, `ghIdentity`, `enabled`) is as for
 any bot. `keep` and `closeDone` are refused: nothing closes a resident's session. The host must
 run the Slack bridge (`slack.host`).
 
 **One session, kept.** Each tick (`fleet bots tick`, every minute) looks at the bot's live
-sessions and the bridge's links:
+sessions and the bridge's connections:
 
-- none live → it starts one and links it (`trigger: resident`);
-- one live, linked to the channel → nothing;
-- one live that lost its link (unlinked, the link failed) → it links that session again, the prompt
+- none live → it starts one and connects it (`trigger: resident`);
+- one live, connected to the channel → nothing;
+- one live that lost its connection (disconnected, the connection failed) → it connects that session again, the prompt
   with the intro (`trigger: relink`);
 - more than one live → nothing; `fleet hosts` reports it, and a person closes the extra.
 
-After a start or a relink the next one waits 5 minutes (the session may still be registering; a
+After a start or a reconnect the next one waits 5 minutes (the session may still be registering; a
 failing bridge is not asked every minute). No bridge to ask → nothing is decided. `fleet bots run`
 starts it now when none is live, and refuses when one is. To stop it, pause the bot
-(`fleet bots disable`) and close its session; unlinking alone gets it linked again.
+(`fleet bots disable`) and close its session; disconnecting alone gets it connected again.
 
 ## Snooze
 

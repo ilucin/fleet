@@ -137,7 +137,7 @@ test('link: reads the thread, types the intro into the idle session, then messag
   await fx.bridge.tick();
   assert.equal(fx.sent.length, 1);
   const intro = fx.sent[0].text;
-  assert.match(intro, new RegExp(`^\\[slack ${link.id}\\] You are linked to a Slack thread until`));
+  assert.match(intro, new RegExp(`^\\[slack ${link.id}\\] You are connected to a Slack thread until`));
   assert.match(intro, /The owner's instructions for it: artifact testing/);
   assert.match(intro, /a thread you have posted in[^]*not necessarily for you/);
   assert.match(fx.sent[0].text, /Stay free to talk[^]*background subagent/);
@@ -662,7 +662,7 @@ test('a DM link: a person instead of a URL — the app\'s DM with them, every me
   assert.deepEqual(fx.slack.calls.find((c) => c.method === 'conversations.open').params, { users: 'U0SAM0001' });
 
   await fx.bridge.tick();
-  assert.match(fx.sent[0].text, /linked to a Slack DM with Sam/);
+  assert.match(fx.sent[0].text, /connected to a Slack DM with Sam/);
   assert.match(fx.sent[0].text, /if the instructions say to start, post a short opener now/);
   assert.doesNotMatch(fx.sent[0].text, /--thread/);
   fx.advance(10_000);
@@ -912,7 +912,7 @@ test('two bridges: slack.bridges sends a host\'s sessions to its own bridge; sta
   // A server that still sends everything to slack.host: refused, not linked twice.
   const twice = await call(`${old}/api/slack/link`, 'POST', { host: 'studio', session: SID, url: URL_, minutes: 30 });
   assert.equal(twice.status, 400);
-  assert.match(twice.body.error, /linked by the bridge on studio/);
+  assert.match(twice.body.error, /connected by the bridge on studio/);
   assert.equal(read(home), 1);
 
   // Status: both bridges' links, wherever you look; each bridge's own view stays its own.
@@ -986,7 +986,7 @@ test('a spawn linked to Slack: no prompt at launch, linked once it registers, th
 
   await fx.bridge.tick();
   const intro = fx.sent.find((s) => s.id === NEW).text;
-  assert.match(intro, /^\[slack sl-[0-9a-f]{6}\] You are linked to a Slack thread/);
+  assert.match(intro, /^\[slack sl-[0-9a-f]{6}\] You are connected to a Slack thread/);
   assert.match(intro, /How does it work\?[^]*Their request — start on it now[^]*\nHelp Alex with this$/);
 });
 
@@ -996,7 +996,7 @@ test('forever: a link with no end never expires and says so in its intro', async
   assert.equal(link.until, null);
   assert.equal(link.minutes, null);
   await fx.bridge.tick();
-  assert.match(fx.sent[0].text, /You are linked to a Slack thread until the owner unlinks it/);
+  assert.match(fx.sent[0].text, /You are connected to a Slack thread until the owner disconnects it/);
   fx.advance(30 * 24 * 60 * 60 * 1000);
   await fx.bridge.tick();
   assert.equal((await fx.bridge.list()).links.length, 1);

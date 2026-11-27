@@ -613,16 +613,16 @@ servers[0].listen(config.port, addresses[0], () => {
   if (github) {
     github.start();
     const from = config.github.spawn?.from ?? [];
-    log(`[fleet-web] github links on (notifications of this host's gh; review requests start sessions: ${config.github.spawn ? (from.length ? from.join(', ') : 'nobody') : 'off'})`);
+    log(`[fleet-web] github connections on (notifications of this host's gh; review requests start sessions: ${config.github.spawn ? (from.length ? from.join(', ') : 'nobody') : 'off'})`);
   } else if (config.github.host) {
-    log(`[fleet-web] github links: served by ${config.github.host}`);
+    log(`[fleet-web] github connections: served by ${config.github.host}`);
   }
   if (productive) {
     productive.start();
     const from = config.productive.spawn?.from ?? [];
-    log(`[fleet-web] productive links on (inbox of this host's Productive account; mentions start sessions: ${config.productive.spawn ? (from.length ? `${from.length} people` : 'nobody') : 'off'})`);
+    log(`[fleet-web] productive connections on (inbox of this host's Productive account; mentions start sessions: ${config.productive.spawn ? (from.length ? `${from.length} people` : 'nobody') : 'off'})`);
   } else if (config.productive.host) {
-    log(`[fleet-web] productive links: served by ${config.productive.host}`);
+    log(`[fleet-web] productive connections: served by ${config.productive.host}`);
   }
   loadMonitor.start();
   if (config.usage.enabled) log(`[fleet-web] subscription fallback on (${Object.entries(config.usage.fallback).filter(([, t]) => t).map(([f, t]) => `${f}→${t}`).join(', ')}; session ${config.usage.limits.session}%, weekly ${config.usage.limits.weekly}%)`);
@@ -665,16 +665,16 @@ servers[0].listen(config.port, addresses[0], () => {
       });
       setInterval(() => usageAlerts.tick().catch((err) => log(`[usage] alerts: ${err?.message ?? err}`)), 5 * 60 * 1000).unref();
     }
-    log(`[fleet-web] slack links on (Socket Mode; ${TOKEN_NAMES.bot} + ${TOKEN_NAMES.app} from env or Keychain)`);
+    log(`[fleet-web] slack connections on (Socket Mode; ${TOKEN_NAMES.bot} + ${TOKEN_NAMES.app} from env or Keychain)`);
   } else if (config.slack.host) {
-    log(`[fleet-web] slack links: served by ${config.slack.host}`);
+    log(`[fleet-web] slack connections: served by ${config.slack.host}`);
   }
   if (veranda) {
     // Polls only while a link is active.
     veranda.start().catch((err) => log(`[fleet-web] veranda: ${err?.message ?? err}`));
-    log(`[fleet-web] veranda links on (bot API at ${config.veranda.socket})`);
+    log(`[fleet-web] veranda connections on (bot API at ${config.veranda.socket})`);
   } else if (config.veranda.host) {
-    log(`[fleet-web] veranda links: served by ${config.veranda.host}`);
+    log(`[fleet-web] veranda connections: served by ${config.veranda.host}`);
   }
   // The sync judges members on other hosts with the merged fleet (the warm snapshot when someone
   // is watching, else one fresh build); a sibling started on a peer is found in that peer's list.

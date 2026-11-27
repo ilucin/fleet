@@ -40,7 +40,7 @@ The setup it is built for:
   session list and board, chat with a prompt queue, briefs, a live diff reviewer (side
   questions, PlainLang specs read as specs, PR review with or without a session), spawning now
   or later — plus the modules around the sessions: an Inbox of everything waiting on you,
-  Productive tasks, pull requests, Slack and GitHub links, bots, a voice operator, voice memos and
+  Productive tasks, pull requests, Slack and GitHub connections, bots, a voice operator, voice memos and
   notes. Your own machines and shared sheds sit side by side in one host rail.
 - **Config** — one small JSON file per machine (`~/.config/fleet/config.json`), written by
   `fleet init`, read by both the CLI and the web server.
@@ -88,14 +88,14 @@ Building the whole setup from scratch (always-on Mac, Tailscale, ssh, tmux, phon
 | --- | --- |
 | Claude sessions | `list` · `peek` · `send` · `rename` · `name` · `spawn` · `handoff` · `brief` · `stack` · `group` · `watch` (default) · `skill` |
 | finishing | `done` — an agent reports its work finished (the UI shows it Done; you close it) · `ask-done` · `snooze` — set a session aside until a time (it keeps running; back in the list, marked, then) · `sleep` — close a session but keep it dormant (the app's Deactivate) |
-| Slack | `slack link <thread-url \| @person> --for 2h` · `slack` · `slack unlink` · `slack reply` — a session talks, for a while, with the people in one Slack thread, channel or DM; with `slack.spawn`, mentioning the app in a thread opens a new session there |
+| Slack | `slack connect <thread-url \| @person> --for 2h` · `slack` · `slack disconnect` · `slack reply` — a session talks, for a while, with the people in one Slack thread, channel or DM; with `slack.spawn`, mentioning the app in a thread opens a new session there |
 | tmux sessions | `tmux list\|enter\|last\|new\|kill\|rename\|stale` (alias `t`), shortcuts `enter` · `last` · `new` |
 | after a reboot | `restore` — dormant sessions (the app's Inactive): list, bring back (same tmux layout, `claude --resume`), forget; `--closed` for recently closed ones |
 | hosts | `exec` · `ssh` · `doctor` · `usage` (Claude and ChatGPT plan limits) · `harness` · `gh-identity` (act on GitHub as a GitHub App) |
 | setup | `init` · `config path\|show\|edit\|set` · `install --host <name>` |
 | pull requests | `prs` — the GitHub PRs that need you (unseen @mentions, yours, waiting on your review, waiting on their author), through `gh`, with their local worktrees · `pr checkout\|spawn` — a PR in a worktree, a session on it |
-| GitHub links | `github` — a session follows one pull request: review requests, replies in its review threads and mentions are typed into it; a review request can start one |
-| Productive links | `productive` — a session follows one Productive task: its comments and changes are typed into it (throttled), it answers with `productive reply`; a mention can start one |
+| GitHub connections | `github` — a session follows one pull request: review requests, replies in its review threads and mentions are typed into it; a review request can start one |
+| Productive connections | `productive` — a session follows one Productive task: its comments and changes are typed into it (throttled), it answers with `productive reply`; a mention can start one |
 | Productive tasks | `tasks` · `task show\|status\|spawn\|schedule` — your open Productive tasks (due soon, in progress, to do), moved between statuses, a session started on one now or on its start date |
 | later | `schedule add --at <when> \| --task <task>` · `schedule` · `schedule cancel` — one-off sessions started later on this host |
 | git repos | `repos` · `repos sync` · `repos install-service` — fetch + fast-forward every repo under `~/Code`, on a timer |

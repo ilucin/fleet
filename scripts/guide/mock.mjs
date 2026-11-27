@@ -70,8 +70,8 @@ function chat(id) {
     { role: 'assistant', kind: 'assistant', final: false, ts: t - 60_000, text: 'Checking how `Currency.minorUnits` is used across billing…' },
   ]
   if (id.endsWith('0008') && id.startsWith('a1')) return [
-    { role: 'user', kind: 'user', ts: t - 2 * HR, text: 'You are linked to a Slack thread in #billing until 18:00 (sl-3c9e1a). Task: answer questions about the invoice rounding fix and when the affected invoices can be re-issued. Do not promise dates. Post only with `fleet slack reply`.' },
-    { role: 'assistant', kind: 'assistant', final: true, ts: t - 2 * HR + 30_000, text: 'Linked. I read the thread so far and will answer when someone asks me.' },
+    { role: 'user', kind: 'user', ts: t - 2 * HR, text: 'You are connected to a Slack thread in #billing until 18:00 (sl-3c9e1a). Task: answer questions about the invoice rounding fix and when the affected invoices can be re-issued. Do not promise dates. Post only with `fleet slack reply`.' },
+    { role: 'assistant', kind: 'assistant', final: true, ts: t - 2 * HR + 30_000, text: 'Connected. I read the thread so far and will answer when someone asks me.' },
     { role: 'user', kind: 'user', ts: t - 25 * M, text: 'Slack #billing · Alex (U04ALEX) → mentions you: can we re-issue INV-2026-0912 today?' },
     { role: 'assistant', kind: 'assistant', final: false, ts: t - 24 * M, text: 'Checking the state of acme/acme-api#482.' },
     { role: 'assistant', kind: 'assistant', final: true, ts: t - 23 * M, text: 'Replied in the thread: the fix is in review (#482, CI running); the invoice can be re-issued once it is merged and deployed. I did not give a date.' },
@@ -749,7 +749,7 @@ function slack() {
     links: [{ id: 'sl-3c9e1a', host: 'workstation', session: SID(8), sessionName: 'Billing questions (#billing)', channel: 'C04BILLING', threadTs: '1761.0001', permalink: 'https://acme.slack.com/archives/C04BILLING/p1761', dm: null,
       task: 'Answer questions about the invoice rounding fix and when the affected invoices can be re-issued. Do not promise dates.', mode: 'mention', createdAt: t - 2 * HR, until: t + 6 * HR, minutes: 480, pending: 0, delivered: 5, replies: 3, endedAt: null, endReason: null }] }
 }
-// GitHub and Productive links: the bridges run on workstation; the #billing session follows a task, and followed #482 before
+// GitHub and Productive connections: the bridges run on workstation; the #billing session follows a task, and followed #482 before
 const followLink = (o) => ({ host: 'workstation', session: SID(8), sessionName: 'Billing questions (#billing)', task: '', keep: 1440, startedBy: null, pending: 0, waking: false, delivered: 0, asleep: false, createdAt: now() - 3 * HR, endedAt: null, endReason: null, retired: false, ...o })
 const github = () => ({ enabled: true, host: 'workstation', links: [],
   ended: [followLink({ id: 'gl-5b20aa', repo: 'acme/acme-api', number: 482, url: 'https://github.com/acme/acme-api/pull/482', title: 'Fix invoice total rounding', login: 'acme-fleet', task: 'Answer review comments on the rounding fix.', delivered: 2, endedAt: now() - HR, endReason: 'unlinked' })] })

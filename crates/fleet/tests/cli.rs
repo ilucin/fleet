@@ -617,3 +617,25 @@ fn spawn_true_or_absent_keeps_spawning() {
         );
     }
 }
+
+// Bridges' links are "connections" now: `connect` / `disconnect` are the commands, `link` /
+// `unlink` keep working as aliases (scripts, bots and other hosts still run them).
+#[test]
+fn bridge_connect_and_link_alias_both_parse() {
+    for bridge in ["slack", "github", "productive", "veranda"] {
+        for (verb, name) in [
+            ("connect", "connect"),
+            ("link", "connect"),
+            ("disconnect", "disconnect"),
+            ("unlink", "disconnect"),
+        ] {
+            let out = fleet().args([bridge, verb, "--help"]).output().unwrap();
+            assert!(out.status.success(), "fleet {bridge} {verb} --help failed");
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                text.contains(&format!("fleet {bridge} {name}")),
+                "fleet {bridge} {verb}: {text}"
+            );
+        }
+    }
+}

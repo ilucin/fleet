@@ -265,7 +265,7 @@ test('a review request from an allowed login starts one linked session, its intr
   assert.equal(s.spawned[0].prompt, '');
   await s.tick();
   assert.equal(s.sent.length, 1);
-  assert.match(s.sent[0].text, /\[github gl-[0-9a-f]{6}\] This session is linked to the GitHub pull request https:\/\/github.com\/acme\/app\/pull\/5/);
+  assert.match(s.sent[0].text, /\[github gl-[0-9a-f]{6}\] This session is connected to the GitHub pull request https:\/\/github.com\/acme\/app\/pull\/5/);
   assert.match(s.sent[0].text, /@alex requested your review \(as @mak\) on acme\/app#5/);
   const st = await s.bridge.status();
   assert.equal(st.links.length, 1);

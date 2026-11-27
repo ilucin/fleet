@@ -355,11 +355,11 @@ enum Commands {
         /// The session reports itself done once its work is finished (`fleet done`; tmux only)
         #[arg(long)]
         ask_done: bool,
-        /// Start linked to this Slack thread, channel or @person (tmux, on `slack.host` only):
-        /// the prompt goes in with the link's intro, so nothing runs before it knows
+        /// Start connected to this Slack thread, channel or @person (tmux, on `slack.host` only):
+        /// the prompt goes in with the connection's intro, so nothing runs before it knows
         #[arg(long, value_name = "URL", conflicts_with = "from")]
         slack: Option<String>,
-        /// How long the --slack link lasts: minutes, or like 30m, 2h, 2d, 1w (max 1 week), or `forever`
+        /// How long the --slack connection lasts: minutes, or like 30m, 2h, 2d, 1w (max 1 week), or `forever`
         #[arg(
             long,
             value_name = "DURATION",
@@ -367,10 +367,10 @@ enum Commands {
             requires = "slack"
         )]
         slack_for: String,
-        /// The --slack link's instructions: what it may help with (default: the work of this session)
+        /// The --slack connection's instructions: what it may help with (default: the work of this session)
         #[arg(long, value_name = "TEXT", requires = "slack")]
         slack_task: Option<String>,
-        /// The --slack link sees every message and steps in when it should (default: woken when mentioned)
+        /// The --slack connection sees every message and steps in when it should (default: woken when mentioned)
         #[arg(long, requires = "slack")]
         slack_proactive: bool,
     },
@@ -393,27 +393,27 @@ enum Commands {
         cmd: StackCmd,
     },
 
-    /// GitHub links: a session follows one pull request — review requests, replies in its review
+    /// GitHub connections: a session follows one pull request — review requests, replies in its review
     /// threads and mentions are typed in (`github.host`)
     Github {
         #[command(subcommand)]
         cmd: Option<GithubCmd>,
     },
 
-    /// Productive links: a session follows one Productive task — its comments and changes are
+    /// Productive connections: a session follows one Productive task — its comments and changes are
     /// typed in, it answers with `fleet productive reply` (`productive.host`)
     Productive {
         #[command(subcommand)]
         cmd: Option<ProductiveCmd>,
     },
 
-    /// Slack links: a session talks, for a while, with the people in one Slack thread (`slack.host`)
+    /// Slack connections: a session talks, for a while, with the people in one Slack thread (`slack.host`)
     Slack {
         #[command(subcommand)]
         cmd: Option<SlackCmd>,
     },
 
-    /// Veranda links (opt-in): a session talks, for a while, with the guests in one room of
+    /// Veranda connections (opt-in): a session talks, for a while, with the guests in one room of
     /// Veranda, a separate self-hosted group chat (`veranda.host`)
     Veranda {
         #[command(subcommand)]
@@ -719,17 +719,18 @@ enum HarnessCmd {
 
 #[derive(Subcommand)]
 enum GithubCmd {
-    /// The bridge (polling?) and the active links
+    /// The bridge (polling?) and the active connections
     List {
         #[arg(long)]
         json: bool,
     },
-    /// Link a session to a pull request (default: this session); ends when the PR is merged or
-    /// closed
+    /// Connect a session to a pull request (default: this session); ends when the PR is merged
+    /// or closed
+    #[command(name = "connect", visible_alias = "link")]
     Link {
         /// The pull request: https://github.com/<owner>/<repo>/pull/<n> or <owner>/<repo>#<n>
         url: String,
-        /// The session to link (default: the one this command runs in, by $TMUX_PANE)
+        /// The session to connect (default: the one this command runs in, by $TMUX_PANE)
         #[arg(long, value_name = "TARGET")]
         session: Option<String>,
         /// Your instructions for it on this PR
@@ -742,9 +743,11 @@ enum GithubCmd {
         #[arg(long)]
         json: bool,
     },
-    /// End a link now
+    /// End a connection now
+    #[command(name = "disconnect", visible_alias = "unlink")]
     Unlink {
-        /// The link id (gl-xxxxxx)
+        /// The connection id (gl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         #[arg(long)]
         json: bool,
@@ -753,16 +756,18 @@ enum GithubCmd {
 
 #[derive(Subcommand)]
 enum ProductiveCmd {
-    /// The bridge (polling?) and the active links
+    /// The bridge (polling?) and the active connections
     List {
         #[arg(long)]
         json: bool,
     },
-    /// Link a session to a Productive task (default: this session); ends when the task is closed
+    /// Connect a session to a Productive task (default: this session); ends when the task is
+    /// closed
+    #[command(name = "connect", visible_alias = "link")]
     Link {
         /// The task: https://app.productive.io/<org>/tasks/<id>, or its id
         url: String,
-        /// The session to link (default: the one this command runs in, by $TMUX_PANE)
+        /// The session to connect (default: the one this command runs in, by $TMUX_PANE)
         #[arg(long, value_name = "TARGET")]
         session: Option<String>,
         /// Your instructions for it on this task
@@ -775,25 +780,27 @@ enum ProductiveCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Post a comment on the linked task, as the bridge's Productive account
+    /// Post a comment on the connected task, as the bridge's Productive account
     Reply {
         /// The comment (Markdown-lite; `-` or nothing: read stdin)
         text: Option<String>,
         /// Read the comment from this file
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
-        /// The link (pl-xxxxxx; default: the one of this session)
-        #[arg(long)]
+        /// The connection (pl-xxxxxx; default: the one of this session)
+        #[arg(long, value_name = "CONNECTION")]
         link: Option<String>,
-        /// The session whose link to answer on (default: the one this command runs in)
+        /// The session whose connection to answer on (default: the one this command runs in)
         #[arg(long, value_name = "TARGET")]
         session: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// End a link now
+    /// End a connection now
+    #[command(name = "disconnect", visible_alias = "unlink")]
     Unlink {
-        /// The link id (pl-xxxxxx)
+        /// The connection id (pl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         #[arg(long)]
         json: bool,
@@ -802,20 +809,21 @@ enum ProductiveCmd {
 
 #[derive(Subcommand)]
 enum SlackCmd {
-    /// The bridge (connected?) and the active links
+    /// The bridge (connected?) and the active connections
     List {
         #[arg(long)]
         json: bool,
     },
-    /// Link a session to a Slack thread, channel or DM for a while (default: this session)
+    /// Connect a session to a Slack thread, channel or DM for a while (default: this session)
+    #[command(name = "connect", visible_alias = "link")]
     Link {
         /// A Slack link: a message (its thread), or a channel / DM (all of it); or a person
         /// (@name or their user id): the app's DM with them
         url: String,
-        /// How long: minutes, or like 30m, 2h, 1h30m, 2d, 1w (max 1 week), or `forever` (until unlinked)
+        /// How long: minutes, or like 30m, 2h, 1h30m, 2d, 1w (max 1 week), or `forever` (until disconnected)
         #[arg(long = "for", value_name = "DURATION")]
         duration: String,
-        /// The session to link (default: the one this command runs in, by $TMUX_PANE)
+        /// The session to connect (default: the one this command runs in, by $TMUX_PANE)
         #[arg(long, value_name = "TARGET")]
         session: Option<String>,
         /// Your instructions: what it may help with, tone, when to step in (default: the work
@@ -830,28 +838,32 @@ enum SlackCmd {
         #[arg(long)]
         json: bool,
     },
-    /// End a link now
+    /// End a connection now
+    #[command(name = "disconnect", visible_alias = "unlink")]
     Unlink {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         #[arg(long)]
         json: bool,
     },
-    /// Post in a linked thread — what a linked session runs to answer there
+    /// Post in a connected thread — what a connected session runs to answer there
     Reply {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         /// The message (Slack mrkdwn)
         text: String,
-        /// For a channel link: the thread to answer in (a message ts)
+        /// For a channel connection: the thread to answer in (a message ts)
         #[arg(long, value_name = "TS")]
         thread: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// React to a message in a linked conversation with an emoji — often enough instead of a post
+    /// React to a message in a connected conversation with an emoji — often enough instead of a post
     React {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         /// The message's ts (each delivered message and `history` line carries it)
         ts: String,
@@ -863,10 +875,11 @@ enum SlackCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Read the linked conversation, a page at a time (a thread link: its thread) — what a linked
-    /// session runs to catch up; lists each message's ts, replies and files
+    /// Read the connected conversation, a page at a time (a thread connection: its thread) — what a
+    /// connected session runs to catch up; lists each message's ts, replies and files
     History {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         /// Messages per page (1–200, default 50)
         #[arg(long)]
@@ -883,9 +896,10 @@ enum SlackCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Read one thread of the linked conversation
+    /// Read one thread of the connected conversation
     Thread {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         /// The thread's first message ts
         ts: String,
@@ -899,11 +913,12 @@ enum SlackCmd {
         json: bool,
     },
     /// Claude Code PreToolUse hook (matcher `AskUserQuestion`): deny the prompt while this
-    /// session is linked to Slack, where it cannot be answered (reads the hook JSON on stdin)
+    /// session is connected to Slack, where it cannot be answered (reads the hook JSON on stdin)
     Guard,
-    /// Download a file shared in the linked conversation (its id from `history` / `thread`)
+    /// Download a file shared in the connected conversation (its id from `history` / `thread`)
     File {
-        /// The link id (sl-xxxxxx)
+        /// The connection id (sl-xxxxxx)
+        #[arg(value_name = "CONNECTION")]
         link: String,
         /// The file id (F…)
         file: String,
@@ -917,16 +932,18 @@ enum SlackCmd {
 
 #[derive(Subcommand)]
 enum VerandaCmd {
-    /// The bridge and the active links
+    /// The bridge and the active connections
     #[command(alias = "list")]
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Open (or reopen) a Veranda room with a new passphrase and link a session to it (default:
-    /// the one this command runs in). Prints the passphrase once, to pass on to the guests
+    /// Open (or reopen) a Veranda room with a new passphrase and connect a session to it
+    /// (default: the one this command runs in). Prints the passphrase once, to pass on to the
+    /// guests
+    #[command(name = "connect", visible_alias = "link")]
     Link {
-        /// The session to link (default: this one, by $TMUX_PANE)
+        /// The session to connect (default: this one, by $TMUX_PANE)
         session: Option<String>,
         /// The room's name: lowercase letters, digits and dashes (one session per room)
         #[arg(long)]
@@ -943,33 +960,34 @@ enum VerandaCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Close the room and end the link (default: this session's)
+    /// Close the room and end the connection (default: this session's)
+    #[command(name = "disconnect", visible_alias = "unlink")]
     Unlink {
-        /// The room (default: the one this session is linked to)
+        /// The room (default: the one this session is connected to)
         #[arg(long)]
         room: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Let a link (and its room) last longer — not from the linked session itself
+    /// Let a connection (and its room) last longer — not from the connected session itself
     Extend {
         /// How much longer: minutes, or like 30m, 2h, 1d (at most 30 days from now in all)
         #[arg(long = "for", value_name = "DURATION")]
         duration: String,
-        /// The room (default: the one this session is linked to)
+        /// The room (default: the one this session is connected to)
         #[arg(long)]
         room: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Post in this session's room (markdown) — what a linked session runs to answer
+    /// Post in this session's room (markdown) — what a connected session runs to answer
     Reply {
         /// The message (markdown, at most 20000 characters)
         text: String,
         #[arg(long)]
         json: bool,
     },
-    /// Read this session's room since it was linked (read-only)
+    /// Read this session's room since it was connected (read-only)
     History {
         /// Messages per page (1–200, default 50)
         #[arg(long)]
@@ -981,7 +999,7 @@ enum VerandaCmd {
         json: bool,
     },
     /// Claude Code PreToolUse hook (matcher `AskUserQuestion`): the same as `fleet slack guard`,
-    /// which covers Slack and Veranda links
+    /// which covers Slack and Veranda connections
     Guard,
 }
 
