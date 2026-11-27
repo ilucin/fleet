@@ -870,7 +870,7 @@ first seen (the UI's "new" dot).
 
 ## Connections in the web UI
 
-Details → **Connections** (`web/ui/src/components/LinksSection.tsx`) shows every connection of a session in one
+Details → **Connections** (`web/ui/src/components/ConnectionsSection.tsx`) shows every connection of a session in one
 list — Slack threads, the Veranda room, the PRs and tasks it follows — each with what it allows
 (Disconnect; +1h for Veranda; Edit for GitHub and Productive: instructions and sleep-after-idle, a second
 `POST …/link` for the same session), then the ended ones it can have again ("Reconnect"; not a
