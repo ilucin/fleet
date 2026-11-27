@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { HttpError, readJsonBody } from './http.mjs';
 import { clampLines, findSession, resolveHost, sleep as defaultSleep, validateKey, validateSendText, validateTitle } from './util.mjs';
 import { answerSteps, parseScreenPrompt, questionsText, screenShowsPrompt, validateAnswer } from './questions.mjs';
-import { resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
+import { isWithin, resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import {
   fetchPeerHost as defaultFetchPeerHost,
   proxyToPeer as defaultProxyToPeer,
@@ -2380,11 +2380,13 @@ export function createApi({
     if (action === 'checkout') return { status: 200, body: { host: config.self, worktree } };
 
     const userPrompt = check.prompt.trim();
-    const prompt = userPrompt ? `${worktree.contextLine} ${userPrompt}` : worktree.contextLine;
+    // Without a task of its own it only learns the PR and waits for yours.
+    const prompt = `${worktree.contextLine} ${userPrompt || 'Wait for my instructions before doing anything.'}`;
+    const dir = prSessionDir(worktree.path);
     const nameGiven = check.nameGiven !== false || !config.autoName?.enabled;
     let result;
     try {
-      result = await spawner.spawn({ name: check.name, dir: worktree.path, prompt, nameGiven, model: check.model, harness: check.harness, ghIdentity: check.ghIdentity, force: body?.ignoreLoad === true, ...spawnUsageOpts(body) });
+      result = await spawner.spawn({ name: check.name, dir, prompt, nameGiven, model: check.model, harness: check.harness, ghIdentity: check.ghIdentity, force: body?.ignoreLoad === true, ...spawnUsageOpts(body) });
     } catch (err) {
       if (err?.status) throw statusHttpError(err);
       throw err;
@@ -2392,6 +2394,21 @@ export function createApi({
     refreshFleet();
     if (!nameGiven && spawnNamer && check.harness === 'claude') spawnNamer.schedule(result.tmuxSession).catch(() => {});
     return { status: 200, body: { host: config.self, worktree, spawn: { ok: true, host: config.self, ...result } } };
+  }
+
+  /**
+   * Where a session on a PR starts: the deepest of this host's spawn dirs that holds the
+   * worktree (where its sessions already run, Claude already trusts the folder and its
+   * CLAUDE.md imports: a fresh worktree would stop at both prompts), else the worktree itself.
+   * Its first prompt names the worktree either way.
+   */
+  function prSessionDir(worktreePath) {
+    const wt = path.resolve(worktreePath);
+    const home = spawnRoots(config)
+      .map((d) => path.resolve(d))
+      .filter((d) => d !== wt && isWithin(wt, d))
+      .sort((a, b) => b.length - a.length)[0];
+    return home ?? wt;
   }
 
   /**

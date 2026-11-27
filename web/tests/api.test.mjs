@@ -75,7 +75,7 @@ function fakeHost(self, sessions) {
     calls.push(['prCheckout', ref]);
     if (ref === 'acme/gone#9') throw new Error('no checkout of acme/gone under the repos roots (~/Code) — clone it there first');
     const [, owner, repo, number] = /^(.+)\/(.+)#(\d+)$/.exec(ref);
-    const p = `/home/tester/wt/${repo}-feat`;
+    const p = repo === 'inhome' ? path.join(os.tmpdir(), 'wt', 'inhome-feat') : `/home/tester/wt/${repo}-feat`;
     return { owner, repo, number: Number(number), branch: 'feat', path: p, created: true, contextLine: `You're working on pull request ${ref} in ${p}.` };
   };
   cli.prSeen = async (ref) => {
@@ -612,6 +612,17 @@ test('prs/checkout and prs/spawn: worktree first, then a session there told abou
   assert.equal(req.prompt, "You're working on pull request acme/app#12 in /home/tester/wt/app-feat. Check CI.");
   assert.equal(req.model, 'opus');
   assert.equal(lap.calls.filter((c) => c[0] === 'spawn').length, 0);
+});
+
+test('prs/spawn: a worktree under a spawn dir starts the session in that dir; no prompt = wait', async (t) => {
+  const { urls, lap } = await startPair(t);
+  const sp = await post(`${urls.laptop}/api/hosts/laptop/prs/spawn`, { pr: 'acme/inhome#5' });
+  assert.equal(sp.status, 200);
+  const wt = path.join(os.tmpdir(), 'wt', 'inhome-feat');
+  assert.equal(sp.body.worktree.path, wt);
+  const [, req] = lap.calls.find((c) => c[0] === 'spawn');
+  assert.equal(req.dir, path.resolve(os.tmpdir()));
+  assert.equal(req.prompt, `You're working on pull request acme/inhome#5 in ${wt}. Wait for my instructions before doing anything.`);
 });
 
 test('prs/spawn: bad input is a 400 before anything is fetched; a failed checkout spawns nothing', async (t) => {

@@ -13,6 +13,7 @@ import { useLocation } from 'wouter'
 
 import type { PullRequest, Session } from '@/api/types'
 import { ChecksIcon, PrSessionLink } from '@/components/PrChip'
+import { NewSessionDialog, NewSessionDrawer, type SpawnPrefill } from '@/components/NewSessionDrawer'
 import { PrDialog } from '@/components/PrDialog'
 import { PrMention } from '@/components/PrMention'
 import { ScreenHeader } from '@/components/ScreenHeader'
@@ -42,6 +43,8 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
   const sel = parsePrLocation(location)
   // A ⌘-click in another window's PR dialog: run its action here, once.
   const [start, setStart] = useState(() => takePrStart())
+  // With a session: the New session form, filled in for the PR (its dialog has closed by then).
+  const [newSession, setNewSession] = useState<SpawnPrefill | null>(null)
   const setOpen = (p: PullRequest) => navigate(prHref(p))
   const [q, setQ] = useState('')
   const now = useNow(30_000)
@@ -147,8 +150,19 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
       onChanged={reload}
       start={start}
       onStarted={() => setStart(null)}
+      onNewSession={setNewSession}
     />
   ) : null
+  const NewSession = pane ? NewSessionDialog : NewSessionDrawer
+  const newSessionForm = (
+    <NewSession
+      key={newSession?.reviewRoot ?? 'none'}
+      open={!!newSession}
+      onOpenChange={(o) => (o ? null : setNewSession(null))}
+      onOpenSession={(href) => navigate(href)}
+      prefill={newSession}
+    />
+  )
 
   if (pane) {
     return (
@@ -178,6 +192,7 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
                 .map((g) => <Column key={g.id} group={g} now={now} onOpen={setOpen} sessionsOf={(p) => links.byPr.get(p.url)} />)}
         </div>
         {dialog}
+        {newSessionForm}
       </section>
     )
   }
@@ -219,6 +234,7 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
         ) : null}
       </div>
       {dialog}
+      {newSessionForm}
     </div>
   )
 }

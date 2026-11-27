@@ -93,16 +93,15 @@ export const prHref = (p: Pick<PullRequest, 'owner' | 'repo' | 'number'>) => `/p
 export interface PrStart {
   kind: 'review' | 'session'
   on: string
-  prompt: string
 }
 
 /**
- * `#/prs/<owner>/<repo>/<n>` with `?prStart=…&prOn=…[&prPrompt=…]`: that PR's dialog, which runs
+ * `#/prs/<owner>/<repo>/<n>` with `?prStart=…&prOn=…`: that PR's dialog, which runs
  * the action at once (opened in a new window by a ⌘-click; the work it waits on, a checkout or
  * a spawn, outlasts the click's permission to open a window).
  */
 export const prStartHref = (p: Pick<PullRequest, 'owner' | 'repo' | 'number'>, s: PrStart) =>
-  `${prHref(p)}?${new URLSearchParams({ prStart: s.kind, prOn: s.on, ...(s.prompt.trim() ? { prPrompt: s.prompt } : {}) })}`
+  `${prHref(p)}?${new URLSearchParams({ prStart: s.kind, prOn: s.on })}`
 
 /** The start a page's query carries (see [prStartHref]), if any. */
 export function parsePrStart(search: string): PrStart | null {
@@ -110,7 +109,7 @@ export function parsePrStart(search: string): PrStart | null {
   const kind = q.get('prStart')
   const on = q.get('prOn')
   if ((kind !== 'review' && kind !== 'session') || !on) return null
-  return { kind, on, prompt: q.get('prPrompt') ?? '' }
+  return { kind, on }
 }
 
 /** Take this page's start (once): it leaves the URL, so a reload does not run it again. */
@@ -118,10 +117,22 @@ export function takePrStart(): PrStart | null {
   const s = parsePrStart(window.location.search)
   if (s) {
     const url = new URL(window.location.href)
-    for (const k of ['prStart', 'prOn', 'prPrompt']) url.searchParams.delete(k)
+    for (const k of ['prStart', 'prOn']) url.searchParams.delete(k)
     window.history.replaceState(window.history.state, '', url.href)
   }
   return s
+}
+
+/**
+ * Where a session on a PR's worktree starts: the deepest of the host's spawn dirs that holds the
+ * worktree (its sessions already run there, Claude already trusts it and its CLAUDE.md imports;
+ * a fresh worktree stops at both prompts), else the worktree. The server does the same for prs/spawn.
+ */
+export function prSessionDir(worktree: string, dirs: { path: string }[]): string {
+  const trim = (p: string) => p.replace(/\/+$/, '')
+  const wt = trim(worktree)
+  const homes = dirs.map((d) => trim(d.path)).filter((d) => d && d !== wt && wt.startsWith(`${d}/`))
+  return homes.sort((a, b) => b.length - a.length)[0] ?? wt
 }
 
 /** The PR a `#/prs/…` location names; null for plain `/prs` (or anything else). */

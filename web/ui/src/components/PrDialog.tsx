@@ -15,8 +15,8 @@ import { useLocation } from 'wouter'
 
 import { api } from '@/api/client'
 import type { PullRequest, Session } from '@/api/types'
-import { watchForSpawned } from '@/api/spawnWatch'
 import { HostDot } from '@/components/HostBadge'
+import type { SpawnPrefill } from '@/components/NewSessionDrawer'
 import { PrSessionLink } from '@/components/PrChip'
 import { PrMention } from '@/components/PrMention'
 import { PrTaskChips } from '@/components/TaskChip'
@@ -24,19 +24,17 @@ import { usePrTasks } from '@/hooks/useTasks'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { useFleet } from '@/hooks/useFleet'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePrs } from '@/hooks/usePrs'
 import { copyText } from '@/lib/clipboard'
 import { shortCwd } from '@/lib/format'
-import { CHECKS_LABEL, checksTone, prRef, prStartHref, type PrStart } from '@/lib/prs'
-import { prReviewHref, reviewHref } from '@/lib/review'
+import { CHECKS_LABEL, checksTone, prRef, prSessionDir, prStartHref, type PrStart } from '@/lib/prs'
+import { prReviewHref } from '@/lib/review'
 import { spawnTargets } from '@/lib/sessions'
 import { hashRouteUrl, wantsNewWindow } from '@/lib/newWindow'
-import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
+import { isMacPlatform } from '@/lib/shortcuts'
 
 /** Starts already run (a remount in development must not run one twice). */
 const started = new WeakSet<PrStart>()
@@ -65,6 +63,8 @@ interface PrDialogProps {
   /** Run this action at once (this window was opened by a ⌘-click on it). */
   start?: PrStart | null
   onStarted?: () => void
+  /** Open the New session form with these values (With a session). */
+  onNewSession: (prefill: SpawnPrefill) => void
 }
 
 function PrDialogBody({
@@ -75,12 +75,11 @@ function PrDialogBody({
   onChanged,
   start = null,
   onStarted,
+  onNewSession,
 }: PrDialogProps & { pr: PullRequest; host: string }) {
   const [, navigate] = useLocation()
-  const { fleet, applyFleet } = useFleet()
+  const { fleet } = useFleet()
   const { approve, dismiss, watch, data } = usePrs()
-  const [prompt, setPrompt] = useState('')
-  const [showPrompt, setShowPrompt] = useState(false)
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
   const tasks = usePrTasks(pr)
@@ -141,29 +140,25 @@ function PrDialogBody({
     }
   }
 
-  const spawn = async (firstPrompt = prompt) => {
+  /** The New session form, filled in for this PR: its worktree first (made when missing). */
+  const newSession = async () => {
     if (busy) return
     setBusy('session')
     setError(null)
     try {
-      const res = await api.prSpawn(on, { pr: ref, prompt: firstPrompt.trim() || undefined })
-      const name = res.spawn?.name || res.spawn?.tmuxSession || ref
-      onClose()
+      const wt = await checkout()
+      const dirs = spawnTargets(fleet).find((t) => t.name === on)
       onChanged()
-      const id = toast.loading(`Starting ${name} on ${on}…`, { description: shortCwd(res.worktree.path) })
-      watchForSpawned(
-        { host: res.spawn?.host || on, name, tmuxSession: res.spawn?.tmuxSession ?? name },
-        {
-          onFleet: applyFleet,
-          onFound: (s) => {
-            toast.success(`${name} is up`, { id, description: undefined })
-            navigate(reviewHref(s.host, s.session_id))
-          },
-          onTimeout: () => toast.error(`${name} has not shown up yet`, { id, description: 'Check the list in a moment' }),
-        },
-      )
+      onClose()
+      onNewSession({
+        host: on,
+        dir: prSessionDir(wt.path, [...(dirs?.dirs ?? []), ...(dirs?.hiddenDirs ?? [])]),
+        prompt: `${wt.contextLine} Wait for my instructions before doing anything.`,
+        title: `New session on ${ref}`,
+        reviewRoot: wt.path,
+      })
     } catch (err) {
-      fail(err, 'Failed to start')
+      fail(err, 'Checkout failed')
     }
   }
 
@@ -197,7 +192,7 @@ function PrDialogBody({
   }
 
   /** ⌘-click: a new Fleet window runs it (opened now, while the click may still open one). */
-  const inNewWindow = (kind: PrStart['kind']) => window.open(hashRouteUrl(prStartHref(pr, { kind, on, prompt: kind === 'session' ? prompt : '' })), '_blank')
+  const inNewWindow = (kind: PrStart['kind']) => window.open(hashRouteUrl(prStartHref(pr, { kind, on })), '_blank')
   const click = (kind: PrStart['kind'], here: () => void) => (e: MouseEvent) => {
     if (wantsNewWindow(e)) {
       e.preventDefault()
@@ -211,7 +206,7 @@ function PrDialogBody({
     queueMicrotask(() => {
       onStarted?.()
       if (start.kind === 'review') void openReview()
-      else void spawn(start.prompt)
+      else void newSession()
     })
     // Mount only: a start runs once (`started`), its window's later renders leave it alone.
   }, []) // oxlint-disable-line react-hooks/exhaustive-deps
@@ -322,40 +317,15 @@ function PrDialogBody({
               {spin('review') ? <Loader2Icon className="animate-spin" /> : <FileDiffIcon />} Code Review
             </Button>
             <Button
-              onClick={click('session', () => void spawn())}
+              onClick={click('session', () => void newSession())}
               onAuxClick={(e) => e.button === 1 && click('session', () => {})(e)}
               disabled={!!busy || !!blocked}
-              title={blocked ?? `Check it out, start a session there and open Code Review with its chat beside the diff · ${isMacPlatform() ? '⌘' : 'Ctrl'}-click: in a new window`}
+              title={blocked ?? `Check it out, then New session (filled in, change anything); once it is up, Code Review with its chat beside the diff · ${isMacPlatform() ? '⌘' : 'Ctrl'}-click: in a new window`}
             >
               {spin('session') ? <Loader2Icon className="animate-spin" /> : <MessagesSquareIcon />} With a session
             </Button>
           </div>
           {blocked ? <p className="text-xs text-status-waiting">{blocked}</p> : null}
-          {showPrompt ? (
-            <Textarea
-              autoFocus
-              aria-label="First prompt for the session"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (isSubmitChord(e)) {
-                  e.preventDefault()
-                  if (!blocked) void spawn()
-                }
-              }}
-              rows={3}
-              placeholder="What should the session do? (optional; it is told the PR and the worktree)"
-            />
-          ) : (
-            <button type="button" className="text-xs text-muted-foreground hover:text-foreground hover:underline" onClick={() => setShowPrompt(true)}>
-              + First prompt for the session
-            </button>
-          )}
-          {showPrompt ? (
-            <p className="text-xs text-dimmer">
-              <Kbd className="mr-1">{isMacPlatform() ? '⌘↵' : 'Ctrl↵'}</Kbd> starts it
-            </p>
-          ) : null}
         </div>
 
         {error ? (

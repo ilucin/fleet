@@ -31,6 +31,7 @@ import { harnessLabel, modelKey, offeredHarnesses, pickHarness } from '@/lib/har
 import { pickModel } from '@/lib/models'
 import { localInputValue, scheduleWhen } from '@/lib/schedule'
 import { storage } from '@/lib/storage'
+import { reviewHref } from '@/lib/review'
 import { sessionHref, spawnTargets } from '@/lib/sessions'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
 import { stackErrorMessage, stacksMissing } from '@/lib/stacks'
@@ -104,6 +105,10 @@ export interface SpawnPrefill {
   embed?: string
   /** Offer Sibling beside Hand off: the same prompt, spawned into this session's stack instead. */
   sibling?: SiblingTarget | null
+  /** The form's title (default: from the other fields). */
+  title?: string
+  /** Once it registers, open Code Review on this checkout (absolute on `host`) instead of the session. */
+  reviewRoot?: string
 }
 
 export interface NewSessionDrawerProps {
@@ -398,7 +403,7 @@ function NewSessionForm({
           onFound: (s) => {
             clearDraftIf(sent)
             toast.success(`${res.name} is up`, { id, description: undefined })
-            onOpenSession(sessionHref(s))
+            onOpenSession(prefill?.reviewRoot ? reviewHref(s.host, s.session_id, prefill.reviewRoot) : sessionHref(s))
           },
           onTimeout: () => notShownUp(res.name, id, sent),
         },
@@ -788,7 +793,7 @@ function NewSessionForm({
       }}
     >
       <Header className="px-0 pt-3 pb-2 text-left">
-        <Title className="text-left text-base font-semibold">{offersSibling ? 'New session from here' : sibling ? 'Spawn sibling' : fixed ? 'New session' : prefill ? 'Continue in new session' : 'New session'}</Title>
+        <Title className="text-left text-base font-semibold">{prefill?.title ?? (offersSibling ? 'New session from here' : sibling ? 'Spawn sibling' : fixed ? 'New session' : prefill ? 'Continue in new session' : 'New session')}</Title>
         {/* A plain New session needs no explanation on screen: kept for screen readers only. */}
         <Description className={cn('text-left text-xs', !sibling && !fixed && !offersSibling && 'sr-only')}>
           {sibling

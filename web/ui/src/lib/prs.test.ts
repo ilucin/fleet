@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { PullRequest, Session } from '@/api/types'
 
-import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, parsePrStart, prHref, prStartHref, prRef, reviewLabel, waitingSince } from './prs'
+import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, parsePrStart, prHref, prSessionDir, prStartHref, prRef, reviewLabel, waitingSince } from './prs'
 
 const pr = (o: Partial<PullRequest>): PullRequest => ({
   column: 'waitingOnMe',
@@ -107,11 +107,16 @@ describe('actions', () => {
   it('refs', () => {
     expect(prRef(pr({ number: 12 }))).toBe('acme/app#12')
   })
+  it('a PR session starts in the deepest spawn dir that holds the worktree', () => {
+    const dirs = [{ path: '/h/Code' }, { path: '/h/Code/work/' }, { path: '/h/Code/workshop' }]
+    expect(prSessionDir('/h/Code/work/worktrees/app-x', dirs)).toBe('/h/Code/work')
+    expect(prSessionDir('/elsewhere/wt', dirs)).toBe('/elsewhere/wt')
+    expect(prSessionDir('/h/Code/work', [{ path: '/h/Code/work' }])).toBe('/h/Code/work')
+  })
   it('a start for a new window round-trips through the query', () => {
-    const href = prStartHref(pr({ number: 12 }), { kind: 'session', on: 'workstation', prompt: 'look at it' })
+    const href = prStartHref(pr({ number: 12 }), { kind: 'session', on: 'workstation' })
     expect(href.startsWith('/prs/acme/app/12?')).toBe(true)
-    expect(parsePrStart(href.split('?')[1])).toEqual({ kind: 'session', on: 'workstation', prompt: 'look at it' })
-    expect(parsePrStart(prStartHref(pr({}), { kind: 'review', on: 'w', prompt: ' ' }).split('?')[1])).toEqual({ kind: 'review', on: 'w', prompt: '' })
+    expect(parsePrStart(href.split('?')[1])).toEqual({ kind: 'session', on: 'workstation' })
     expect(parsePrStart('prStart=nope&prOn=w')).toBeNull()
     expect(parsePrStart('prStart=review')).toBeNull()
   })
