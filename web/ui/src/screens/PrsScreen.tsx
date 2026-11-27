@@ -25,7 +25,7 @@ import { usePrs } from '@/hooks/usePrs'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { relTime } from '@/lib/format'
 import { usePersistentState } from '@/hooks/usePersistentState'
-import { groupPrs, isOthersDraft, parsePrLocation, prHref, prRef, reviewLabel, ROT_TONE, waitingSince, type PrGroup } from '@/lib/prs'
+import { groupPrs, isOthersDraft, parsePrLocation, prHref, prRef, takePrStart, reviewLabel, ROT_TONE, waitingSince, type PrGroup } from '@/lib/prs'
 import { cn } from '@/lib/utils'
 
 /**
@@ -40,6 +40,8 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
   const { host, data, error, loading, refresh, refreshing, reload, links } = usePrs()
   // `#/prs/<owner>/<repo>/<n>`: that PR's dialog is open (session PR chips link here).
   const sel = parsePrLocation(location)
+  // A ⌘-click in another window's PR dialog: run its action here, once.
+  const [start, setStart] = useState(() => takePrStart())
   const setOpen = (p: PullRequest) => navigate(prHref(p))
   const [q, setQ] = useState('')
   const now = useNow(30_000)
@@ -143,6 +145,8 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
       sessions={links.byPr.get(current.url) ?? []}
       onClose={() => navigate('/prs', { replace: true })}
       onChanged={reload}
+      start={start}
+      onStarted={() => setStart(null)}
     />
   ) : null
 

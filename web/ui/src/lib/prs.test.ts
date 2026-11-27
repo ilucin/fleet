@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { PullRequest, Session } from '@/api/types'
 
-import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, prHref, prRef, reviewLabel, waitingSince } from './prs'
+import { checksTone, groupPrs, isOthersDraft, linkSessions, parsePrLocation, parsePrStart, prHref, prStartHref, prRef, reviewLabel, waitingSince } from './prs'
 
 const pr = (o: Partial<PullRequest>): PullRequest => ({
   column: 'waitingOnMe',
@@ -106,6 +106,14 @@ describe('rotting', () => {
 describe('actions', () => {
   it('refs', () => {
     expect(prRef(pr({ number: 12 }))).toBe('acme/app#12')
+  })
+  it('a start for a new window round-trips through the query', () => {
+    const href = prStartHref(pr({ number: 12 }), { kind: 'session', on: 'workstation', prompt: 'look at it' })
+    expect(href.startsWith('/prs/acme/app/12?')).toBe(true)
+    expect(parsePrStart(href.split('?')[1])).toEqual({ kind: 'session', on: 'workstation', prompt: 'look at it' })
+    expect(parsePrStart(prStartHref(pr({}), { kind: 'review', on: 'w', prompt: ' ' }).split('?')[1])).toEqual({ kind: 'review', on: 'w', prompt: '' })
+    expect(parsePrStart('prStart=nope&prOn=w')).toBeNull()
+    expect(parsePrStart('prStart=review')).toBeNull()
   })
 })
 

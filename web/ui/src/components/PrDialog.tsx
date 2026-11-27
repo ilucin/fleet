@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -32,10 +32,14 @@ import { usePersistentState } from '@/hooks/usePersistentState'
 import { usePrs } from '@/hooks/usePrs'
 import { copyText } from '@/lib/clipboard'
 import { shortCwd } from '@/lib/format'
-import { CHECKS_LABEL, checksTone, prRef } from '@/lib/prs'
+import { CHECKS_LABEL, checksTone, prRef, prStartHref, type PrStart } from '@/lib/prs'
 import { prReviewHref, reviewHref } from '@/lib/review'
 import { spawnTargets } from '@/lib/sessions'
+import { hashRouteUrl, wantsNewWindow } from '@/lib/newWindow'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
+
+/** Starts already run (a remount in development must not run one twice). */
+const started = new WeakSet<PrStart>()
 
 type Busy = null | 'editor' | 'review' | 'session' | 'approve' | 'dismiss'
 
@@ -46,20 +50,32 @@ type Busy = null | 'editor' | 'review' | 'session' | 'approve' | 'dismiss'
  * the focus again, just that PR is fetched, so an approval there takes it off the board too).
  * `host`: whose `gh` and checkouts the board comes from. Key it by the PR.
  */
-export function PrDialog({
-  pr,
-  host,
-  sessions = [],
-  onClose,
-  onChanged,
-}: {
+export function PrDialog(props: PrDialogProps) {
+  if (!props.pr || !props.host) return null
+  return <PrDialogBody {...props} pr={props.pr} host={props.host} />
+}
+
+interface PrDialogProps {
   pr: PullRequest | null
   host: string | null
   /** Sessions already working in its worktree. */
   sessions?: Session[]
   onClose: () => void
   onChanged: () => void
-}) {
+  /** Run this action at once (this window was opened by a ⌘-click on it). */
+  start?: PrStart | null
+  onStarted?: () => void
+}
+
+function PrDialogBody({
+  pr,
+  host,
+  sessions = [],
+  onClose,
+  onChanged,
+  start = null,
+  onStarted,
+}: PrDialogProps & { pr: PullRequest; host: string }) {
   const [, navigate] = useLocation()
   const { fleet, applyFleet } = useFleet()
   const { approve, dismiss, watch, data } = usePrs()
@@ -67,12 +83,11 @@ export function PrDialog({
   const [showPrompt, setShowPrompt] = useState(false)
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
-  const tasks = usePrTasks(pr ?? { url: '' })
+  const tasks = usePrTasks(pr)
   const targets = spawnTargets(fleet).map((t) => t.name)
   const [picked, setPicked] = usePersistentState<string>('fleet.prActionHost', '')
-  if (!pr || !host) return null
-  // Where the worktree and the session go: the one you picked last, else the board's host.
-  const on = picked && targets.includes(picked) ? picked : targets.includes(host) ? host : (targets[0] ?? host)
+  // Where the worktree and the session go: the window's start, the one you picked last, else the board's host.
+  const on = start?.on ?? (picked && targets.includes(picked) ? picked : targets.includes(host) ? host : (targets[0] ?? host))
   const ref = prRef(pr)
   // The board knows its own host's checkouts only.
   const local = on === host ? pr.local : undefined
@@ -126,12 +141,12 @@ export function PrDialog({
     }
   }
 
-  const spawn = async () => {
+  const spawn = async (firstPrompt = prompt) => {
     if (busy) return
     setBusy('session')
     setError(null)
     try {
-      const res = await api.prSpawn(on, { pr: ref, prompt: prompt.trim() || undefined })
+      const res = await api.prSpawn(on, { pr: ref, prompt: firstPrompt.trim() || undefined })
       const name = res.spawn?.name || res.spawn?.tmuxSession || ref
       onClose()
       onChanged()
@@ -180,6 +195,26 @@ export function PrDialog({
       fail(err, 'Dismiss failed')
     }
   }
+
+  /** ⌘-click: a new Fleet window runs it (opened now, while the click may still open one). */
+  const inNewWindow = (kind: PrStart['kind']) => window.open(hashRouteUrl(prStartHref(pr, { kind, on, prompt: kind === 'session' ? prompt : '' })), '_blank')
+  const click = (kind: PrStart['kind'], here: () => void) => (e: MouseEvent) => {
+    if (wantsNewWindow(e)) {
+      e.preventDefault()
+      inNewWindow(kind)
+    } else here()
+  }
+  // The start this window was opened with: run once, on mount.
+  useEffect(() => {
+    if (!start || started.has(start)) return
+    started.add(start)
+    queueMicrotask(() => {
+      onStarted?.()
+      if (start.kind === 'review') void openReview()
+      else void spawn(start.prompt)
+    })
+    // Mount only: a start runs once (`started`), its window's later renders leave it alone.
+  }, []) // oxlint-disable-line react-hooks/exhaustive-deps
 
   const spin = (b: Busy) => busy === b
 
@@ -277,10 +312,21 @@ export function PrDialog({
             <Button variant="outline" className="pointer-coarse:hidden" onClick={() => void openEditor()} disabled={!!busy || !!blocked} title={blocked ?? 'Check it out (if needed) and open the worktree in VS Code'}>
               {spin('editor') ? <Loader2Icon className="animate-spin" /> : <CodeXmlIcon />} VS Code
             </Button>
-            <Button variant="outline" onClick={() => void openReview()} disabled={!!busy || !!blocked} title={blocked ?? 'Check it out (if needed) and open the diff in Code Review, no session'}>
+            <Button
+              variant="outline"
+              onClick={click('review', () => void openReview())}
+              onAuxClick={(e) => e.button === 1 && click('review', () => {})(e)}
+              disabled={!!busy || !!blocked}
+              title={blocked ?? `Check it out (if needed) and open the diff in Code Review, no session · ${isMacPlatform() ? '⌘' : 'Ctrl'}-click: in a new window`}
+            >
               {spin('review') ? <Loader2Icon className="animate-spin" /> : <FileDiffIcon />} Code Review
             </Button>
-            <Button onClick={() => void spawn()} disabled={!!busy || !!blocked} title={blocked ?? 'Check it out, start a session there and open Code Review with its chat beside the diff'}>
+            <Button
+              onClick={click('session', () => void spawn())}
+              onAuxClick={(e) => e.button === 1 && click('session', () => {})(e)}
+              disabled={!!busy || !!blocked}
+              title={blocked ?? `Check it out, start a session there and open Code Review with its chat beside the diff · ${isMacPlatform() ? '⌘' : 'Ctrl'}-click: in a new window`}
+            >
               {spin('session') ? <Loader2Icon className="animate-spin" /> : <MessagesSquareIcon />} With a session
             </Button>
           </div>

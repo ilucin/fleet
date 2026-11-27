@@ -89,6 +89,41 @@ export const prRef = (p: Pick<PullRequest, 'owner' | 'repo' | 'number'>) => `${p
 /** `#/prs/<owner>/<repo>/<n>`: the PR screen with that PR's dialog open. */
 export const prHref = (p: Pick<PullRequest, 'owner' | 'repo' | 'number'>) => `/prs/${encodeURIComponent(p.owner)}/${encodeURIComponent(p.repo)}/${p.number}`
 
+/** What a new window opened by a ⌘-click in the PR dialog starts with: the action and its host. */
+export interface PrStart {
+  kind: 'review' | 'session'
+  on: string
+  prompt: string
+}
+
+/**
+ * `#/prs/<owner>/<repo>/<n>` with `?prStart=…&prOn=…[&prPrompt=…]`: that PR's dialog, which runs
+ * the action at once (opened in a new window by a ⌘-click; the work it waits on, a checkout or
+ * a spawn, outlasts the click's permission to open a window).
+ */
+export const prStartHref = (p: Pick<PullRequest, 'owner' | 'repo' | 'number'>, s: PrStart) =>
+  `${prHref(p)}?${new URLSearchParams({ prStart: s.kind, prOn: s.on, ...(s.prompt.trim() ? { prPrompt: s.prompt } : {}) })}`
+
+/** The start a page's query carries (see [prStartHref]), if any. */
+export function parsePrStart(search: string): PrStart | null {
+  const q = new URLSearchParams(search)
+  const kind = q.get('prStart')
+  const on = q.get('prOn')
+  if ((kind !== 'review' && kind !== 'session') || !on) return null
+  return { kind, on, prompt: q.get('prPrompt') ?? '' }
+}
+
+/** Take this page's start (once): it leaves the URL, so a reload does not run it again. */
+export function takePrStart(): PrStart | null {
+  const s = parsePrStart(window.location.search)
+  if (s) {
+    const url = new URL(window.location.href)
+    for (const k of ['prStart', 'prOn', 'prPrompt']) url.searchParams.delete(k)
+    window.history.replaceState(window.history.state, '', url.href)
+  }
+  return s
+}
+
 /** The PR a `#/prs/…` location names; null for plain `/prs` (or anything else). */
 export function parsePrLocation(location: string): { owner: string; repo: string; number: number } | null {
   const m = /^\/prs\/([^/]+)\/([^/]+)\/([1-9][0-9]*)$/.exec(location)
