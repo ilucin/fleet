@@ -24,7 +24,7 @@ export interface SiblingTarget {
 interface State {
   sheet: { host: string; id: string } | null
   sibling: SiblingTarget | null
-  /** The "Link with a session…" picker: the session to link (by host + id). */
+  /** The stack picker ("Add a session" / "Add to a stack"): the session it is for (by host + id). */
   link: { host: string; id: string } | null
 }
 

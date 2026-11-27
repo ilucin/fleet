@@ -259,7 +259,7 @@ function NewSessionForm({
   }, [draftable, prompt])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Start linked to Slack (any host: the bridge on `slack.host` reaches the others). The prompt goes
+  // Start connected to Slack (any host: the bridge on `slack.host` reaches the others). The prompt goes
   // in with the link's intro, so the session never works on it before it knows it is in Slack.
   const slack = useSlack()
   const [slackUrl, setSlackUrl] = useState('')
@@ -390,7 +390,7 @@ function NewSessionForm({
       onDone()
       const startedWho = harnessLabel(res.harness ?? harness)
       if (res.usage?.fellBack) toast.info(`${harnessLabel(res.usage.primary)} is at its usage limit — started on ${startedWho}`, { description: res.usage.note ?? undefined })
-      const id = toast.loading(`Starting ${res.name} on ${host}…`, { description: res.slack ? 'Linked to Slack' : `Waiting for ${startedWho} to register` })
+      const id = toast.loading(`Starting ${res.name} on ${host}…`, { description: res.slack ? 'Connected to Slack' : `Waiting for ${startedWho} to register` })
       watchForSpawned(
         { host, name: res.name, tmuxSession: res.tmuxSession },
         {
@@ -433,7 +433,7 @@ function NewSessionForm({
   // Shown until the bridge says it is off (`null` = not asked yet), so the row does not pop in.
   const slackOffered = slack?.enabled !== false && !laterAt && !prefill?.embed
   const slackField = slackOffered ? (
-    <Field label="Slack" hint={slackUrl.trim() ? 'starts linked: the prompt goes in with the link' : 'optional'}>
+    <Field label="Slack" hint={slackUrl.trim() ? 'starts connected: the prompt goes in with the connection' : 'optional'}>
       <Input
         value={slackUrl}
         onChange={(e) => setSlackUrl(e.target.value)}

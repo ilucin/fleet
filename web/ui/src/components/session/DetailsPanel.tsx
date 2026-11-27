@@ -6,7 +6,7 @@ import { api, sessionErrorMessage } from '@/api/client'
 import type { Session } from '@/api/types'
 import { BeadsSection } from '@/components/session/BeadsSection'
 import { BriefSection, type BriefSectionProps } from '@/components/session/BriefSection'
-import { LinksSection } from '@/components/LinksSection'
+import { ConnectionsSection } from '@/components/ConnectionsSection'
 import { SnoozePicker } from '@/components/session/SnoozePicker'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
@@ -38,7 +38,7 @@ export interface DetailsPanelProps {
   onReview?: () => void
   /** "VSC": VS Code in Fleet on the session's checkout, the chat beside it. */
   onCode?: () => void
-  /** Session stacks: the label and the StackBrief sheet (when in one), and "Add session" (put another live session in it). */
+  /** Session stacks: the label and the StackBrief sheet (when in one), and the picker: "Add a session" (to this stack) or "Add to a stack" (this one joins or starts one). */
   stack?: { label: string | null; onOpen?: () => void; onLink: () => void } | null
 }
 
@@ -306,17 +306,24 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
                       StackBrief
                     </Button>
                   ) : null}
-                  <Button variant="outline" size={btn} aria-label="Add a session to the stack" title="Add a session to the stack: put another live session in it (or start one)" onClick={p.stack.onLink}>
-                    <PlusIcon />
-                    Add session
-                  </Button>
+                  {p.stack.onOpen ? (
+                    <Button variant="outline" size={btn} title={`Add a session to ${p.stack.label || "this stack"}: the session you pick joins it`} onClick={p.stack.onLink}>
+                      <PlusIcon />
+                      Add a session
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size={btn} title="Add this session to a stack: join an existing stack, or start a new one with another session" onClick={p.stack.onLink}>
+                      <PlusIcon />
+                      Add to a stack
+                    </Button>
+                  )}
                 </div>
               </div>
               <p className={cn('truncate py-1 text-sm', !p.stack.label && 'text-xs text-dimmer')}>{p.stack.label ?? 'Not in a stack'}</p>
             </section>
           ) : null}
 
-          <LinksSection host={p.host} session={s} size={btn} />
+          <ConnectionsSection host={p.host} session={s} size={btn} />
 
           <BriefSection {...p.brief} desktop={panel} cancelEditRef={p.cancelEditRef} />
 

@@ -7,7 +7,7 @@ import { slackLatest, slackLeft, useSessionSlackLinks } from '@/hooks/useSlack'
 import { cn } from '@/lib/utils'
 
 /**
- * A session linked to Slack (web/lib/slack.mjs): the time left. Nothing for an unlinked one. Not a
+ * A session connected to Slack (web/lib/slack.mjs): the time left. Nothing for an unconnected one. Not a
  * link — rows and cards are links already.
  */
 export function SlackChip({ session: s, className }: { session: Pick<Session, 'host' | 'session_id'>; className?: string }) {
@@ -19,7 +19,7 @@ export function SlackChip({ session: s, className }: { session: Pick<Session, 'h
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          aria-label={until == null ? 'Linked to Slack, no end' : `Linked to Slack for ${slackLeft(until, now)}`}
+          aria-label={until == null ? 'Connected to Slack, no end' : `Connected to Slack for ${slackLeft(until, now)}`}
           className={cn(
             'inline-flex h-4.5 shrink-0 items-center gap-1 rounded-[5px] border border-primary/40 px-1 text-[0.6875rem] text-primary tabular-nums',
             className,
@@ -29,7 +29,7 @@ export function SlackChip({ session: s, className }: { session: Pick<Session, 'h
           {slackLeft(until, now)}
         </span>
       </TooltipTrigger>
-      <TooltipContent>People in a Slack thread can talk to this session ({links.length > 1 ? `${links.length} links` : links[0].permalink})</TooltipContent>
+      <TooltipContent>People in a Slack thread can talk to this session ({links.length > 1 ? `${links.length} threads` : links[0].permalink})</TooltipContent>
     </Tooltip>
   )
 }

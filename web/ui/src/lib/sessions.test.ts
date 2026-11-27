@@ -11,8 +11,8 @@ import {
   sessionDone,
   findSpawned,
   setAside,
-  isLinked,
-  linkedKeys,
+  isConnected,
+  connectedKeys,
   isEmbedSession,
   isJobSession,
   keepOrder,
@@ -291,13 +291,13 @@ test('Slack-linked sessions: set aside like bot sessions, in their own Slack fil
       },
     ],
   }
-  const slack = linkedKeys([
+  const slack = connectedKeys([
     { host: 'workstation', session: 'linked-idle' },
     { host: 'workstation', session: 'linked-wait' },
     { host: 'laptop', session: 'mine' },
   ])
-  expect(isLinked(s({ host: 'workstation', session_id: 'linked-idle' }), slack)).toBe(true)
-  expect(isLinked(s({ host: 'workstation', session_id: 'mine' }), slack)).toBe(false)
+  expect(isConnected(s({ host: 'workstation', session_id: 'linked-idle' }), slack)).toBe(true)
+  expect(isConnected(s({ host: 'workstation', session_id: 'mine' }), slack)).toBe(false)
   // Without the links (Slack off, not loaded yet) nothing is set aside.
   expect(listView(f, {}).sessions.map((x) => x.session_id)).toEqual(['linked-wait', 'linked-idle', 'mine'])
   const all = listView(f, { linked: { slack } })
@@ -324,8 +324,8 @@ test('listView: Veranda- and GitHub-linked sessions only under their own filter,
     ],
   }
   // A Veranda link without a host is on the bridge's host.
-  const veranda = linkedKeys([{ host: null, session: 'room' }], 'workstation')
-  const github = linkedKeys([{ host: 'workstation', session: 'pr' }, { host: 'workstation', session: 'pr-wait' }])
+  const veranda = connectedKeys([{ host: null, session: 'room' }], 'workstation')
+  const github = connectedKeys([{ host: 'workstation', session: 'pr' }, { host: 'workstation', session: 'pr-wait' }])
   const linked = { veranda, github }
   const all = listView(f, { linked })
   expect(all.sessions.map((x) => x.session_id)).toEqual(['pr-wait', 'mine'])

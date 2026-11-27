@@ -837,7 +837,7 @@ export interface SpawnRequest {
   ghIdentity?: string
   /** Started from this app's embedded panel (the embed view's `app`): a label on the session. */
   embed?: string
-  /** Start linked to Slack (only on `slack.host`): the prompt goes in with the link's intro. */
+  /** Start connected to Slack (only on `slack.host`): the prompt goes in with the link's intro. */
   slack?: { url: string; minutes: SlackMinutes; mode?: 'mention' | 'proactive'; task?: string }
   /** Start on `harness` even when its subscription is at its limit (config `usage`). */
   noFallback?: boolean

@@ -8,7 +8,7 @@ import { useSlack } from '@/hooks/useSlack'
 import { useVeranda } from '@/hooks/useVeranda'
 import { relTime } from '@/lib/format'
 import { DEFAULT_SELECTION, isShared, parseSelection, resolveSelection, serializeSelection, type HostSelection } from '@/lib/hosts'
-import { allSessions, findStatusFilter, keepOrder, linkedKeys, listView, snoozedView, statusSummary, type Linked, type StatusFilterId } from '@/lib/sessions'
+import { allSessions, findStatusFilter, keepOrder, connectedKeys, listView, snoozedView, statusSummary, type Connected, type StatusFilterId } from '@/lib/sessions'
 
 /**
  * The session list's state, shared by the mobile list screen and the desktop sidebar:
@@ -39,12 +39,12 @@ export function useSessionList(now: number) {
   const verandaStatus = useVeranda()
   const githubStatus = useGithub()
   const productiveStatus = useProductive()
-  const linked = useMemo<Linked>(
+  const linked = useMemo<Connected>(
     () => ({
-      slack: linkedKeys(slackStatus?.enabled ? slackStatus.links : null),
-      veranda: linkedKeys(verandaStatus?.enabled ? verandaStatus.links : null, verandaStatus?.host ?? null),
-      github: linkedKeys(githubStatus?.enabled ? githubStatus.links : null, githubStatus?.host ?? null),
-      productive: linkedKeys(productiveStatus?.enabled ? productiveStatus.links : null, productiveStatus?.host ?? null),
+      slack: connectedKeys(slackStatus?.enabled ? slackStatus.links : null),
+      veranda: connectedKeys(verandaStatus?.enabled ? verandaStatus.links : null, verandaStatus?.host ?? null),
+      github: connectedKeys(githubStatus?.enabled ? githubStatus.links : null, githubStatus?.host ?? null),
+      productive: connectedKeys(productiveStatus?.enabled ? productiveStatus.links : null, productiveStatus?.host ?? null),
     }),
     [slackStatus, verandaStatus, githubStatus, productiveStatus],
   )

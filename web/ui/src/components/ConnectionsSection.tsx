@@ -30,12 +30,12 @@ import { refreshProductive, useProductive } from '@/hooks/useProductive'
 import { refreshSlack, SLACK_DURATIONS, slackDuration, slackLeft, toSlackMinutes, useSessionSlackLinks, useSlack } from '@/hooks/useSlack'
 import { refreshVeranda, useSessionVerandaLink, useVeranda } from '@/hooks/useVeranda'
 import { copyText } from '@/lib/clipboard'
-import { detectLinkKind, KEEP_OPTIONS, keepLabel, keepValue, LINK_KINDS, LINK_LABEL, ROOM_RE } from '@/lib/links'
-import type { LinkKind } from '@/lib/sessions'
+import { detectConnectionKind, KEEP_OPTIONS, keepLabel, keepValue, CONNECTION_KINDS, CONNECTION_LABEL, ROOM_RE } from '@/lib/connections'
+import type { ConnectionKind } from '@/lib/sessions'
 
-const ICON: Record<LinkKind, LucideIcon> = { slack: MessagesSquareIcon, github: GitPullRequestIcon, productive: ListTodoIcon, veranda: UsersRoundIcon }
+const ICON: Record<ConnectionKind, LucideIcon> = { slack: MessagesSquareIcon, github: GitPullRequestIcon, productive: ListTodoIcon, veranda: UsersRoundIcon }
 
-const PLACEHOLDER: Record<LinkKind, string> = {
+const PLACEHOLDER: Record<ConnectionKind, string> = {
   slack: 'Slack thread or channel, @person',
   github: 'GitHub PR',
   productive: 'Productive task',
@@ -69,7 +69,7 @@ const chip = 'h-8 rounded-full border border-border bg-card px-3 text-xs data-[s
 
 /** The form's state: a new link (any kind), or the settings of an active GitHub / Productive link. */
 interface Draft {
-  kind: LinkKind | null
+  kind: ConnectionKind | null
   /** Set by hand: detection no longer changes it. */
   picked: boolean
   url: string
@@ -99,13 +99,13 @@ const freshDraft = (): Draft => ({
 type Size = 'xs' | 'sm'
 
 /**
- * Details → Connections: every link of the session in one place — Slack threads, a Veranda room, GitHub
+ * Details → Connections: every connection of the session in one place — Slack threads, a Veranda room, GitHub
  * PRs and Productive tasks it follows — with what each allows (Disconnect, +1h, Edit), the ones it had
  * before ("Reconnect"), and "Connect": paste a Slack link or @person, a PR, a task or a room name,
  * and the form shows that kind's settings. A kind this fleet has no bridge for is not offered; each
  * bridge reaches sessions on the other hosts through their web servers.
  */
-export function LinksSection({ host, session: s, size = 'sm' }: { host: string; session: Session | null; size?: Size }) {
+export function ConnectionsSection({ host, session: s, size = 'sm' }: { host: string; session: Session | null; size?: Size }) {
   const slack = useSlack()
   const veranda = useVeranda()
   const github = useGithub()
@@ -118,7 +118,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
   const [, setTick] = useState(0)
 
   const sid = s?.session_id ?? null
-  const available = LINK_KINDS.filter((k) =>
+  const available = CONNECTION_KINDS.filter((k) =>
     k === 'slack'
       ? Boolean(slack?.enabled)
       : k === 'veranda'
@@ -173,13 +173,13 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
     }
   }
 
-  const unlink = (kind: LinkKind, id: string, room?: string, bridge?: string) =>
+  const unlink = (kind: ConnectionKind, id: string, room?: string, bridge?: string) =>
     void act(id, 'Disconnect', async () => {
       if (kind === 'slack') await api.slackUnlink(id).then(refreshSlack)
       else if (kind === 'veranda') await api.verandaUnlink(room!).then(refreshVeranda)
       else if (kind === 'github') await api.githubUnlink(id, bridge).then(refreshGithub)
       else await api.productiveUnlink(id, bridge).then(refreshProductive)
-      toast.success(`Disconnected from ${LINK_LABEL[kind]}`)
+      toast.success(`Disconnected from ${CONNECTION_LABEL[kind]}`)
     })
 
   const linkVeranda = async (body: { room: string; minutes: number; title?: string; note?: string }) => {
@@ -193,7 +193,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
   const follow = async (kind: 'github' | 'productive', body: { url: string; task?: string; keep?: string | null }) => {
     const l = kind === 'github' ? await api.githubLink({ host, session: sid, ...body }) : await api.productiveLink({ host, session: sid, ...body })
     const what = kind === 'github' ? `${(l as GithubLink).repo}#${l.number}` : `task #${l.number ?? (l as ProductiveLink).taskId}`
-    toast.success(l.renewed ? `${LINK_LABEL[kind]} connection updated` : `Connected to ${LINK_LABEL[kind]}`, { description: [what, l.title].filter(Boolean).join(' · ') })
+    toast.success(l.renewed ? `${CONNECTION_LABEL[kind]} connection updated` : `Connected to ${CONNECTION_LABEL[kind]}`, { description: [what, l.title].filter(Boolean).join(' · ') })
     await (kind === 'github' ? refreshGithub() : refreshProductive())
   }
 
@@ -202,7 +202,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
     const d = draft
     const url = d.url.trim()
     const note = d.note.trim()
-    const ok = await act('link', d.editing ? 'Save' : `Connect to ${LINK_LABEL[d.kind!]}`, async () => {
+    const ok = await act('link', d.editing ? 'Save' : `Connect to ${CONNECTION_LABEL[d.kind!]}`, async () => {
       if (d.kind === 'slack') {
         const l = await api.slackLink({ host, session: sid, url, minutes: d.slackMinutes, mode: d.mode, ...(note ? { task: note } : {}) })
         toast.success(l.renewed ? 'Slack connection renewed' : 'Connected to Slack', { description: slackUntil(l.until) })
@@ -222,7 +222,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
   const setUrl = (url: string) =>
     setDraft((d) => {
       if (!d) return d
-      const found = detectLinkKind(url, addable)
+      const found = detectConnectionKind(url, addable)
       return { ...d, url: d.kind === 'veranda' ? url.toLowerCase() : url, kind: d.picked ? d.kind : (found ?? d.kind) }
     })
 
@@ -232,9 +232,9 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
     kind === 'veranda'
       ? ROOM_RE.test(url)
       : kind === 'github'
-        ? detectLinkKind(url, ['github']) === 'github'
+        ? detectConnectionKind(url, ['github']) === 'github'
         : kind === 'productive'
-          ? detectLinkKind(url, ['productive']) === 'productive' || /^#?\d+$/.test(url)
+          ? detectConnectionKind(url, ['productive']) === 'productive' || /^#?\d+$/.test(url)
           : url !== ''
 
   return (
@@ -242,7 +242,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
       <div className="flex items-center justify-between gap-2 pt-2 pb-1">
         <h3 className="text-[0.6875rem] font-semibold tracking-wider text-dimmer uppercase">Connections</h3>
         {!draft && addable.length ? (
-          <Button variant="outline" size={size} title={`Let people talk to this session from ${joinOr(addable.map((k) => LINK_LABEL[k]))}`} onClick={() => setDraft(freshDraft())}>
+          <Button variant="outline" size={size} title={`Let people talk to this session from ${joinOr(addable.map((k) => CONNECTION_LABEL[k]))}`} onClick={() => setDraft(freshDraft())}>
             <PlusIcon />
             Connect
           </Button>
@@ -319,7 +319,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
               onClick={() =>
                 void act('extend', 'Extend', async () => {
                   const l = await api.verandaExtend(verandaLink.room, 60)
-                  toast.success('Veranda link extended', { description: `room ${l.room}, ${slackLeft(l.until, Date.now())} left` })
+                  toast.success('Veranda connection extended', { description: `room ${l.room}, ${slackLeft(l.until, Date.now())} left` })
                   await refreshVeranda()
                 })
               }
@@ -377,7 +377,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
           <div className="flex flex-col gap-2 py-2">
             {draft.editing ? (
               <div className="truncate text-sm">
-                {LINK_LABEL[draft.kind!]} · <span className="text-muted-foreground">{draft.url}</span>
+                {CONNECTION_LABEL[draft.kind!]} · <span className="text-muted-foreground">{draft.url}</span>
               </div>
             ) : (
               <>
@@ -394,8 +394,8 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
                   <ToggleGroup
                     type="single"
                     value={kind ?? ''}
-                    onValueChange={(v) => v && setDraft((d) => d && { ...d, kind: v as LinkKind, picked: true, url: v === 'veranda' ? d.url.toLowerCase() : d.url })}
-                    aria-label="Link to"
+                    onValueChange={(v) => v && setDraft((d) => d && { ...d, kind: v as ConnectionKind, picked: true, url: v === 'veranda' ? d.url.toLowerCase() : d.url })}
+                    aria-label="Connect to"
                     className="flex-wrap justify-start"
                   >
                     {addable.map((k) => {
@@ -403,7 +403,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
                       return (
                         <ToggleGroupItem key={k} value={k} className={chip}>
                           <Icon className="size-3.5" />
-                          {LINK_LABEL[k]}
+                          {CONNECTION_LABEL[k]}
                         </ToggleGroupItem>
                       )
                     })}
@@ -484,7 +484,7 @@ export function LinksSection({ host, session: s, size = 'sm' }: { host: string; 
             </div>
           </div>
         ) : !slackLinks.length && !ghLinks.length && !ptLinks.length && !verandaLink && !secret && addable.length ? (
-          <p className="py-1 text-xs text-dimmer">None: connect {joinOr(addable.map((k) => LINK_LABEL[k]))} to let people talk to this session</p>
+          <p className="py-1 text-xs text-dimmer">None: connect {joinOr(addable.map((k) => CONNECTION_LABEL[k]))} to let people talk to this session</p>
         ) : null}
       </div>
     </section>
@@ -500,7 +500,7 @@ function LinkRow({
   muted = false,
   children,
 }: {
-  kind: LinkKind
+  kind: ConnectionKind
   icon?: LucideIcon
   title: ReactNode
   sub: string | (string | null | undefined | false)[]
@@ -512,7 +512,7 @@ function LinkRow({
   const subText = Array.isArray(sub) ? sub.filter(Boolean).join(' · ') : sub
   const head = (
     <>
-      <Icon className={muted ? 'size-3.5 shrink-0 text-dimmer' : 'size-3.5 shrink-0 text-primary'} aria-label={LINK_LABEL[kind]} />
+      <Icon className={muted ? 'size-3.5 shrink-0 text-dimmer' : 'size-3.5 shrink-0 text-primary'} aria-label={CONNECTION_LABEL[kind]} />
       <span className="truncate">{title}</span>
       {href ? <ExternalLinkIcon className="size-3 shrink-0 text-dimmer" /> : null}
     </>
@@ -572,7 +572,7 @@ const followSub = (l: GithubLink | ProductiveLink, as: string | null) => [
 ]
 
 /** The account a new link on `host` answers as: the bridge on that host when it has its own, else the main one. */
-function account(kind: LinkKind | null, host: string, github: GithubStatus | null | undefined, productive: ProductiveStatus | null | undefined): string | null {
+function account(kind: ConnectionKind | null, host: string, github: GithubStatus | null | undefined, productive: ProductiveStatus | null | undefined): string | null {
   if (kind === 'github') {
     const login = github?.bridges?.find((b) => b.host === host)?.login ?? github?.login
     return login ? `@${login}` : null
@@ -580,8 +580,8 @@ function account(kind: LinkKind | null, host: string, github: GithubStatus | nul
   return productive?.bridges?.find((b) => b.host === host)?.me?.name ?? productive?.me?.name ?? null
 }
 
-function hint(d: Draft, kind: LinkKind | null, url: string, valid: boolean, addable: LinkKind[], account: string | null) {
-  if (!kind) return url ? `Not a link this session can have — paste ${joinOr(addable.map((k) => PLACEHOLDER[k]))}.` : `Paste ${joinOr(addable.map((k) => PLACEHOLDER[k]))}.`
+function hint(d: Draft, kind: ConnectionKind | null, url: string, valid: boolean, addable: ConnectionKind[], account: string | null) {
+  if (!kind) return url ? `Not something this session can connect to — paste ${joinOr(addable.map((k) => PLACEHOLDER[k]))}.` : `Paste ${joinOr(addable.map((k) => PLACEHOLDER[k]))}.`
   if (url && !valid) {
     if (kind === 'veranda') return 'A room is 1–48 lowercase letters, digits or dashes.'
     if (kind === 'github') return 'A pull request: https://github.com/<owner>/<repo>/pull/<n> or <owner>/<repo>#<n>.'
@@ -591,7 +591,7 @@ function hint(d: Draft, kind: LinkKind | null, url: string, valid: boolean, adda
     const how = d.mode === 'proactive' ? 'It sees every message there and posts when it has something useful, as the Slack app.' : 'It answers when someone mentions the app or DMs it, or, in a thread it has posted in, talks to it.'
     return `${how} ${url.startsWith('http') ? 'Invite the app first.' : url ? 'A person: the app DMs with them.' : ''}`.trim()
   }
-  if (kind === 'veranda') return 'Opens the room with a new passphrase (shown here once). Guests with a Veranda account and the passphrase talk to this session until the link ends.'
+  if (kind === 'veranda') return 'Opens the room with a new passphrase (shown here once). Guests with a Veranda account and the passphrase talk to this session until the connection ends.'
   const who = kind === 'github' ? 'review requests, mentions and replies in its threads on the PR' : 'comments and changes on the task'
   const ends = kind === 'github' ? 'the PR is merged or closed' : 'the task is closed'
   return `${d.editing ? 'New instructions and sleep for this connection. ' : ''}It gets the ${who} (throttled) and answers there as ${account ?? "the bridge's account"}, until ${ends} or you disconnect it.`

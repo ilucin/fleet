@@ -1,9 +1,9 @@
-import type { LinkKind } from '@/lib/sessions'
+import type { ConnectionKind } from '@/lib/sessions'
 
-/** The link kinds in the order Details → Links shows them. */
-export const LINK_KINDS: readonly LinkKind[] = ['slack', 'github', 'productive', 'veranda']
+/** The connection kinds in the order Details → Connections shows them. */
+export const CONNECTION_KINDS: readonly ConnectionKind[] = ['slack', 'github', 'productive', 'veranda']
 
-export const LINK_LABEL: Record<LinkKind, string> = { slack: 'Slack', github: 'GitHub', productive: 'Productive', veranda: 'Veranda' }
+export const CONNECTION_LABEL: Record<ConnectionKind, string> = { slack: 'Slack', github: 'GitHub', productive: 'Productive', veranda: 'Veranda' }
 
 /** As the bridges check them (web/lib/github.mjs `parsePrUrl`, productive.mjs `parseTaskRef`, veranda.mjs `validRoom`). */
 const PR_URL_RE = /^https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+(?:[/?#].*)?$/
@@ -13,14 +13,14 @@ const SLACK_URL_RE = /^https?:\/\/[a-z0-9-]+\.slack\.com\//i
 export const ROOM_RE = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/
 
 /**
- * What a pasted link points at, among the kinds this session can be linked to: a Slack thread or
+ * What a pasted link points at, among the kinds this session can be connected to: a Slack thread or
  * channel (or `@person`, a DM), a GitHub pull request, a Productive task, or a Veranda room name.
  * Null when it is none of them (or that kind is not available here).
  */
-export function detectLinkKind(input: string, available: readonly LinkKind[]): LinkKind | null {
+export function detectConnectionKind(input: string, available: readonly ConnectionKind[]): ConnectionKind | null {
   const s = input.trim()
   if (!s) return null
-  const kind: LinkKind | null =
+  const kind: ConnectionKind | null =
     PR_URL_RE.test(s) || PR_SHORT_RE.test(s)
       ? 'github'
       : TASK_URL_RE.test(s)
@@ -33,7 +33,7 @@ export function detectLinkKind(input: string, available: readonly LinkKind[]): L
   return kind && available.includes(kind) ? kind : null
 }
 
-/** "Sleep after idle" for GitHub and Productive links (the bridges' `keep`, in minutes; null: never). */
+/** "Sleep after idle" for GitHub and Productive connections (the bridges' `keep`, in minutes; null: never). */
 export const KEEP_OPTIONS: { label: string; value: string | null }[] = [
   { label: 'Never', value: null },
   { label: '12h', value: '12h' },

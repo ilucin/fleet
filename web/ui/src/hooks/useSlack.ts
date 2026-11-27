@@ -4,8 +4,8 @@ import { api } from '@/api/client'
 import type { SlackLink, SlackMinutes, SlackStatus } from '@/api/types'
 
 /**
- * Slack links, shared by every row and panel: one poll of /api/slack (every 20s while anything
- * is subscribed and the tab is visible), refreshed at once after a link or unlink.
+ * Slack connections, shared by every row and panel: one poll of /api/slack (every 20s while anything
+ * is subscribed and the tab is visible), refreshed at once after a connect or disconnect.
  */
 const POLL_MS = 20 * 1000
 let state: SlackStatus | null = null
@@ -61,7 +61,7 @@ export function useSessionSlackLinks(host: string | null | undefined, sessionId:
 }
 const NONE: SlackLink[] = []
 
-/** How long a link lasts: the choices in Link to Slack and New session. */
+/** How long a Slack connection lasts: the choices in Connect and New session. */
 export const SLACK_DURATIONS: { label: string; minutes: SlackMinutes }[] = [
   { label: '1h', minutes: 60 },
   { label: '4h', minutes: 240 },

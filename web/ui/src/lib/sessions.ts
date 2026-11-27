@@ -47,20 +47,20 @@ export function backgroundLabel(bg: Session['background']): string {
 
 export type StatusFilterId = 'all' | 'waiting' | 'busy' | 'idle' | 'scheduled' | 'slack' | 'veranda' | 'github' | 'productive' | 'embedded'
 
-/** The bridges a session can be linked to: people there talk to it (Slack thread, Veranda room, GitHub PR, Productive task). */
-export type LinkKind = 'slack' | 'veranda' | 'github' | 'productive'
-/** Per bridge, the `host/session_id` keys of the sessions with an active link (`linkedKeys`); a missing one = none. */
-export type Linked = Partial<Record<LinkKind, ReadonlySet<string>>>
+/** The bridges a session can be connected to: people there talk to it (Slack thread, Veranda room, GitHub PR, Productive task). */
+export type ConnectionKind = 'slack' | 'veranda' | 'github' | 'productive'
+/** Per bridge, the `host/session_id` keys of the sessions with an active connection (`connectedKeys`); a missing one = none. */
+export type Connected = Partial<Record<ConnectionKind, ReadonlySet<string>>>
 
 export interface StatusFilter {
   id: StatusFilterId
   label: string
-  match: (s: Session, linked: Linked) => boolean
+  match: (s: Session, linked: Connected) => boolean
   /** The chip's tooltip. */
   title?: string
 }
 
-/** The filters for sessions set aside from the rest (bots, links, app panels): a chip only when there are some. */
+/** The filters for sessions set aside from the rest (bots, connections, app panels): a chip only when there are some. */
 export const SET_ASIDE: StatusFilterId[] = ['scheduled', 'slack', 'veranda', 'github', 'productive', 'embedded']
 
 export const STATUS_FILTERS: StatusFilter[] = [
@@ -68,17 +68,17 @@ export const STATUS_FILTERS: StatusFilter[] = [
   { id: 'waiting', label: 'Needs you', match: (s) => statusMeta(s.status).key === 'waiting' },
   { id: 'busy', label: 'Busy', match: (s) => statusMeta(s.status).key === 'busy' },
   { id: 'idle', label: 'Idle', match: (s) => statusMeta(s.status).key === 'idle' },
-  // Only the sessions bots started / linked to Slack, Veranda or GitHub / an app's embedded panel
+  // Only the sessions bots started / connected to Slack, Veranda or GitHub / an app's embedded panel
   // started (every other filter leaves them out unless waiting).
   { id: 'scheduled', label: 'Bots', match: (s) => isJobSession(s), title: 'Sessions started by bots' },
-  { id: 'slack', label: 'Slack', match: (s, l) => isLinked(s, l.slack), title: 'Sessions linked to Slack: people in a thread talk to them' },
-  { id: 'veranda', label: 'Veranda', match: (s, l) => isLinked(s, l.veranda), title: 'Sessions linked to a Veranda room: its guests talk to them' },
-  { id: 'github', label: 'GitHub', match: (s, l) => isLinked(s, l.github), title: 'Sessions linked to a GitHub pull request: they follow it and answer there' },
-  { id: 'productive', label: 'Productive', match: (s, l) => isLinked(s, l.productive), title: 'Sessions linked to a Productive task: they follow its comments and answer there' },
+  { id: 'slack', label: 'Slack', match: (s, l) => isConnected(s, l.slack), title: 'Sessions connected to Slack: people in a thread talk to them' },
+  { id: 'veranda', label: 'Veranda', match: (s, l) => isConnected(s, l.veranda), title: 'Sessions connected to a Veranda room: its guests talk to them' },
+  { id: 'github', label: 'GitHub', match: (s, l) => isConnected(s, l.github), title: 'Sessions connected to a GitHub pull request: they follow it and answer there' },
+  { id: 'productive', label: 'Productive', match: (s, l) => isConnected(s, l.productive), title: 'Sessions connected to a Productive task: they follow its comments and answer there' },
   { id: 'embedded', label: 'Apps', match: (s) => isEmbedSession(s), title: "Sessions started from an app's Fleet panel (embed view)" },
 ]
 
-/** The filters worth a chip: Bots / the link kinds / Apps only when there are such sessions, or it is the one picked. */
+/** The filters worth a chip: Bots / the connection kinds / Apps only when there are such sessions, or it is the one picked. */
 export function visibleStatusFilters(counts: Record<StatusFilterId, number> | null, current: StatusFilterId): StatusFilter[] {
   return STATUS_FILTERS.filter((f) => !SET_ASIDE.includes(f.id) || current === f.id || (counts?.[f.id] ?? 0) > 0)
 }
@@ -148,30 +148,30 @@ export function isEmbedSession(s: Pick<Session, 'embed'>): boolean {
 }
 
 /**
- * The `host/session_id` keys of the sessions with an active link (Slack, Veranda, GitHub). A link
+ * The `host/session_id` keys of the sessions with an active connection (Slack, Veranda, GitHub). A link
  * without a host (Veranda's on the bridge itself) is on `fallbackHost`.
  */
-export function linkedKeys(
+export function connectedKeys(
   links: readonly { host?: string | null; session: string }[] | null | undefined,
   fallbackHost: string | null = null,
 ): ReadonlySet<string> {
   return new Set((links ?? []).map((l) => `${l.host ?? fallbackHost}/${l.session}`))
 }
 
-/** A session in `keys` (`linkedKeys`): people on that bridge talk to it, not you. */
-export function isLinked(s: Pick<Session, 'host' | 'session_id'>, keys: ReadonlySet<string> | undefined): boolean {
+/** A session in `keys` (`connectedKeys`): people on that bridge talk to it, not you. */
+export function isConnected(s: Pick<Session, 'host' | 'session_id'>, keys: ReadonlySet<string> | undefined): boolean {
   return !!keys?.has(`${s.host}/${s.session_id}`)
 }
 
-const NOT_LINKED: Linked = {}
+const NOT_CONNECTED: Connected = {}
 
 /**
  * Job, linked (Slack / Veranda / GitHub) and embed sessions stay out of every filter but their own —
  * except one waiting on you, which always shows (and always counts).
  */
-export function setAside(s: Session, linked: Linked = NOT_LINKED): boolean {
+export function setAside(s: Session, linked: Connected = NOT_CONNECTED): boolean {
   if (statusMeta(s.status).key === 'waiting') return false
-  return isJobSession(s) || isEmbedSession(s) || isLinked(s, linked.slack) || isLinked(s, linked.veranda) || isLinked(s, linked.github) || isLinked(s, linked.productive)
+  return isJobSession(s) || isEmbedSession(s) || isConnected(s, linked.slack) || isConnected(s, linked.veranda) || isConnected(s, linked.github) || isConnected(s, linked.productive)
 }
 
 /**
@@ -186,9 +186,9 @@ export function listView(
     query = '',
     hosts = null,
     status = 'all',
-    linked = NOT_LINKED,
+    linked = NOT_CONNECTED,
     now = Date.now(),
-  }: { query?: string; hosts?: ReadonlySet<string> | null; status?: StatusFilterId; linked?: Linked; now?: number },
+  }: { query?: string; hosts?: ReadonlySet<string> | null; status?: StatusFilterId; linked?: Connected; now?: number },
 ): ListView {
   const matched = allSessions(fleet).filter((s) => (hosts == null || hosts.has(s.host)) && !isSnoozed(s, now) && matchesSearch(s, query))
   const visible = matched.filter((s) => !setAside(s, linked))

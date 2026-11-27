@@ -524,7 +524,7 @@ export const api = {
   runGroups: (o: Opts = {}) => request<GroupsResponse>('/api/groups/run', { ...o, method: 'POST', body: {} }),
   /** Rename a group / move a session (409: the id or label was refused). */
   editGroups: (edit: GroupEdit, o: Opts = {}) => request<GroupsResponse>('/api/groups/edit', { ...o, method: 'POST', body: edit }),
-  /** Slack links: the bridge's state, from the `slack.host` server (proxied). */
+  /** Slack connections: the bridge's state, from the `slack.host` server (proxied). */
   slack: (o: Opts = {}) => request<SlackStatus>('/api/slack', o),
   /** Link a session to a Slack thread / channel / DM for `minutes`. */
   slackLink: (body: { host: string; session: string; url: string; minutes: SlackMinutes; task?: string; mode?: 'mention' | 'proactive' }, o: Opts = {}) =>

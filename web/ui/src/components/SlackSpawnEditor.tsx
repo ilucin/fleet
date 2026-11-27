@@ -38,7 +38,7 @@ export function SlackSpawnEditor() {
   const status = useSlack()
   const bridges = slackBridges(status)
   if (!status) return <p className="py-3 text-sm text-dimmer">Loading…</p>
-  if (!bridges.length) return <p className="py-3 text-sm text-dimmer">Slack links are not set up on this fleet (slack.host).</p>
+  if (!bridges.length) return <p className="py-3 text-sm text-dimmer">Slack connections are not set up on this fleet (slack.host).</p>
   return (
     <div className="flex flex-col gap-3 py-2">
       {bridges.map((b) => (
@@ -95,7 +95,7 @@ function BridgeCard({ bridge }: { bridge: SlackBridge }) {
       <label className="flex items-center gap-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-sm">Open a session on a mention</div>
-          <div className="text-xs text-dimmer">Mentioning {appName} in a channel thread no session follows starts one, linked to that thread</div>
+          <div className="text-xs text-dimmer">Mentioning {appName} in a channel thread no session follows starts one, connected to that thread</div>
         </div>
         <Switch
           checked={!!cur}
@@ -136,8 +136,8 @@ function BridgeCard({ bridge }: { bridge: SlackBridge }) {
               ))}
             </select>
           </Row>
-          <Row label="Linked for">
-            <ToggleGroup type="single" value={String(cur.minutes)} onValueChange={(v) => v && patch({ minutes: v })} disabled={saving} spacing={0} aria-label="Linked for" className="w-full rounded-lg bg-muted p-1">
+          <Row label="Connected for">
+            <ToggleGroup type="single" value={String(cur.minutes)} onValueChange={(v) => v && patch({ minutes: v })} disabled={saving} spacing={0} aria-label="Connected for" className="w-full rounded-lg bg-muted p-1">
               {durations.map((d) => (
                 <ToggleGroupItem key={d} value={d} className={segItem}>{d}</ToggleGroupItem>
               ))}

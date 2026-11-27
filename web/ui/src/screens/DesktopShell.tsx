@@ -530,7 +530,7 @@ export function DesktopShell() {
           ? [
               {
                 id: 'stack-link',
-                label: selectedSession.stack?.id ? 'Add a session to this stack…' : 'Link with a session (stack)…',
+                label: selectedSession.stack?.id ? 'Add a session to this stack…' : 'Add this session to a stack…',
                 icon: <Link2Icon />,
                 keywords: ['stack', 'link', 'group', 'join', 'sibling', 'together'],
                 run: () => openStackLink(selected.host, selected.id),
