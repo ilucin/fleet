@@ -482,6 +482,9 @@ export const api = {
   /** Approve it on GitHub (that host's gh login); its cached list drops it (`column: null`) without a full fetch. */
   prApprove: (host: string, pr: string, body = '', o: Opts = {}) =>
     request<PrUpdateResponse>(`${hostPath(host)}/prs/approve`, { ...o, method: 'POST', body: { pr, ...(body ? { body } : {}) } }),
+  /** Off the board in Fleet only (nothing on GitHub) until it gets new commits; `undo` brings it back. */
+  prDismiss: (host: string, pr: string, undo = false, o: Opts = {}) =>
+    request<{ host: string; pr: string; dismissed: boolean }>(`${hostPath(host)}/prs/dismiss`, { ...o, method: 'POST', body: { pr, ...(undo ? { undo } : {}) } }),
   /** Fetch just this PR into that host's cached list (approved / merged elsewhere: it leaves). */
   prSync: (host: string, pr: string, o: Opts = {}) => request<PrUpdateResponse>(`${hostPath(host)}/prs/sync`, { ...o, method: 'POST', body: { pr } }),
   /** The diff reviewer over a PR without a session: the diff from the host's clone (`refetch`: fetch now). */

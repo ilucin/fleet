@@ -18,6 +18,8 @@ export interface PrsState {
   markSeen: (p: PullRequest) => Promise<void>
   /** Approve it on GitHub (as `host`'s gh login); it leaves the board at once. */
   approve: (p: PullRequest, body?: string) => Promise<void>
+  /** Off the board in Fleet only, until it gets new commits (`undo`: back). */
+  dismiss: (p: PullRequest, undo?: boolean) => Promise<void>
   /** It was opened on GitHub: fetch just it when Fleet has the focus again. */
   watch: (p: PullRequest) => void
   links: PrLinks
@@ -33,6 +35,7 @@ const EMPTY: PrsState = {
   reload: () => {},
   markSeen: async () => {},
   approve: async () => {},
+  dismiss: async () => {},
   watch: () => {},
   links: { bySession: new Map(), byPr: new Map() },
 }

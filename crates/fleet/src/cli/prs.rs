@@ -261,6 +261,32 @@ pub fn approve(r: &str, body: Option<&str>, json: bool) -> Result<()> {
     print_synced("approved", &s, json, dry)
 }
 
+/// `fleet pr dismiss <ref> [--undo]`: off your board in Fleet until it gets new commits.
+pub fn dismiss(r: &str, undo: bool, json: bool) -> Result<()> {
+    let pr_ref = parse_ref(r)?;
+    let dry = crate::core::hosts::dry_run();
+    let now = chrono::Utc::now().timestamp_millis();
+    let key = prs::dismiss(&pr_ref, now, undo, dry)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "pr": key, "dismissed": !undo, "applied": !dry })
+            )?
+        );
+    } else if dry {
+        println!(
+            "dry-run: would {} {key}",
+            if undo { "bring back" } else { "dismiss" }
+        );
+    } else if undo {
+        println!("{} {key}", "back".green());
+    } else {
+        println!("{} {key} · back with new commits", "dismissed".green());
+    }
+    Ok(())
+}
+
 /// `fleet pr sync <ref>`: fetch just this PR and move it in the cached list.
 pub fn sync(r: &str, json: bool) -> Result<()> {
     let pr_ref = parse_ref(r)?;

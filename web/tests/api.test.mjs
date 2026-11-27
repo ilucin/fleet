@@ -87,6 +87,10 @@ function fakeHost(self, sessions) {
     if (ref === 'acme/own#1') throw new Error('acme/own#1: Can not approve your own pull request');
     return { pr: ref, cached: true, column: null, applied: true };
   };
+  cli.prDismiss = async (ref, o) => {
+    calls.push(['prDismiss', ref, !!o?.undo]);
+    return { pr: ref, dismissed: !o?.undo, applied: true };
+  };
   cli.prSync = async (ref) => {
     calls.push(['prSync', ref]);
     return { pr: ref, cached: true, column: 'waitingOnMe', applied: true };
@@ -651,6 +655,18 @@ test('prs/approve and prs/sync run on the PR host and answer where it is now', a
   assert.match(r.body.error, /your own pull request/);
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/approve`, { pr: 'app#1' })).status, 400);
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/approve`, { pr: 'acme/app#1', body: 'x'.repeat(8001) })).status, 400);
+});
+
+test('prs/dismiss runs on the PR host, undo brings it back', async (t) => {
+  const { urls, lap, remote } = await startPair(t);
+  let r = await post(`${urls.laptop}/api/hosts/workstation/prs/dismiss`, { pr: 'acme/app#30' });
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.body.host, r.body.pr, r.body.dismissed], ['workstation', 'acme/app#30', true]);
+  r = await post(`${urls.laptop}/api/hosts/workstation/prs/dismiss`, { pr: 'acme/app#30', undo: true });
+  assert.equal(r.body.dismissed, false);
+  assert.deepEqual(remote.calls.filter((c) => c[0] === 'prDismiss'), [['prDismiss', 'acme/app#30', false], ['prDismiss', 'acme/app#30', true]]);
+  assert.equal(lap.calls.filter((c) => c[0] === 'prDismiss').length, 0);
+  assert.equal((await post(`${urls.laptop}/api/hosts/laptop/prs/dismiss`, { pr: 'app#1' })).status, 400);
 });
 
 test('prs: a CLI failure is a 502 with its reason', async () => {

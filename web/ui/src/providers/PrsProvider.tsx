@@ -92,6 +92,16 @@ export function PrsProvider({ children }: { children: ReactNode }) {
     [host, place, reload],
   )
 
+  const dismiss = useCallback(
+    async (p: PullRequest, undo = false) => {
+      if (!host) return
+      await api.prDismiss(host, prRef(p), undo)
+      if (!undo) place(p, null)
+      reload()
+    },
+    [host, place, reload],
+  )
+
   // PRs opened on GitHub from Fleet: when Fleet has the focus again, fetch just those (an
   // approval, a merge there takes them off the board without a full refresh).
   const watched = useRef(new Map<string, PullRequest>())
@@ -121,8 +131,8 @@ export function PrsProvider({ children }: { children: ReactNode }) {
 
   const links = useMemo(() => linkSessions(data?.prs ?? [], data ? host : null, allSessions(fleet)), [data, host, fleet])
   const value = useMemo<PrsState>(
-    () => ({ host, data, error, loading, refresh, refreshing, reload, markSeen, approve, watch, links }),
-    [host, data, error, loading, refresh, refreshing, reload, markSeen, approve, watch, links],
+    () => ({ host, data, error, loading, refresh, refreshing, reload, markSeen, approve, dismiss, watch, links }),
+    [host, data, error, loading, refresh, refreshing, reload, markSeen, approve, dismiss, watch, links],
   )
   return <PrsContext.Provider value={value}>{children}</PrsContext.Provider>
 }

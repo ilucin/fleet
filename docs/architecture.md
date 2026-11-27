@@ -533,6 +533,7 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | POST | `/api/hosts/:host/prs/checkout` | `{ pr: "owner/repo#123" }` → `{ host, worktree }`: `fleet pr checkout --json` on that host |
 | POST | `/api/hosts/:host/prs/seen` | `{ pr: "owner/repo#123" }` → `{ host, pr, seenAt }`: `fleet pr seen --json` on that host — its @mentions of you so far are seen |
 | POST | `/api/hosts/:host/prs/approve` | `{ pr, body? }` → `{ host, pr, cached, column }`: `fleet pr approve --json` on that host (its gh login); `column: null` = no longer listed |
+| POST | `/api/hosts/:host/prs/dismiss` | `{ pr, undo? }` → `{ host, pr, dismissed }`: `fleet pr dismiss --json` — off the list in Fleet only, until new commits |
 | POST | `/api/hosts/:host/prs/sync` | `{ pr }` → `{ host, pr, cached, column }`: `fleet pr sync --json` — just that PR, re-placed in the cached list |
 | POST | `/api/hosts/:host/prs/spawn` | `{ pr, prompt?, name?, model?, harness? }` → `{ host, worktree, spawn }`: the checkout, then a new session in the worktree whose first prompt is `worktree.contextLine` + `prompt` (like a stack sibling: the web spawner, not `fleet pr spawn`). Starts an agent |
 | GET | `/api/hosts/:host/prs[?refresh=1]` | the GitHub PRs that need you, as `gh` on that host sees them: `fleet prs --json` + `host` (see [cli.md](cli.md#pull-requests)), and `local.editorUrl` ("Open in VS Code / Cursor" for the worktree, like a session's `editorUrl`); 502 with the CLI's reason (no `gh`, not logged in, GitHub down with nothing cached), 501 when that host's CLI predates `fleet prs` |

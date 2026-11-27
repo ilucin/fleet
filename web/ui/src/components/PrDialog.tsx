@@ -4,6 +4,7 @@ import {
   ChevronDownIcon,
   CodeXmlIcon,
   ExternalLinkIcon,
+  EyeOffIcon,
   FileDiffIcon,
   GitBranchIcon,
   Loader2Icon,
@@ -36,7 +37,7 @@ import { prReviewHref, reviewHref } from '@/lib/review'
 import { spawnTargets } from '@/lib/sessions'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
 
-type Busy = null | 'editor' | 'review' | 'session' | 'approve'
+type Busy = null | 'editor' | 'review' | 'session' | 'approve' | 'dismiss'
 
 /**
  * One PR's actions: check it out in a worktree on a host you pick (remembered) and open it in
@@ -61,7 +62,7 @@ export function PrDialog({
 }) {
   const [, navigate] = useLocation()
   const { fleet, applyFleet } = useFleet()
-  const { approve, watch, data } = usePrs()
+  const { approve, dismiss, watch, data } = usePrs()
   const [prompt, setPrompt] = useState('')
   const [showPrompt, setShowPrompt] = useState(false)
   const [busy, setBusy] = useState<Busy>(null)
@@ -161,6 +162,22 @@ export function PrDialog({
       onClose()
     } catch (err) {
       fail(err, 'Approve failed')
+    }
+  }
+
+  const doDismiss = async () => {
+    if (busy) return
+    setBusy('dismiss')
+    setError(null)
+    try {
+      await dismiss(pr)
+      toast(`Dismissed ${ref}`, {
+        description: 'Back on the board when it gets new commits',
+        action: { label: 'Undo', onClick: () => void dismiss(pr, true).catch((err) => toast.error((err as Error)?.message || 'Undo failed')) },
+      })
+      onClose()
+    } catch (err) {
+      fail(err, 'Dismiss failed')
     }
   }
 
@@ -307,11 +324,20 @@ export function PrDialog({
               <ExternalLinkIcon /> GitHub
             </a>
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-muted-foreground"
+            onClick={() => void doDismiss()}
+            disabled={!!busy}
+            title="Off the board in Fleet only, nothing on GitHub; back when it gets new commits"
+          >
+            {spin('dismiss') ? <Loader2Icon className="animate-spin" /> : <EyeOffIcon />} Dismiss
+          </Button>
           {canApprove ? (
             <Button
               variant="outline"
               size="sm"
-              className="ml-auto"
               onClick={() => void doApprove()}
               disabled={!!busy}
               title={`Approve on GitHub as @${data?.user ?? 'you'}; it leaves the board`}

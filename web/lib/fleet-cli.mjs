@@ -331,6 +331,11 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     return prCommand('sync', ref, t);
   }
 
+  /** Off the board in Fleet only: `fleet --local pr dismiss <ref> [--undo] --json` → `{ pr, dismissed }`. */
+  async function prDismiss(ref, { undo = false, timeoutMs: t = 30 * 1000 } = {}) {
+    return prCommand('dismiss', ref, t, undo ? ['--undo'] : []);
+  }
+
   async function prCommand(sub, ref, t, extra = []) {
     let stdout;
     try {
@@ -707,6 +712,7 @@ export function createFleetCli({ run, bin = 'fleet', timeoutMs = 8000 } = {}) {
     prSeen,
     prApprove,
     prSync,
+    prDismiss,
     tasks,
     taskShow,
     taskStatus,

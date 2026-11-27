@@ -857,6 +857,7 @@ pub struct View {
 pub fn get(s: &Settings, mode: Mode, now_ms: i64) -> Result<View> {
     let mut v = get_snapshot(s, mode, now_ms)?;
     resolve_mentions(&mut v.snap.prs, &load_seen(&seen_path()));
+    drop_dismissed(&mut v.snap.prs, &load_dismissed(&dismissed_path()));
     for p in &mut v.snap.prs {
         p.rotting = rotting(p, now_ms);
     }
@@ -1167,6 +1168,84 @@ pub fn mark_seen(path: &Path, key: &str, now_ms: i64) -> Result<()> {
     std::fs::write(&tmp, serde_json::to_string_pretty(&seen)? + "\n")?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+// ---------- dismissed ----------
+
+/// A PR you took off the board in Fleet (nothing on GitHub): hidden while its head is the one
+/// it had then. New commits bring it back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dismissed {
+    /// ms epoch.
+    pub at: i64,
+    /// Its head then; `None` (not in the cache): hidden until the mark expires.
+    pub head: Option<String>,
+}
+
+pub fn dismissed_path() -> PathBuf {
+    if let Some(p) = std::env::var_os("FLEET_PRS_DISMISSED").filter(|p| !p.is_empty()) {
+        return PathBuf::from(tools::expand_tilde(&p.to_string_lossy()));
+    }
+    seen_path().with_file_name("prs-dismissed.json")
+}
+
+/// [`seen_key`] → its mark.
+pub fn load_dismissed(path: &Path) -> HashMap<String, Dismissed> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Dismiss `key` at `head` (`undo`: forget it). Marks older than [`SEEN_KEEP_MS`] are dropped.
+pub fn mark_dismissed(
+    path: &Path,
+    key: &str,
+    head: Option<String>,
+    now_ms: i64,
+    undo: bool,
+) -> Result<()> {
+    let mut all = load_dismissed(path);
+    all.retain(|_, d| now_ms - d.at < SEEN_KEEP_MS);
+    if undo {
+        all.remove(key);
+    } else {
+        all.insert(key.to_string(), Dismissed { at: now_ms, head });
+    }
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&all)? + "\n")?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Read time: leave out the PRs dismissed at their current head.
+pub fn drop_dismissed(prs: &mut Vec<Pr>, dismissed: &HashMap<String, Dismissed>) {
+    prs.retain(
+        |p| match dismissed.get(&seen_key(&p.owner, &p.repo, p.number)) {
+            Some(d) => d.head.is_some() && d.head != p.head_oid,
+            None => true,
+        },
+    );
+}
+
+/// Dismiss the PR in Fleet (`undo`: bring it back). → `owner/repo#12`.
+pub fn dismiss(r: &PrRef, now_ms: i64, undo: bool, dry: bool) -> Result<String> {
+    let owner = owner_of(r)?;
+    let key = seen_key(&owner, &r.repo, r.number);
+    let head = load_cache(&cache_path()).and_then(|c| {
+        c.prs
+            .into_iter()
+            .find(|p| seen_key(&p.owner, &p.repo, p.number) == key)
+            .and_then(|p| p.head_oid)
+    });
+    if !dry {
+        mark_dismissed(&dismissed_path(), &key, head, now_ms, undo)?;
+    }
+    Ok(key)
 }
 
 /// The owner of `r` (its own, or from the cache).
@@ -1969,6 +2048,52 @@ mod tests {
         assert!(replace_cached(&mut snap, &url, None));
         assert_eq!(snap.prs.len(), 1);
         assert!(!replace_cached(&mut snap, &url, None));
+    }
+
+    #[test]
+    fn dismissed_prs_stay_hidden_until_new_commits() {
+        let me = "me";
+        let reqd = json!({ "reviewRequests": { "nodes": [ { "requestedReviewer": { "login": "me" } } ] } });
+        let all = classify(
+            me,
+            &[],
+            &[
+                node("api", 1, reqd.clone()),
+                node("api", 2, reqd.clone()),
+                node("api", 3, reqd),
+            ],
+            &[],
+            &[],
+        );
+        let mut d = HashMap::new();
+        d.insert(
+            "acme/api#1".to_string(),
+            Dismissed {
+                at: 1,
+                head: Some("head1".into()),
+            },
+        );
+        d.insert(
+            "acme/api#2".to_string(),
+            Dismissed {
+                at: 1,
+                head: Some("older".into()),
+            },
+        );
+        d.insert("acme/api#3".to_string(), Dismissed { at: 1, head: None });
+        let mut prs = all.clone();
+        drop_dismissed(&mut prs, &d);
+        assert_eq!(prs.iter().map(|p| p.number).collect::<Vec<_>>(), vec![2]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.json");
+        mark_dismissed(&path, "acme/api#1", Some("h".into()), 10, false).unwrap();
+        assert_eq!(
+            load_dismissed(&path)["acme/api#1"].head.as_deref(),
+            Some("h")
+        );
+        mark_dismissed(&path, "acme/api#1", None, 11, true).unwrap();
+        assert!(load_dismissed(&path).is_empty());
     }
 
     #[test]

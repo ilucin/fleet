@@ -133,7 +133,7 @@ const JOBS_ROUTE = /^\/api\/hosts\/([^/]+)\/jobs(?:\/([^/]+)(?:\/(run|enabled|re
 const JOB_RUN_PROXY_MS = 90 * 1000;
 const USAGE_ROUTE = /^\/api\/hosts\/([^/]+)\/usage$/;
 const USAGE_SUB_ROUTE = /^\/api\/hosts\/([^/]+)\/usage\/(check|settings|override)$/;
-const PRS_ROUTE = /^\/api\/hosts\/([^/]+)\/prs(?:\/(checkout|spawn|seen|approve|sync))?$/;
+const PRS_ROUTE = /^\/api\/hosts\/([^/]+)\/prs(?:\/(checkout|spawn|seen|approve|sync|dismiss))?$/;
 /** A PR in the diff reviewer without a session: …/prs/:owner/:repo/:n/diff | files | ask | notes[/:note[/post]] | notes/handoff. */
 const PR_REVIEW_ROUTE = /^\/api\/hosts\/([^/]+)\/prs\/([^/]+)\/([^/]+)\/(\d{1,9})\/(diff|files|ask|notes)(?:\/([^/]+)(?:\/(post))?)?$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -2359,6 +2359,7 @@ export function createApi({
     if (!PR_REF_RE.test(ref)) throw new HttpError('pr must look like owner/repo#123', 400);
     if (action === 'seen') return localPrSeen(ref);
     if (action === 'approve' || action === 'sync') return localPrUpdate(action, ref, body);
+    if (action === 'dismiss') return localPrDismiss(ref, body?.undo === true);
     let check = null;
     if (action === 'spawn') {
       refuseSpawn();
@@ -2408,6 +2409,18 @@ export function createApi({
       return { status: 200, body: { host: config.self, pr: r?.pr ?? ref, cached: r?.cached === true, column: r?.column ?? null } };
     } catch (err) {
       if (err?.missing) throw new HttpError(`this host’s fleet CLI has no \`pr ${action}\` command — update it`, 501);
+      throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+    }
+  }
+
+  /** POST prs/dismiss `{ pr, undo? }` → `{ host, pr, dismissed }`: off the board in Fleet only, until new commits. */
+  async function localPrDismiss(ref, undo) {
+    if (typeof cli?.prDismiss !== 'function') throw new HttpError('pull requests are not available on this server', 501);
+    try {
+      const r = await cli.prDismiss(ref, { undo });
+      return { status: 200, body: { host: config.self, pr: r?.pr ?? ref, dismissed: r?.dismissed ?? !undo } };
+    } catch (err) {
+      if (err?.missing) throw new HttpError('this host’s fleet CLI has no `pr dismiss` command — update it', 501);
       throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
     }
   }

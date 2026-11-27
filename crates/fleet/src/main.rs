@@ -1261,6 +1261,16 @@ enum PrCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Take the PR off your board in Fleet only (nothing on GitHub) until it gets new commits
+    Dismiss {
+        /// owner/repo#123, repo#123 (from your cached PRs) or the PR's URL
+        pr: String,
+        /// Bring it back
+        #[arg(long)]
+        undo: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Fetch just this PR and move it in the cached list (or drop it: approved, merged, closed)
     Sync {
         /// owner/repo#123, repo#123 (from your cached PRs) or the PR's URL
@@ -2281,6 +2291,7 @@ set one with: fleet config set hosts.{h}.ssh <alias>"
             PrCmd::Seen { pr, json } => prs_cmd::seen(&pr, json)?,
             PrCmd::Approve { pr, body, json } => prs_cmd::approve(&pr, body.as_deref(), json)?,
             PrCmd::Sync { pr, json } => prs_cmd::sync(&pr, json)?,
+            PrCmd::Dismiss { pr, undo, json } => prs_cmd::dismiss(&pr, undo, json)?,
             PrCmd::Checkout { pr, json } => {
                 prs_cmd::checkout(&pr, json)?;
             }
