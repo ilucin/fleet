@@ -153,7 +153,7 @@ function PrDialogBody({
       onNewSession({
         host: on,
         dir: prSessionDir(wt.path, [...(dirs?.dirs ?? []), ...(dirs?.hiddenDirs ?? [])]),
-        prompt: `${wt.contextLine} Wait for my instructions before doing anything.`,
+        prompt: `Working on PR ${wt.url || pr.url} in worktree ${wt.path}. Check it out and wait for further instructions.`,
         title: `New session on ${ref}`,
         reviewRoot: wt.path,
       })

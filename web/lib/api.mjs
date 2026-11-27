@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { HttpError, readJsonBody } from './http.mjs';
 import { clampLines, findSession, resolveHost, sleep as defaultSleep, validateKey, validateSendText, validateTitle } from './util.mjs';
 import { answerSteps, parseScreenPrompt, questionsText, screenShowsPrompt, validateAnswer } from './questions.mjs';
-import { isWithin, resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
+import { isWithin, prWaitPrompt, resolveAllowedDir, validateSpawnRequest } from './spawn.mjs';
 import {
   fetchPeerHost as defaultFetchPeerHost,
   proxyToPeer as defaultProxyToPeer,
@@ -2381,7 +2381,7 @@ export function createApi({
 
     const userPrompt = check.prompt.trim();
     // Without a task of its own it only learns the PR and waits for yours.
-    const prompt = `${worktree.contextLine} ${userPrompt || 'Wait for my instructions before doing anything.'}`;
+    const prompt = userPrompt ? `${worktree.contextLine} ${userPrompt}` : prWaitPrompt(worktree.url || prUrl(ref), worktree.path);
     const dir = prSessionDir(worktree.path);
     const nameGiven = check.nameGiven !== false || !config.autoName?.enabled;
     let result;
@@ -2394,6 +2394,12 @@ export function createApi({
     refreshFleet();
     if (!nameGiven && spawnNamer && check.harness === 'claude') spawnNamer.schedule(result.tmuxSession).catch(() => {});
     return { status: 200, body: { host: config.self, worktree, spawn: { ok: true, host: config.self, ...result } } };
+  }
+
+  /** `owner/repo#12` → its GitHub URL. */
+  function prUrl(ref) {
+    const [, owner, repo, n] = /^([^/]+)\/([^#]+)#(\d+)$/.exec(ref) ?? [];
+    return owner ? `https://github.com/${owner}/${repo}/pull/${n}` : ref;
   }
 
   /**

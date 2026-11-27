@@ -95,6 +95,9 @@ export function launchCommand({ launcher = 'claude', harness = 'claude', name, p
 
 const EMBED_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
+/** A PR session's first prompt when it has no task yet (the web UI's New session prefill says the same). */
+export const prWaitPrompt = (url, worktree) => `Working on PR ${url} in worktree ${worktree}. Check it out and wait for further instructions.`;
+
 export function validateSpawnRequest(body, { spawnDirs = [] } = {}) {
   const errors = [];
   const nameGiven = Boolean(body?.name && sanitizeName(body.name));

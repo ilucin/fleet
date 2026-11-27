@@ -622,7 +622,7 @@ test('prs/spawn: a worktree under a spawn dir starts the session in that dir; no
   assert.equal(sp.body.worktree.path, wt);
   const [, req] = lap.calls.find((c) => c[0] === 'spawn');
   assert.equal(req.dir, path.resolve(os.tmpdir()));
-  assert.equal(req.prompt, `You're working on pull request acme/inhome#5 in ${wt}. Wait for my instructions before doing anything.`);
+  assert.equal(req.prompt, `Working on PR https://github.com/acme/inhome/pull/5 in worktree ${wt}. Check it out and wait for further instructions.`);
 });
 
 test('prs/spawn: bad input is a 400 before anything is fetched; a failed checkout spawns nothing', async (t) => {
