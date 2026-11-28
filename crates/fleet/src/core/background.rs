@@ -18,6 +18,11 @@
 //!   it again, `TaskStop` / `KillShell` stop one;
 //! - an `Agent` call not answered yet, in a turn in progress, is a foreground agent.
 //!
+//! The tail can miss a background agent launched before it (a busy session writes megabytes
+//! an hour), so the session's `subagents/agent-<id>.meta.json` files fill the gap: one
+//! with `requestShape: "background"`, no `finished: true`, and a transcript created since the
+//! process started is a running background agent.
+//!
 //! None of this is a stable Claude Code API: what is not recognised changes nothing (the
 //! registry status stands). Like [`super::prompted`], the first read scans the tail
 //! (2 MiB) and later reads only what was appended.
@@ -144,6 +149,11 @@ fn main_of(st: &State, path: &Path, started_at: Option<i64>) -> Main {
         .filter(|a| alive(a.started_at))
         .cloned()
         .collect();
+    if let Some(start) = started_at {
+        agents.extend(unfinished(&subagents, start, |id| {
+            st.agents.contains_key(id) || st.done.contains_key(id)
+        }));
+    }
     if st.ended_at.is_none() {
         agents.extend(st.foreground.values().cloned());
     }
@@ -170,6 +180,58 @@ fn main_of(st: &State, path: &Path, started_at: Option<i64>) -> Main {
             shells: st.shells.values().filter(|at| alive(**at)).count() as u32,
         },
     }
+}
+
+/// Background agents the meta files say are running, launched since `start` (ms), except
+/// those `known` from the transcript (running or finished there).
+fn unfinished(subagents: &Path, start: i64, known: impl Fn(&str) -> bool) -> Vec<Agent> {
+    let Ok(entries) = std::fs::read_dir(subagents) else {
+        return Vec::new();
+    };
+    let ms = |t: std::io::Result<std::time::SystemTime>| {
+        t.ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+    };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("agent-")?.strip_suffix(".meta.json"))
+        else {
+            continue;
+        };
+        if known(id) {
+            continue;
+        }
+        let Some(meta) = std::fs::read_to_string(e.path())
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        else {
+            continue;
+        };
+        if meta["requestShape"] != "background" || meta["finished"] == true {
+            continue;
+        }
+        let Ok(m) = std::fs::metadata(subagents.join(format!("agent-{id}.jsonl"))) else {
+            continue;
+        };
+        let created = ms(m.created()).or(ms(m.modified()));
+        if created.is_none_or(|c| c < start) {
+            continue;
+        }
+        out.push(Agent {
+            id: id.to_string(),
+            description: text(&meta["description"]),
+            agent_type: text(&meta["agentType"]),
+            model: text(&meta["model"]).filter(|m| m != "inherit"),
+            background: true,
+            started_at: created,
+            ..Default::default()
+        });
+    }
+    out
 }
 
 fn scan(path: &Path, st: &mut State, start: u64, size: u64, aligned: bool) -> Option<()> {
@@ -601,6 +663,50 @@ mod tests {
         );
         let m = for_session(h.path(), Some(&cwd), "s-side", None).unwrap();
         assert_eq!(m.ended_at, Some(at(T1)));
+    }
+
+    #[test]
+    fn a_background_agent_before_the_tail_comes_from_its_meta_file() {
+        let (h, cwd) = home();
+        let dir = proj(h.path(), &cwd);
+        let sid = "s-meta";
+        // The launch is not in the transcript (before the tail); only a turn is.
+        write(&dir, sid, &[prompt(T3), end(T4)]);
+        let sub = dir.join(sid).join("subagents");
+        std::fs::create_dir_all(&sub).unwrap();
+        let meta = |id: &str, extra: &str| {
+            std::fs::write(
+                sub.join(format!("agent-{id}.meta.json")),
+                format!(r#"{{"agentType":"general-purpose","description":"job {id}","requestShape":"background","model":"claude-opus-5-5"{extra}}}"#),
+            )
+            .unwrap();
+            std::fs::write(sub.join(format!("agent-{id}.jsonl")), "{}\n").unwrap();
+        };
+        meta("run", "");
+        meta("fin", r#","finished":true"#);
+        std::fs::write(
+            sub.join("agent-fg.meta.json"),
+            r#"{"agentType":"Explore","requestShape":"foreground"}"#,
+        )
+        .unwrap();
+        std::fs::write(sub.join("agent-fg.jsonl"), "{}\n").unwrap();
+
+        let m = for_session(h.path(), Some(&cwd), sid, Some(0)).unwrap();
+        assert_eq!(m.ended_at, Some(at(T4)));
+        let ids: Vec<_> = m.background.agents.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["run"]);
+        let a = &m.background.agents[0];
+        assert_eq!(a.description.as_deref(), Some("job run"));
+        assert_eq!(a.agent_type.as_deref(), Some("general-purpose"));
+        assert!(a.background && a.last_activity_at.is_some());
+
+        // Created before the process started: a leftover, not running.
+        let later = chrono::Utc::now().timestamp_millis() + 60_000;
+        let m = for_session(h.path(), Some(&cwd), sid, Some(later)).unwrap();
+        assert!(m.background.agents.is_empty());
+        // No process start known: the meta files are not trusted.
+        let m = for_session(h.path(), Some(&cwd), sid, None).unwrap();
+        assert!(m.background.agents.is_empty());
     }
 
     #[test]

@@ -247,7 +247,9 @@ That is the source of truth; `fleet` enriches each entry:
    background agent, a Bash result with `backgroundTaskId` a background shell, and a
    `<task-notification>` (in a user entry or a queue operation) ends either (`SendMessage` starts a
    finished agent again; `TaskStop` / `KillShell` stop one; what started before the process did is
-   not running). When the main turn has ended and something runs beside it (or the registry says
+   not running). Only the transcript's tail is read, so a background agent launched before it is
+   taken from `subagents/agent-<id>.meta.json`: `requestShape: "background"`, no
+   `finished: true`, its transcript created since the process started. When the main turn has ended and something runs beside it (or the registry says
    `shell`), the session is reported `idle` — `updated_at` then is when the turn ended — with
    `background`. An `Agent` call not answered yet in a turn in progress is a foreground agent
    (`background: false`). None of this is a stable Claude Code API: what is not recognised leaves
