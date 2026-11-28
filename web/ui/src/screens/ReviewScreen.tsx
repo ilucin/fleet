@@ -4,7 +4,8 @@ import { flushSync } from 'react-dom'
 import { useLocation } from 'wouter'
 
 import { HostBadge } from '@/components/HostBadge'
-import { ChatPanel } from '@/components/review/ChatPanel'
+import { ResizablePanel } from '@/components/review/ResizablePanel'
+import { CHAT_MIN_W, TREE_MIN_W, defaultChatWidth, defaultTreeWidth } from '@/lib/panelWidth'
 import { DiffStat, FileDiff, type DiffView } from '@/components/review/FileDiff'
 import { FileTree } from '@/components/review/FileTree'
 import { PrDescription, PrDescriptionRow } from '@/components/review/PrDescription'
@@ -938,7 +939,8 @@ function ReviewView({ layout, source }: { layout: Layout; source: ReviewSource }
         {header}
         <div className="flex min-h-0 flex-1">
           {showTree && files.length ? (
-            <aside aria-label="Changed files" className="w-64 shrink-0 overflow-y-auto border-r px-1.5">
+            <ResizablePanel side="left" label="Changed files" storageKey="fleet.reviewTreeWidth" min={TREE_MIN_W} defaultWidth={defaultTreeWidth}>
+              <div className="min-w-0 flex-1 overflow-y-auto px-1.5">
               {treeDescription ? <PrDescriptionRow title={treeDescription.title} number={treeDescription.number} body={treeDescription.body} onOpen={() => openDescription(treeDescription.key, treeDescription.bucket)} /> : null}
               {sections.map(({ bucket, groups }) => {
                 const open = isOpen(bucket)
@@ -983,13 +985,16 @@ function ReviewView({ layout, source }: { layout: Layout; source: ReviewSource }
                   </div>
                 )
               })}
-            </aside>
+              </div>
+            </ResizablePanel>
           ) : null}
           {body}
         </div>
       </div>
       {showChat && source.chat ? (
-        <ChatPanel>{source.chat}</ChatPanel>
+        <ResizablePanel side="right" label="Session" storageKey="fleet.reviewChatWidth" min={CHAT_MIN_W} defaultWidth={defaultChatWidth}>
+          {source.chat}
+        </ResizablePanel>
       ) : null}
       {dialog}
       {fullDialog}
